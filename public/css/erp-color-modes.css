@@ -1,0 +1,201 @@
+/* ============================================================================
+   EMS Infra ERP - Bootstrap 5.3 Color Modes (Dark Mode)
+   ---------------------------------------------------------------------------
+   This file is loaded AFTER Vite assets, so it can safely override colors for:
+   - Custom ERP CSS (erp-main-card, erp-sidebar, erp-nav-link, etc.)
+   - Bootstrap "bg-white/bg-light/table-light/text-bg-light" hardcoded usage
+   - Select2 component styling in dark mode
+
+   Toggle is controlled by: <html data-bs-theme="light|dark">
+   Stored in localStorage key: erp-theme
+   ============================================================================ */
+
+/* Provide a few ERP-specific variables */
+:root[data-bs-theme="dark"] {
+  --erp-card-bg: #161a1f;
+  --erp-sidebar-bg: #111418;
+  --erp-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+  --erp-sidebar-active-bg: rgba(13, 110, 253, 0.18); /* Bootstrap primary with alpha */
+  --erp-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
+}
+
+/* Base background */
+:root[data-bs-theme="dark"] body {
+  background-color: var(--bs-body-bg) !important;
+}
+
+/* Fix ERP main card (hardcoded white in resources/css/app.css) */
+:root[data-bs-theme="dark"] .erp-main-card {
+  background-color: var(--erp-card-bg) !important;
+  color: var(--bs-body-color);
+  box-shadow: var(--erp-shadow);
+}
+
+/* Sidebar + header (hardcoded white in resources/css/app.css / blade) */
+:root[data-bs-theme="dark"] .erp-header,
+:root[data-bs-theme="dark"] .erp-sidebar,
+:root[data-bs-theme="dark"] .erp-sidebar-brand,
+:root[data-bs-theme="dark"] .erp-sidebar-search-wrap {
+  background-color: var(--erp-sidebar-bg) !important;
+}
+
+/* Sidebar links */
+:root[data-bs-theme="dark"] .erp-nav-link:hover {
+  background-color: var(--erp-sidebar-hover-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+:root[data-bs-theme="dark"] .erp-nav-link.active {
+  background-color: var(--erp-sidebar-active-bg) !important;
+  color: var(--bs-body-color) !important;
+}
+
+/* Ensure sidebar text remains readable */
+:root[data-bs-theme="dark"] .erp-sidebar .nav-link {
+  color: var(--bs-body-color) !important;
+}
+
+:root[data-bs-theme="dark"] .erp-sidebar .nav-link.text-body-secondary {
+  color: var(--bs-secondary-color) !important;
+}
+
+/* Bootstrap utility classes that force light backgrounds */
+:root[data-bs-theme="dark"] .bg-white {
+  background-color: var(--bs-body-bg) !important;
+}
+
+:root[data-bs-theme="dark"] .bg-light {
+  background-color: var(--bs-tertiary-bg) !important;
+}
+
+/* Tables that use table-light header */
+:root[data-bs-theme="dark"] .table-light {
+  --bs-table-bg: var(--bs-tertiary-bg);
+  --bs-table-color: var(--bs-body-color);
+}
+
+/* Badge "light" becomes unreadable in dark mode */
+:root[data-bs-theme="dark"] .text-bg-light {
+  color: var(--bs-body-color) !important;
+  background-color: var(--bs-tertiary-bg) !important;
+}
+
+/* Notifications dropdown (layout topbar) */
+:root[data-bs-theme="dark"] .notifications-dropdown .list-group-item {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color);
+}
+
+:root[data-bs-theme="dark"] .notifications-dropdown .list-group-item:hover,
+:root[data-bs-theme="dark"] .notifications-dropdown .list-group-item:focus {
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .notifications-dropdown .border-bottom,
+:root[data-bs-theme="dark"] .notifications-dropdown .border-top {
+  border-color: var(--bs-border-color) !important;
+}
+
+/* Select2 dark mode (common pain point) */
+:root[data-bs-theme="dark"] .select2-container--default .select2-selection--single,
+:root[data-bs-theme="dark"] .select2-container--default .select2-selection--multiple {
+  background-color: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+}
+
+:root[data-bs-theme="dark"] .select2-container--default .select2-selection--single .select2-selection__rendered,
+:root[data-bs-theme="dark"] .select2-container--default .select2-selection--multiple .select2-selection__rendered {
+  color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .select2-container--default .select2-selection--multiple .select2-selection__choice {
+  background-color: var(--bs-tertiary-bg);
+  border-color: var(--bs-border-color);
+  color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .select2-dropdown {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color);
+}
+
+:root[data-bs-theme="dark"] .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+}
+
+/* Scrollbars (optional cosmetics) */
+:root[data-bs-theme="dark"] .erp-main-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+:root[data-bs-theme="dark"] .erp-main-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+:root[data-bs-theme="dark"] .erp-main-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============================================================================
+   TYPOGRAPHY + RESPONSIVE CONSISTENCY (ERP)
+   ----------------------------------------------------------------------------
+   ERP layout loads Bootstrap (CDN) + Tailwind (via resources/css/app.css).
+   Tailwind "preflight" resets base elements (h1-h6, p, a, ul/ol), which causes
+   inconsistent font sizes across ERP pages depending on markup.
+   This block restores Bootstrap typography ONLY for ERP pages (since this file
+   is only loaded in layouts/erp.blade.php).
+   ============================================================================ */
+
+:root {
+  --erp-font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans",
+                   sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --bs-body-font-family: var(--erp-font-sans);
+}
+
+body {
+  font-family: var(--erp-font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Restore Bootstrap defaults that Tailwind preflight flattens */
+h1, h2, h3, h4, h5, h6 {
+  font-size: revert;
+  font-weight: revert;
+  line-height: revert;
+  margin: revert;
+}
+
+p { margin: revert; }
+
+a {
+  color: revert;
+  text-decoration: revert;
+}
+
+ul, ol {
+  margin: revert;
+  padding: revert;
+  list-style: revert;
+}
+
+small { font-size: revert; }
+
+/* Mobile polish (common ERP pain points: padding + overflow + offcanvas width) */
+@media (max-width: 575.98px) {
+  .erp-main-scroll .container-fluid { padding: 0.75rem !important; }
+
+  /* Prevent “cut off” content on smaller screens (tables, long rows, etc.) */
+  .erp-main-card { overflow-x: auto; }
+
+  /* Make sidebar offcanvas feel better on phones */
+  .offcanvas.offcanvas-start { width: 85vw; max-width: 320px; }
+
+  /* Slightly more readable tables on phones */
+  .table { font-size: 0.925rem; }
+}

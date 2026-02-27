@@ -1,0 +1,531 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- ERP custom styles --- */
+
+/* Global smooth transition helper */
+.erp-transition {
+    transition: all 0.15s ease-out;
+}
+
+/* Header shadow */
+.erp-header {
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    z-index: 100;
+}
+
+/* Main content wrapper with soft elevation */
+.erp-main-card {
+    border-radius: 0.75rem;
+    background-color: #ffffff;
+    padding: 1.5rem 1.75rem;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    transition: box-shadow 0.2s ease-out;
+}
+
+/* Hover effect - shadow only, NO transform */
+.erp-main-card:hover {
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* On small screens, reduce padding a bit */
+@media (max-width: 768px) {
+    .erp-main-card {
+        padding: 1.0rem 1.0rem;
+    }
+}
+
+/* ============================================================================
+   SIDEBAR LAYOUT - INDEPENDENT SCROLLING FIX
+   ============================================================================
+   The sidebar and main content now scroll independently.
+   - Header: fixed at top, never scrolls
+   - Sidebar: scrolls within its own container
+   - Main content: scrolls within its own container
+   ============================================================================ */
+
+/* Sidebar wrapper - takes full height of available space */
+.erp-sidebar-wrapper {
+    width: 100%;
+    max-width: 240px;
+
+    /* Make wrapper a flex column so the sidebar can stretch and scroll reliably */
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 240px;
+
+    /* IMPORTANT: allow inner scrolling inside nested flex layouts */
+    height: 100%;
+    min-height: 0;
+
+    overflow: hidden;
+}
+
+/* The actual sidebar nav */
+.erp-sidebar {
+    width: 100%;
+    max-width: 240px;
+
+    /* Fill the wrapper height in flex layouts (critical for scrolling menus) */
+    flex: 1 1 auto;
+
+    /* IMPORTANT: ensure sidebar can shrink inside flex parents */
+    height: 100%;
+    min-height: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    background-color: #ffffff;
+    box-shadow: 1px 0 4px rgba(15, 23, 42, 0.04);
+}
+
+/* Sidebar brand header - stays fixed at top of sidebar */
+.erp-sidebar-brand {
+    background-color: #ffffff;
+    flex-shrink: 0;
+}
+
+/* Sidebar navigation - scrolls independently */
+.erp-sidebar-nav {
+    /* IMPORTANT: enables overflow scrolling inside flex parents */
+    flex: 1 1 auto;
+    min-height: 0;
+
+    /* Bootstrap already sets `.overflow-auto { overflow: auto !important; }`
+       This is a safety net in case the class changes later. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+/* Give the last sidebar items breathing space so they don't hide under the bottom edge */
+.erp-sidebar-nav > .p-2 {
+    padding-bottom: 1.25rem;
+}
+
+.erp-sidebar-nav::-webkit-scrollbar {
+    width: 6px;
+}
+
+.erp-sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.erp-sidebar-nav::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 3px;
+}
+
+.erp-sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* Main content scroll area */
+.erp-main-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.erp-main-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+
+.erp-main-scroll::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+.erp-main-scroll::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 4px;
+}
+
+.erp-main-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* Sticky search bar inside sidebar */
+.erp-sidebar-search-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #ffffff;
+}
+
+/* Sidebar accordion/section header */
+.erp-sidebar-section {
+    border-radius: 0.75rem;
+}
+
+/* Sidebar nav links */
+.erp-nav-link {
+    position: relative;
+    border-radius: 0.5rem;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+    transition: background-color 0.15s ease-out, color 0.15s ease-out;
+}
+
+.erp-nav-link:hover {
+    background-color: #f3f4f6;
+    color: #111827 !important;
+}
+
+/* Active state highlight */
+.erp-nav-link.active {
+    background-color: #e0ecff;
+    color: #0f172a !important;
+    font-weight: 600;
+}
+
+/* Left accent bar for active links */
+.erp-nav-link.active::before {
+    content: "";
+    position: absolute;
+    left: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 60%;
+    border-radius: 999px;
+    background: #0d6efd;
+}
+
+/* Ensure sidebar text is always visible */
+.erp-sidebar .nav-link {
+    color: #0f172a;
+}
+
+.erp-sidebar .nav-link.text-body-secondary {
+    color: #6b7280 !important;
+}
+
+/* Accordion header hover styling */
+.erp-accordion-header {
+    transition: background-color 0.15s ease-out, color 0.15s ease-out;
+}
+
+.erp-accordion-header:hover {
+    background-color: #f3f4f6;
+}
+
+.erp-accordion-header[aria-expanded="true"] {
+    background-color: #eef2ff;
+    color: #0f172a;
+}
+
+.erp-accordion-header .erp-chevron {
+    transition: transform 0.15s ease-out;
+}
+
+.erp-accordion-header[aria-expanded="true"] .erp-chevron {
+    transform: rotate(180deg);
+}
+
+/* Primary buttons - shadow only, no transform */
+.btn-primary {
+    transition: background-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.btn-primary:hover {
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+}
+
+/* Make tables scroll nicely */
+.table-responsive {
+    border-radius: 0.5rem;
+}
+
+/* ============================================================================
+   DASHBOARD MODULE GROUPS - CARD-BASED GROUPED LAYOUT
+   ============================================================================
+   Modern grouped module cards with icons for the dashboard
+   ============================================================================ */
+
+/* Module group container */
+.erp-module-group {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    overflow: hidden;
+    transition: all 0.2s ease-out;
+}
+
+.erp-module-group:hover {
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.1);
+    border-color: #cbd5e1;
+}
+
+/* Module group header with icon */
+.erp-module-group-header {
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.erp-module-group-header .erp-module-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+/* Module icon color variants */
+.erp-module-icon.icon-crm {
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    color: #1d4ed8;
+}
+
+.erp-module-icon.icon-purchase {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    color: #b45309;
+}
+
+.erp-module-icon.icon-store {
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    color: #047857;
+}
+
+.erp-module-icon.icon-accounting {
+    background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+    color: #6d28d9;
+}
+
+.erp-module-icon.icon-hr {
+    background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%);
+    color: #be185d;
+}
+
+.erp-module-icon.icon-projects {
+    background: linear-gradient(135deg, #cffafe 0%, #a5f3fc 100%);
+    color: #0891b2;
+}
+
+.erp-module-icon.icon-tasks {
+    background: linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%);
+    color: #c2410c;
+}
+
+.erp-module-icon.icon-production {
+    background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
+    color: #7c3aed;
+}
+
+.erp-module-icon.icon-settings {
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+    color: #475569;
+}
+
+.erp-module-group-header h6 {
+    margin: 0;
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 0.95rem;
+}
+
+.erp-module-group-header .text-muted {
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+/* Module group body */
+.erp-module-group-body {
+    padding: 0.75rem;
+}
+
+/* Module item links inside groups */
+.erp-module-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    color: #334155;
+    transition: all 0.15s ease-out;
+    font-size: 0.875rem;
+}
+
+.erp-module-item:hover {
+    background-color: #f1f5f9;
+    color: #0f172a;
+}
+
+.erp-module-item .item-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 0.375rem;
+    background-color: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0.75rem;
+    color: #64748b;
+    font-size: 0.875rem;
+    transition: all 0.15s ease-out;
+}
+
+.erp-module-item:hover .item-icon {
+    background-color: #e2e8f0;
+    color: #334155;
+}
+
+.erp-module-item .item-label {
+    flex: 1;
+    font-weight: 500;
+}
+
+.erp-module-item .item-action {
+    color: #94a3b8;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    background-color: transparent;
+    transition: all 0.15s ease-out;
+}
+
+.erp-module-item:hover .item-action {
+    background-color: #e2e8f0;
+    color: #0d6efd;
+}
+
+/* KPI stat cards for dashboard */
+.erp-stat-card {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    padding: 1rem 1.25rem;
+    transition: all 0.2s ease-out;
+}
+
+.erp-stat-card:hover {
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+    transform: translateY(-2px);
+}
+
+.erp-stat-card .stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+}
+
+.erp-stat-card .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+}
+
+.erp-stat-card .stat-label {
+    font-size: 0.8rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    font-weight: 500;
+}
+
+/* Quick action buttons */
+.erp-quick-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s ease-out;
+    border: 1px solid transparent;
+}
+
+.erp-quick-action.action-primary {
+    background-color: #0d6efd;
+    color: #ffffff;
+}
+
+.erp-quick-action.action-primary:hover {
+    background-color: #0b5ed7;
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.35);
+}
+
+.erp-quick-action.action-secondary {
+    background-color: #f1f5f9;
+    color: #334155;
+    border-color: #e2e8f0;
+}
+
+.erp-quick-action.action-secondary:hover {
+    background-color: #e2e8f0;
+    color: #0f172a;
+}
+
+/* ============================================================================
+   MODAL FLICKER FIX - CRITICAL SECTION
+   ============================================================================
+   When modal is open, disable ALL animations and transitions on background
+   elements to prevent any visual flickering caused by hover state changes.
+   ============================================================================ */
+
+/* Disable ALL transitions when modal is open */
+body.modal-open .erp-main-card,
+body.modal-open .erp-module-group,
+body.modal-open .erp-stat-card,
+body.modal-open .erp-nav-link,
+body.modal-open .erp-quick-action {
+    transition: none !important;
+    transform: none !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 991.98px) {
+    .erp-module-group-header {
+        padding: 0.875rem 1rem;
+    }
+    
+    .erp-module-group-header .erp-module-icon {
+        width: 36px;
+        height: 36px;
+        font-size: 1.1rem;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .erp-stat-card {
+        padding: 0.875rem 1rem;
+    }
+    
+    .erp-stat-card .stat-value {
+        font-size: 1.5rem;
+    }
+    
+    .erp-stat-card .stat-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 1.1rem;
+    }
+}
+/* ---------------------------------------------------------------------------
+   Bootstrap Collapse vs Tailwind .collapse conflict
+   Prevent “expanded but blank” content when Bootstrap adds `.show`
+--------------------------------------------------------------------------- */
+.collapse.show {
+  visibility: visible !important;
+}
+.collapsing {
+  visibility: visible !important;
+}

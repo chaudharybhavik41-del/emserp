@@ -1,0 +1,28 @@
+@extends('layouts.erp')
+
+@section('title', 'Add Standard Terms Template')
+
+@section('content')
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">Add Standard Terms Template</h1>
+        <a href="{{ route('standard-terms.index') }}" class="btn btn-sm btn-secondary">Back to list</a>
+    </div>
+
+    @if($errors->any())
+        <div class="alert alert-danger">
+            <strong>Please fix the following errors:</strong>
+            <ul class="mb-0">
+                @foreach($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
+    <form method="POST" action="{{ route('standard-terms.store') }}">
+        @include('standard_terms._form')
+        <div class="mt-3 text-end">
+            <button type="submit" class="btn btn-primary">Save Template</button>
+        </div>
+    </form>
+@endsection
