@@ -19,7 +19,7 @@ use RuntimeException;
  * - Series prefixes are unique within a company (enforced at DB level).
  * - Supports both formats:
  *     - PREFIX-000001 (no FY)
- *     - PREFIX/2025-26/0001 (FY)
+ *     - PREFIX/2526/0001 (FY, short code)
  */
 class VoucherNumberService
 {
@@ -202,7 +202,7 @@ class VoucherNumberService
         $fyStartYear = $date->month >= $startMonth ? $date->year : $date->year - 1;
         $fyEndYear = $fyStartYear + 1;
 
-        return sprintf('%d-%02d', $fyStartYear, $fyEndYear % 100);
+        return sprintf('%02d%02d', $fyStartYear % 100, $fyEndYear % 100);
     }
 
     protected function asCarbon(Carbon|string $date): Carbon
