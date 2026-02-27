@@ -13,6 +13,8 @@ use App\Models\Project;
 use App\Models\SubcontractorRaBill;
 use App\Models\SubcontractorRaBillLine;
 use App\Models\Uom;
+use App\Models\User;
+use App\Services\NotificationService;
 use App\Services\Accounting\SubcontractorRaPostingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -450,7 +452,7 @@ class SubcontractorRaBillController extends Controller
     /**
      * Submit for approval
      */
-    public function submit(SubcontractorRaBill $subcontractorRa)
+    public function submit(SubcontractorRaBill $subcontractorRa, NotificationService $notificationService)
     {
         if ($subcontractorRa->status !== 'draft') {
             return back()->with('error', 'Only draft RA Bills can be submitted.');
@@ -464,13 +466,32 @@ class SubcontractorRaBillController extends Controller
         $subcontractorRa->updated_by = Auth::id();
         $subcontractorRa->save();
 
+        $url = route('accounting.subcontractor-ra.show', $subcontractorRa);
+        $notificationService->sendSystemAlertToUsers(
+            User::permission('subcontractor_ra.approve')->get(),
+            'Approval Required',
+            'Approval required for Subcontractor RA Bill ' . ($subcontractorRa->ra_number ?: ('#' . $subcontractorRa->id)) . '.',
+            ['subcontractor_ra_bill_id' => $subcontractorRa->id],
+            $url,
+            'warning',
+            'approval'
+        );
+        $notificationService->sendSystemAlertToCurrentUser(
+            'Submitted for Approval',
+            'Subcontractor RA Bill ' . ($subcontractorRa->ra_number ?: ('#' . $subcontractorRa->id)) . ' was submitted for approval.',
+            ['subcontractor_ra_bill_id' => $subcontractorRa->id],
+            $url,
+            'info',
+            'approval'
+        );
+
         return back()->with('success', 'RA Bill submitted for approval.');
     }
 
     /**
      * Approve RA Bill
      */
-    public function approve(SubcontractorRaBill $subcontractorRa)
+    public function approve(SubcontractorRaBill $subcontractorRa, NotificationService $notificationService)
     {
         if (!$subcontractorRa->canBeApproved()) {
             return back()->with('error', 'RA Bill cannot be approved in current state.');
@@ -482,13 +503,22 @@ class SubcontractorRaBillController extends Controller
         $subcontractorRa->updated_by = Auth::id();
         $subcontractorRa->save();
 
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $subcontractorRa->creator,
+            documentLabel: 'Subcontractor RA Bill ' . ($subcontractorRa->ra_number ?: ('#' . $subcontractorRa->id)),
+            decision: 'approved',
+            url: route('accounting.subcontractor-ra.show', $subcontractorRa),
+            meta: ['subcontractor_ra_bill_id' => $subcontractorRa->id]
+        );
+
         return back()->with('success', 'RA Bill approved successfully.');
     }
 
     /**
      * Reject RA Bill
      */
-    public function reject(Request $request, SubcontractorRaBill $subcontractorRa)
+    public function reject(Request $request, SubcontractorRaBill $subcontractorRa, NotificationService $notificationService)
     {
         if ($subcontractorRa->status !== 'submitted') {
             return back()->with('error', 'Only submitted RA Bills can be rejected.');
@@ -503,6 +533,16 @@ class SubcontractorRaBillController extends Controller
             "\n[Rejected: " . $request->rejection_reason . "]";
         $subcontractorRa->updated_by = Auth::id();
         $subcontractorRa->save();
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $subcontractorRa->creator,
+            documentLabel: 'Subcontractor RA Bill ' . ($subcontractorRa->ra_number ?: ('#' . $subcontractorRa->id)),
+            decision: 'rejected',
+            url: route('accounting.subcontractor-ra.show', $subcontractorRa),
+            remarks: $request->rejection_reason,
+            meta: ['subcontractor_ra_bill_id' => $subcontractorRa->id]
+        );
 
         return back()->with('success', 'RA Bill rejected.');
     }

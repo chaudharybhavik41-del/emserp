@@ -1,11 +1,11 @@
 @extends('layouts.erp')
 
-@section('title', 'Notifications')
+@section('title', $pageTitle ?? 'Notifications')
 
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
-        <h1 class="h4 mb-0">Notifications</h1>
+        <h1 class="h4 mb-0">{{ $pageTitle ?? 'Notifications' }}</h1>
         <small class="text-body-secondary">
             You have {{ $unreadCount }} unread notification{{ $unreadCount === 1 ? '' : 's' }}.
         </small>

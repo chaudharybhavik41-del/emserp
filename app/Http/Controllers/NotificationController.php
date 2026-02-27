@@ -25,7 +25,9 @@ class NotificationController extends Controller
         $notifications = $user->notifications()->latest()->paginate(20);
         $unreadCount   = $user->unreadNotifications()->count();
 
-        return view('notifications.index', compact('notifications', 'unreadCount'));
+        $pageTitle = 'Notifications';
+
+        return view('notifications.index', compact('notifications', 'unreadCount', 'pageTitle'));
     }
 
     /**

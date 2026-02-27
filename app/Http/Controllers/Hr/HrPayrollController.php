@@ -19,6 +19,7 @@ use App\Models\Hr\HrProfessionalTaxSlab;
 use App\Models\Hr\HrSalaryAdvance;
 use App\Models\Hr\HrSalaryComponent;
 use App\Enums\Hr\PayrollStatus;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -315,7 +316,7 @@ class HrPayrollController extends Controller
         return view($viewName, compact('payroll'))->with('pdf_mode', true);
     }
 
-    public function approve(HrPayroll $payroll): RedirectResponse
+    public function approve(HrPayroll $payroll, NotificationService $notificationService): RedirectResponse
     {
         if (!$payroll->canApprove()) {
             return back()->with('error', 'This payroll cannot be approved in its current state.');
@@ -339,6 +340,15 @@ class HrPayrollController extends Controller
                 }
             }
         }
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $payroll->creator ?? $payroll->employee?->user,
+            documentLabel: 'Payroll ' . ($payroll->payroll_number ?: ('#' . $payroll->id)),
+            decision: 'approved',
+            url: route('hr.payroll.show', $payroll),
+            meta: ['hr_payroll_id' => $payroll->id]
+        );
 
         return back()->with('success', 'Payroll approved successfully.');
     }
