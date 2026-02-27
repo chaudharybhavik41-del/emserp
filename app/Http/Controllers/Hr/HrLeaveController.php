@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
+use App\Services\NotificationService;
 
 class HrLeaveController extends Controller
 {
@@ -312,7 +313,7 @@ class HrLeaveController extends Controller
     /**
      * Approve Leave Application
      */
-    public function approve(Request $request, HrLeaveApplication $application)
+    public function approve(Request $request, HrLeaveApplication $application, NotificationService $notificationService)
     {
         if ($application->status !== LeaveStatus::PENDING) {
             return back()->with('error', 'Only pending applications can be approved.');
@@ -364,13 +365,23 @@ class HrLeaveController extends Controller
             ]);
         });
 
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $application->createdBy ?? $application->employee?->user,
+            documentLabel: 'Leave Application ' . ($application->application_number ?: ('#' . $application->id)),
+            decision: 'approved',
+            url: route('hr.leave.show', $application),
+            remarks: $request->remarks,
+            meta: ['hr_leave_application_id' => $application->id]
+        );
+
         return back()->with('success', 'Leave application approved successfully.');
     }
 
     /**
      * Reject Leave Application
      */
-    public function reject(Request $request, HrLeaveApplication $application)
+    public function reject(Request $request, HrLeaveApplication $application, NotificationService $notificationService)
     {
         if ($application->status !== LeaveStatus::PENDING) {
             return back()->with('error', 'Only pending applications can be rejected.');
@@ -386,6 +397,16 @@ class HrLeaveController extends Controller
             'approved_at' => now(),
             'approval_remarks' => $request->rejection_reason,
         ]);
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $application->createdBy ?? $application->employee?->user,
+            documentLabel: 'Leave Application ' . ($application->application_number ?: ('#' . $application->id)),
+            decision: 'rejected',
+            url: route('hr.leave.show', $application),
+            remarks: $request->rejection_reason,
+            meta: ['hr_leave_application_id' => $application->id]
+        );
 
         return back()->with('success', 'Leave application rejected.');
     }

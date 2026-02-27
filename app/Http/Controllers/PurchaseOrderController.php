@@ -13,6 +13,7 @@ use App\Models\PurchaseRfqVendorQuote;
 use App\Models\StandardTerm;
 use App\Services\PurchaseIndentProcurementService;
 use App\Services\MailService;
+use App\Services\NotificationService;
 use App\Support\GstHelper;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -574,7 +575,7 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
             ->with('success', 'Purchase Orders generated successfully for selected vendors.');
     }
 
-    public function approve(PurchaseOrder $purchaseOrder): RedirectResponse
+    public function approve(PurchaseOrder $purchaseOrder, NotificationService $notificationService): RedirectResponse
     {
         if ($purchaseOrder->status !== 'draft') {
             return redirect()->route('purchase-orders.show', $purchaseOrder)
@@ -595,6 +596,15 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
             app(PurchaseIndentProcurementService::class)
                 ->recalcIndent((int) $purchaseOrder->purchase_indent_id);
         }
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $purchaseOrder->creator,
+            documentLabel: 'Purchase Order ' . ($purchaseOrder->code ?: ('#' . $purchaseOrder->id)),
+            decision: 'approved',
+            url: route('purchase-orders.show', $purchaseOrder),
+            meta: ['purchase_order_id' => $purchaseOrder->id]
+        );
 
         return redirect()
             ->route('purchase-orders.show', $purchaseOrder)
