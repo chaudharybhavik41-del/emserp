@@ -8,6 +8,7 @@ use App\Models\Hr\HrEmployeeLoan;
 use App\Models\Hr\HrLoanRepayment;
 use App\Models\Hr\HrLoanType;
 use Carbon\Carbon;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -129,7 +130,7 @@ class HrEmployeeLoanController extends Controller
             ->with('success', 'Loan deleted successfully.');
     }
 
-    public function approve(Request $request, HrEmployeeLoan $loan): RedirectResponse
+    public function approve(Request $request, HrEmployeeLoan $loan, NotificationService $notificationService): RedirectResponse
     {
         $validated = $request->validate([
             'approved_amount' => 'nullable|numeric|min:0',
@@ -148,10 +149,20 @@ class HrEmployeeLoanController extends Controller
             'approval_remarks' => $validated['approval_remarks'] ?? null,
         ]);
 
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $loan->createdBy ?? $loan->employee?->user,
+            documentLabel: 'Employee Loan ' . ($loan->loan_number ?: ('#' . $loan->id)),
+            decision: 'approved',
+            url: route('hr.loans.employee-loans.show', $loan),
+            remarks: $validated['approval_remarks'] ?? null,
+            meta: ['hr_employee_loan_id' => $loan->id]
+        );
+
         return back()->with('success', 'Loan approved successfully.');
     }
 
-    public function reject(Request $request, HrEmployeeLoan $loan): RedirectResponse
+    public function reject(Request $request, HrEmployeeLoan $loan, NotificationService $notificationService): RedirectResponse
     {
         $validated = $request->validate([
             'rejection_reason' => 'required|string|max:1000',
@@ -163,6 +174,16 @@ class HrEmployeeLoanController extends Controller
             'approved_by' => auth()->id(),
             'approved_date' => now()->toDateString(),
         ]);
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $loan->createdBy ?? $loan->employee?->user,
+            documentLabel: 'Employee Loan ' . ($loan->loan_number ?: ('#' . $loan->id)),
+            decision: 'rejected',
+            url: route('hr.loans.employee-loans.show', $loan),
+            remarks: $validated['rejection_reason'],
+            meta: ['hr_employee_loan_id' => $loan->id]
+        );
 
         return back()->with('success', 'Loan rejected successfully.');
     }

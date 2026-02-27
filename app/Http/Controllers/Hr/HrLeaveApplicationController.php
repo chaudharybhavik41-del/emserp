@@ -8,6 +8,7 @@ use App\Models\Hr\HrLeaveType;
 use App\Models\Hr\HrEmployee;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Services\NotificationService;
 
 class HrLeaveApplicationController extends Controller
 {
@@ -167,7 +168,7 @@ class HrLeaveApplicationController extends Controller
                          ->with('success', 'Leave application deleted successfully.');
     }
 
-    public function approve(Request $request, HrLeaveApplication $leaveApplication)
+    public function approve(Request $request, HrLeaveApplication $leaveApplication, NotificationService $notificationService)
     {
         if ($leaveApplication->status !== 'pending') {
             return back()->with('error', 'Application has already been processed.');
@@ -180,10 +181,20 @@ class HrLeaveApplicationController extends Controller
             'approval_remarks' => $request->get('remarks'),
         ]);
 
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $leaveApplication->createdBy ?? $leaveApplication->employee?->user,
+            documentLabel: 'Leave Application ' . ($leaveApplication->application_number ?: ('#' . $leaveApplication->id)),
+            decision: 'approved',
+            url: route('hr.leave-applications.show', $leaveApplication),
+            remarks: $request->get('remarks'),
+            meta: ['hr_leave_application_id' => $leaveApplication->id]
+        );
+
         return back()->with('success', 'Leave application approved successfully.');
     }
 
-    public function reject(Request $request, HrLeaveApplication $leaveApplication)
+    public function reject(Request $request, HrLeaveApplication $leaveApplication, NotificationService $notificationService)
     {
         if ($leaveApplication->status !== 'pending') {
             return back()->with('error', 'Application has already been processed.');
@@ -199,6 +210,16 @@ class HrLeaveApplicationController extends Controller
             'approved_at' => now(),
             'approval_remarks' => $request->get('remarks'),
         ]);
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: Auth::user(),
+            requester: $leaveApplication->createdBy ?? $leaveApplication->employee?->user,
+            documentLabel: 'Leave Application ' . ($leaveApplication->application_number ?: ('#' . $leaveApplication->id)),
+            decision: 'rejected',
+            url: route('hr.leave-applications.show', $leaveApplication),
+            remarks: $request->get('remarks'),
+            meta: ['hr_leave_application_id' => $leaveApplication->id]
+        );
 
         return back()->with('success', 'Leave application rejected.');
     }

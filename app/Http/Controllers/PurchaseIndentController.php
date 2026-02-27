@@ -11,6 +11,7 @@ use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseRfq;
 use App\Models\PurchaseRfqItem;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -410,7 +411,7 @@ class PurchaseIndentController extends Controller
         }
     }
 
-    public function approve(PurchaseIndent $indent): RedirectResponse
+    public function approve(PurchaseIndent $indent, NotificationService $notificationService): RedirectResponse
     {
         if ($indent->status === 'approved') {
             return redirect()->route('purchase-indents.show', $indent)
@@ -426,11 +427,20 @@ class PurchaseIndentController extends Controller
         $indent->approved_by = auth()->id();
         $indent->save();
 
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $indent->creator,
+            documentLabel: 'Purchase Indent ' . ($indent->code ?: ('#' . $indent->id)),
+            decision: 'approved',
+            url: route('purchase-indents.show', $indent),
+            meta: ['purchase_indent_id' => $indent->id]
+        );
+
         return redirect()->route('purchase-indents.show', $indent)
             ->with('success', 'Purchase Indent approved successfully.');
     }
 
-    public function reject(PurchaseIndent $indent): RedirectResponse
+    public function reject(PurchaseIndent $indent, NotificationService $notificationService): RedirectResponse
     {
         if ($indent->status === 'rejected') {
             return redirect()->route('purchase-indents.show', $indent)
@@ -440,6 +450,15 @@ class PurchaseIndentController extends Controller
         $indent->status = 'rejected';
         $indent->approved_by = auth()->id();
         $indent->save();
+
+        $notificationService->sendApprovalDecisionNotifications(
+            approver: auth()->user(),
+            requester: $indent->creator,
+            documentLabel: 'Purchase Indent ' . ($indent->code ?: ('#' . $indent->id)),
+            decision: 'rejected',
+            url: route('purchase-indents.show', $indent),
+            meta: ['purchase_indent_id' => $indent->id]
+        );
 
         return redirect()->route('purchase-indents.show', $indent)
             ->with('success', 'Purchase Indent rejected.');

@@ -102,4 +102,55 @@ class NotificationService
 
         $this->sendSystemAlertToUser($user, $title, $message, $meta, $url, $level, $type);
     }
+
+    /**
+     * Notify approver (actor) + requester about final approval decision.
+     */
+    public function sendApprovalDecisionNotifications(
+        ?User $approver,
+        ?User $requester,
+        string $documentLabel,
+        string $decision,
+        ?string $url = null,
+        ?string $remarks = null,
+        array $meta = []
+    ): void {
+        $decision = strtolower($decision) === 'rejected' ? 'rejected' : 'approved';
+        $past = $decision === 'approved' ? 'approved' : 'rejected';
+        $level = $decision === 'approved' ? 'success' : 'danger';
+
+        if ($approver) {
+            $message = "You {$past} {$documentLabel}.";
+            if ($remarks) {
+                $message .= " Remarks: {$remarks}";
+            }
+
+            $this->sendSystemAlertToUser(
+                $approver,
+                'Approval Action Completed',
+                $message,
+                $meta,
+                $url,
+                $level,
+                'approval'
+            );
+        }
+
+        if ($requester && (!$approver || $requester->id !== $approver->id)) {
+            $message = "{$documentLabel} has been {$past}.";
+            if ($remarks) {
+                $message .= " Remarks: {$remarks}";
+            }
+
+            $this->sendSystemAlertToUser(
+                $requester,
+                $decision === 'approved' ? 'Approval Granted' : 'Approval Rejected',
+                $message,
+                $meta,
+                $url,
+                $level,
+                'approval'
+            );
+        }
+    }
 }
