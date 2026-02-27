@@ -35,10 +35,7 @@
                                             <label class="form-label form-label-sm">Date</label>
                                             <input type="date" name="voucher_date" class="form-control form-control-sm" value="{{ old('voucher_date', now()->toDateString()) }}">
                                         </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label form-label-sm">Exchange Rate</label>
-                                            <input type="number" step="0.000001" name="exchange_rate" class="form-control form-control-sm" value="{{ old('exchange_rate', 1) }}">
-                                        </div>
+                                        <input type="hidden" name="exchange_rate" value="1">
                                     <div class="col-md-3">
                                         <label class="form-label form-label-sm">Project</label>
                                         <select name="project_id" id="project_id" class="form-select form-select-sm">
