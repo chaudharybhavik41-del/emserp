@@ -44,7 +44,11 @@
                                         <select name="project_id" id="project_id" class="form-select form-select-sm">
                                             <option value="">-- none --</option>
                                             @foreach($projects as $p)
-                                                <option value="{{ $p->id }}">
+                                                <option
+                                                    value="{{ $p->id }}"
+                                                    data-cost-center-id="{{ $projectCostCenterMap[$p->id] ?? '' }}"
+                                                    @selected((string) old('project_id') === (string) $p->id)
+                                                >
                                                     {{ $p->code ? ($p->code . ' - ') : '' }}{{ $p->name }}
                                                 </option>
                                             @endforeach
@@ -52,7 +56,7 @@
                                     </div>
                                         <div class="col-md-3">
                                             <label class="form-label form-label-sm">Cost Center</label>
-                                            <select name="cost_center_id" class="form-select form-select-sm">
+                                            <select name="cost_center_id" id="cost_center_id" class="form-select form-select-sm">
                                                 <option value="">-- none --</option>
                                                 @foreach($costCenters as $cc)
 
@@ -304,6 +308,24 @@
         document.querySelector('#voucher-lines-table tbody').addEventListener('click', removeLine);
         document.querySelector('#voucher-lines-table tbody').addEventListener('input', handleMutualExclusivity);
         document.querySelector('#voucher-lines-table tbody').addEventListener('blur', formatDecimal, true);
+
+        const projectSelect = document.getElementById('project_id');
+        const costCenterSelect = document.getElementById('cost_center_id');
+
+        function syncCostCenterWithProject() {
+            if (!projectSelect || !costCenterSelect) {
+                return;
+            }
+
+            const selectedOption = projectSelect.options[projectSelect.selectedIndex];
+            const mappedCostCenterId = selectedOption?.dataset?.costCenterId || '';
+            costCenterSelect.value = mappedCostCenterId;
+        }
+
+        projectSelect?.addEventListener('change', syncCostCenterWithProject);
+        if (!costCenterSelect.value && projectSelect?.value) {
+            syncCostCenterWithProject();
+        }
 
         // Initial calculation
         calculateTotals();
