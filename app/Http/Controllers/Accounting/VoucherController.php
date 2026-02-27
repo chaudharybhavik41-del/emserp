@@ -105,9 +105,12 @@ class VoucherController extends Controller
     {
 
         $accounts    = Account::orderBy('name')->get();
-        
+
         $costCenters = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
+        $projectCostCenterMap = $costCenters
+            ->filter(fn (CostCenter $costCenter) => ! empty($costCenter->project_id))
+            ->mapWithKeys(fn (CostCenter $costCenter) => [(int) $costCenter->project_id => (int) $costCenter->id]);
 
         // Keep the type set small & controlled for now.
         $voucherTypes = [
@@ -115,7 +118,7 @@ class VoucherController extends Controller
             'contra'  => 'Contra',
         ];
 
-        return view('accounting.vouchers.create', compact('accounts', 'costCenters', 'projects', 'voucherTypes'));
+        return view('accounting.vouchers.create', compact('accounts', 'costCenters', 'projects', 'voucherTypes', 'projectCostCenterMap'));
     }
 
     public function store(Request $request)

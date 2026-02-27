@@ -33,7 +33,7 @@ class VoucherSeriesController extends Controller
         $fyStartYear = $date->month >= $startMonth ? $date->year : $date->year - 1;
         $fyEndYear = $fyStartYear + 1;
 
-        return sprintf('%d-%02d', $fyStartYear, $fyEndYear % 100);
+        return sprintf('%02d%02d', $fyStartYear % 100, $fyEndYear % 100);
     }
     public function index(Request $request)
     {
