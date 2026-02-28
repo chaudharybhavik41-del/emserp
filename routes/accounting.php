@@ -19,6 +19,7 @@ use App\Http\Controllers\Accounting\GstVoucherRegisterReportController;
 use App\Http\Controllers\Accounting\InventoryValuationReportController;
 use App\Http\Controllers\Accounting\LedgerReportController;
 use App\Http\Controllers\Accounting\MigrationToolsController;
+use App\Http\Controllers\Accounting\MachineExpenseLedgerReportController;
 use App\Http\Controllers\Accounting\OnAccountAdjustmentController;
 use App\Http\Controllers\Accounting\ProfitLossReportController;
 use App\Http\Controllers\Accounting\ProjectCostSheetController;
@@ -124,6 +125,7 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::get('reports/client-outstanding', [ClientOutstandingReportController::class, 'index'])->name('reports.client-outstanding');
     Route::get('reports/trial-balance', [TrialBalanceReportController::class, 'index'])->name('reports.trial-balance');
     Route::get('reports/ledger', [LedgerReportController::class, 'index'])->name('reports.ledger');
+    Route::get('reports/machine-expense-ledger', [MachineExpenseLedgerReportController::class, 'index'])->name('reports.machine-expense-ledger');
     Route::get('reports/day-book', [DayBookReportController::class, 'index'])->name('reports.day-book');
     Route::get('reports/profit-loss', [ProfitLossReportController::class, 'index'])->name('reports.profit-loss');
     Route::get('reports/balance-sheet', [BalanceSheetReportController::class, 'index'])->name('reports.balance-sheet');

@@ -17,6 +17,7 @@ class PurchaseBillExpenseLine extends Model
         'purchase_bill_id',
         'account_id',
         'project_id',
+        'machine_id',
         'is_reverse_charge',
         'description',
         'basic_amount',
@@ -32,6 +33,7 @@ class PurchaseBillExpenseLine extends Model
     protected $casts = [
         'is_reverse_charge' => 'boolean',
         'project_id'        => 'integer',
+        'machine_id'        => 'integer',
         'basic_amount'      => 'float',
         'tax_rate'          => 'float',
         'tax_amount'        => 'float',
@@ -55,4 +57,10 @@ class PurchaseBillExpenseLine extends Model
     {
         return $this->belongsTo(Project::class, 'project_id');
     }
+
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(FixedAsset::class, 'machine_id');
+    }
 }
+
