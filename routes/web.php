@@ -88,6 +88,7 @@ use App\Http\Controllers\MachineryBillController;
 use App\Http\Controllers\MachineAssignmentController;
 use App\Http\Controllers\MachineCalibrationController;
 use App\Http\Controllers\GatePassController;
+use App\Http\Controllers\FixedAssetController;
 
 // Accounting Module
 use App\Http\Controllers\Accounting\PaymentReceiptController;
@@ -722,6 +723,29 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
 	});
 
 	
+
+    // Fixed Assets - Machinery Register
+    Route::prefix('fixed-assets/machinery')->name('fixed-assets.machinery.')->group(function () {
+        Route::get('/', [FixedAssetController::class, 'index'])
+            ->middleware('permission:fixed_assets.view')
+            ->name('index');
+        Route::get('/create', [FixedAssetController::class, 'create'])
+            ->middleware('permission:fixed_assets.create')
+            ->name('create');
+        Route::post('/', [FixedAssetController::class, 'store'])
+            ->middleware('permission:fixed_assets.create')
+            ->name('store');
+        Route::get('/{fixedAsset}', [FixedAssetController::class, 'show'])
+            ->middleware('permission:fixed_assets.view')
+            ->name('show');
+        Route::get('/{fixedAsset}/edit', [FixedAssetController::class, 'edit'])
+            ->middleware('permission:fixed_assets.edit')
+            ->name('edit');
+        Route::put('/{fixedAsset}', [FixedAssetController::class, 'update'])
+            ->middleware('permission:fixed_assets.edit')
+            ->name('update');
+    });
+
 	// Machinery Bills (Purchase Bills containing machinery items)
 	Route::prefix('machinery-bills')->name('machinery-bills.')->group(function () {
         Route::get('/', [MachineryBillController::class, 'index'])

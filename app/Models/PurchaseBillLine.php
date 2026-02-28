@@ -29,6 +29,9 @@ class PurchaseBillLine extends Model
         'igst_amount',
         'total_amount',
         'account_id',
+        'serial_no',
+        'machine_make',
+        'machine_model',
         'line_no',
     ];
 

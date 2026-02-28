@@ -2,6 +2,7 @@
 
 namespace App\Models\Accounting;
 
+use App\Models\FixedAsset;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,6 +18,7 @@ class VoucherLine extends Model
         'line_no',
         'account_id',
         'cost_center_id',
+        'machine_id',
         'description',
         'debit',
         'credit',
@@ -42,6 +44,11 @@ class VoucherLine extends Model
     public function costCenter(): BelongsTo
     {
         return $this->belongsTo(CostCenter::class);
+    }
+
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(FixedAsset::class, 'machine_id');
     }
 
     public function reference(): MorphTo

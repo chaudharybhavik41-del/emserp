@@ -28,6 +28,9 @@ if ($itemLines === null) {
                     'igst_amount' => $l->igst_amount,
                     'total_amount' => $l->total_amount,
                     'account_id' => $l->account_id,
+                    'serial_no' => $l->serial_no,
+                    'machine_make' => $l->machine_make,
+                    'machine_model' => $l->machine_model,
                 ];
             })
             ->all();
@@ -59,6 +62,9 @@ for ($i = count($itemLines); $i < $targetRows; $i++) {
         'igst_amount' => 0,
         'total_amount' => 0,
         'account_id' => null,
+        'serial_no' => null,
+        'machine_make' => null,
+        'machine_model' => null,
     ];
 }
 
@@ -71,6 +77,7 @@ if ($expenseLines === null) {
                 'account_id' => $l->account_id,
                 // Phase-B: preserve per-expense-line project split when editing
                 'project_id' => $l->project_id,
+                'machine_id' => $l->machine_id,
                 'description' => $l->description,
                 'amount' => $l->basic_amount,
                 'tax_rate' => $l->tax_rate,
@@ -92,6 +99,7 @@ for ($i = count($expenseLines); $i < $targetExpenseRows; $i++) {
     $expenseLines[] = [
         'account_id' => null,
         'project_id' => null,
+        'machine_id' => null,
         'description' => null,
         'amount' => null,
         'tax_rate' => 0,
@@ -619,6 +627,9 @@ $initNet = (float) ($bill->net_payable ?? 0);
         <h5 class="h6 mb-0">Items</h5>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAddItemRow">+ Add Row</button>
     </div>
+    <div class="small text-muted mb-2">
+        For long-term machinery lines, Serial/Make/Model are optional and used for auto fixed-asset creation on posting.
+    </div>
 
     <div class="table-responsive">
         <table class="table table-sm table-bordered align-middle text-nowrap" id="bill-lines-table">
@@ -637,6 +648,9 @@ $initNet = (float) ($bill->net_payable ?? 0);
                 <th style="width:8%">SGST</th>
                 <th style="width:8%">IGST</th>
                 <th style="width:10%">Total</th>
+                <th style="width:10%">Serial No</th>
+                <th style="width:10%">Make</th>
+                <th style="width:10%">Model</th>
             </tr>
             </thead>
             <tbody id="bill-lines-tbody">
@@ -752,6 +766,15 @@ $initNet = (float) ($bill->net_payable ?? 0);
                                class="form-control form-control-sm totalamt-input"
                                value="{{ $line['total_amount'] ?? 0 }}" readonly>
                     </td>
+                    <td>
+                        <input type="text" name="lines[{{ $i }}][serial_no]" class="form-control form-control-sm" value="{{ $line['serial_no'] ?? '' }}" placeholder="Optional">
+                    </td>
+                    <td>
+                        <input type="text" name="lines[{{ $i }}][machine_make]" class="form-control form-control-sm" value="{{ $line['machine_make'] ?? '' }}" placeholder="Optional">
+                    </td>
+                    <td>
+                        <input type="text" name="lines[{{ $i }}][machine_model]" class="form-control form-control-sm" value="{{ $line['machine_model'] ?? '' }}" placeholder="Optional">
+                    </td>
                 </tr>
             @endforeach
             </tbody>
@@ -769,6 +792,7 @@ $initNet = (float) ($bill->net_payable ?? 0);
             <tr>
                 <th style="width:18%">Ledger</th>
                 <th style="width:18%">Project</th>
+                <th style="width:18%">Machine</th>
                 <th>Description</th>
                 <th style="width:10%">Amount</th>
                 <th style="width:7%">GST %</th>
@@ -802,6 +826,16 @@ $initNet = (float) ($bill->net_payable ?? 0);
                         @foreach($projects as $p)
                             <option value="{{ $p->id }}" @selected((string) $selProj === (string) $p->id)>
                                 {{ $p->code }} - {{ $p->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </td>
+                <td>
+                    <select name="expense_lines[{{ $i }}][machine_id]" class="form-select form-select-sm exp-machine">
+                        <option value="">-- Not Tagged --</option>
+                        @foreach($machines as $machine)
+                            <option value="{{ $machine->id }}" @selected((string) ($ex['machine_id'] ?? '') === (string) $machine->id)>
+                                {{ $machine->asset_code }} - {{ $machine->name }}
                             </option>
                         @endforeach
                     </select>
@@ -1239,6 +1273,9 @@ $initNet = (float) ($bill->net_payable ?? 0);
         <td><input type="number" step="0.01" name="lines[__INDEX__][sgst_amount]" class="form-control form-control-sm sgst-input" value="0" readonly></td>
         <td><input type="number" step="0.01" name="lines[__INDEX__][igst_amount]" class="form-control form-control-sm igst-input" value="0" readonly></td>
         <td><input type="number" step="0.01" name="lines[__INDEX__][total_amount]" class="form-control form-control-sm totalamt-input" value="0" readonly></td>
+        <td><input type="text" name="lines[__INDEX__][serial_no]" class="form-control form-control-sm" value="" placeholder="Optional"></td>
+        <td><input type="text" name="lines[__INDEX__][machine_make]" class="form-control form-control-sm" value="" placeholder="Optional"></td>
+        <td><input type="text" name="lines[__INDEX__][machine_model]" class="form-control form-control-sm" value="" placeholder="Optional"></td>
     </tr>
 </template>
 

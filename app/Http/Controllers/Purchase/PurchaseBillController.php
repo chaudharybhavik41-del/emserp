@@ -17,6 +17,7 @@ use App\Models\Uom;
 use App\Models\PurchaseOrder;
 use App\Models\MaterialReceipt;
 use App\Models\Company;
+use App\Models\FixedAsset;
 use App\Models\Attachment;
 use App\Services\Accounting\PurchaseBillPostingService;
 use App\Support\GstHelper;
@@ -214,6 +215,10 @@ public function index(Request $request)
     $accounts   = Account::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
+    $machines = FixedAsset::query()
+        ->where('asset_type', 'machinery')
+        ->orderBy('asset_code')
+        ->get(['id', 'asset_code', 'name']);
 
     // TDS Sections master (for dropdown)
     $tdsSections = TdsSection::query()
@@ -224,7 +229,7 @@ public function index(Request $request)
 
     $emptyLines = 5;
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects', 'machines'));
 	}
 
 
@@ -386,6 +391,9 @@ public function index(Request $request)
 	                'igst_amount'              => $igstAmt,
 	                'total_amount'             => $totalLine,
 	                'account_id'               => $lineInput['account_id'] ?? null, // override account allowed
+	                'serial_no'                => $lineInput['serial_no'] ?? null,
+	                'machine_make'             => $lineInput['machine_make'] ?? null,
+	                'machine_model'            => $lineInput['machine_model'] ?? null,
 	                'line_no'                  => $lineNo++,
 	            ]);
 	        }
@@ -400,6 +408,7 @@ public function index(Request $request)
                 // Phase-B: allow splitting expense lines across projects
                 // If line project is empty, default to bill header project (or PO project).
                 $lineProjectId = $expInput['project_id'] ?? null;
+                $machineId = $expInput['machine_id'] ?? null;
                 if (empty($lineProjectId) && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
@@ -455,6 +464,7 @@ public function index(Request $request)
 	                $bill->expenseLines()->create([
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
+                    'machine_id'   => $machineId,
                     'is_reverse_charge' => $isReverseCharge,
 	                    'description'  => $description,
 	                    'basic_amount' => $basic,
@@ -519,7 +529,7 @@ public function index(Request $request)
 	
     public function edit(PurchaseBill $bill)
     {
-        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
+        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'expenseLines.machine', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
 
         $suppliers  = Party::query()
             ->where(function ($q) {
@@ -533,6 +543,10 @@ public function index(Request $request)
         $accounts   = Account::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
+    $machines = FixedAsset::query()
+        ->where('asset_type', 'machinery')
+        ->orderBy('asset_code')
+        ->get(['id', 'asset_code', 'name']);
 
         $companyId = (int) ($bill->company_id ?: 1);
         // TDS Sections master (for dropdown)
@@ -546,12 +560,12 @@ public function index(Request $request)
 
         $company = Company::find($companyId) ?: Company::where('is_default', true)->first();
 
-        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects', 'machines'));
     }
 
    public function show(PurchaseBill $bill)
 	{
-	    $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'voucher', 'purchaseOrder.project', 'project', 'attachments');
+	    $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'expenseLines.machine', 'supplier', 'voucher', 'purchaseOrder.project', 'project', 'attachments');
 
     return view('purchase.bills.show', compact('bill'));
 	}
@@ -722,6 +736,9 @@ public function index(Request $request)
 	                'igst_amount'              => $igstAmt,
 	                'total_amount'             => $totalLine,
 	                'account_id'               => $lineInput['account_id'] ?? null,
+	                'serial_no'                => $lineInput['serial_no'] ?? null,
+	                'machine_make'             => $lineInput['machine_make'] ?? null,
+	                'machine_model'            => $lineInput['machine_model'] ?? null,
 	                'line_no'                  => $lineNo++,
 	            ];
 
@@ -754,6 +771,7 @@ public function index(Request $request)
 
                 // Phase-B: allow splitting expense lines across projects
                 $lineProjectId = $expInput['project_id'] ?? null;
+                $machineId = $expInput['machine_id'] ?? null;
                 if (empty($lineProjectId) && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
@@ -809,6 +827,7 @@ public function index(Request $request)
 	                $bill->expenseLines()->create([
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
+                    'machine_id'   => $machineId,
                     'is_reverse_charge' => $isReverseCharge,
 	                    'description'  => $description,
 	                    'basic_amount' => $basic,
