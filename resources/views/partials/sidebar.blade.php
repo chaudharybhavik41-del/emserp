@@ -1661,6 +1661,7 @@
                     @php
                         $rTrialBalance        = $pickRoute(['accounting.reports.trial-balance', 'reports.trial-balance']);
                         $rLedger              = $pickRoute(['accounting.reports.ledger', 'reports.ledger']);
+                        $rMachineExpenseLedger = $pickRoute(['accounting.reports.machine-expense-ledger', 'reports.machine-expense-ledger']);
                         $rDayBook             = $pickRoute(['accounting.reports.day-book', 'reports.day-book']);
                         $rProfitLoss          = $pickRoute(['accounting.reports.profit-loss', 'reports.profit-loss']);
                         $rBalanceSheet        = $pickRoute(['accounting.reports.balance-sheet', 'reports.balance-sheet']);
@@ -1684,7 +1685,7 @@
 
                     @can('accounting.reports.view')
                         @if(
-                            $rTrialBalance || $rLedger || $rDayBook || $rProfitLoss || $rBalanceSheet ||
+                            $rTrialBalance || $rLedger || $rMachineExpenseLedger || $rDayBook || $rProfitLoss || $rBalanceSheet ||
                             $rInventoryValuation || $rProjectCostSheet ||
                             $rSupplierOutstanding || $rClientOutstanding || $rSupplierAgeing || $rClientAgeing ||
                             $rCashFlow || $rFundFlow || $rUnbalancedVouchers || $rTdsCertificates || $rGstSummary ||
@@ -1714,6 +1715,18 @@
                                           {{ $isRoute(['accounting.reports.ledger', 'reports.ledger']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-journals me-2"></i>
                                     <span>Ledger</span>
+                                </a>
+                            </li>
+                        @endif
+
+
+                        @if($rMachineExpenseLedger)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rMachineExpenseLedger) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.reports.machine-expense-ledger', 'reports.machine-expense-ledger']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-gear-wide-connected me-2"></i>
+                                    <span>Machine Expense Ledger</span>
                                 </a>
                             </li>
                         @endif

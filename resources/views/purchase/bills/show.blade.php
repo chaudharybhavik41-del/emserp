@@ -225,7 +225,7 @@
                     </tbody>
                     <tfoot>
                     <tr>
-                        <th colspan="5" class="text-end">Totals</th>
+                        <th colspan="6" class="text-end">Totals</th>
                         <th class="text-end">{{ number_format((float) $itemBasic, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemCgst, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemSgst, 2) }}</th>
@@ -252,6 +252,7 @@
                             <th>#</th>
                             <th>Ledger</th>
                             <th>Project</th>
+                            <th>Machine</th>
                             <th>Desc</th>
                             <th class="text-center">RCM</th>
                             <th class="text-end">Basic</th>
@@ -283,6 +284,7 @@
                                         <span class="text-muted">—</span>
                                     @endif
                                 </td>
+                                <td>{{ $line->machine ? ($line->machine->asset_code . ' - ' . $line->machine->name) : '—' }}</td>
                                 <td>{{ $line->description ?: '—' }}</td>
                                 <td class="text-center">
                                     @if($line->is_reverse_charge)
@@ -301,7 +303,7 @@
                         </tbody>
                         <tfoot>
                         <tr>
-                            <th colspan="5" class="text-end">Totals</th>
+                            <th colspan="6" class="text-end">Totals</th>
                             <th class="text-end">{{ number_format((float) $expBasic, 2) }}</th>
                             <th class="text-end">{{ number_format((float) $expCgst, 2) }}</th>
                             <th class="text-end">{{ number_format((float) $expSgst, 2) }}</th>

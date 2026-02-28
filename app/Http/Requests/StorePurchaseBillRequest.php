@@ -66,6 +66,7 @@ class StorePurchaseBillRequest extends FormRequest
             'expense_lines.*.id'             => ['nullable', 'integer'],
             'expense_lines.*.account_id'     => ['nullable', 'integer', Rule::exists('accounts', 'id')],
             'expense_lines.*.project_id'     => ['nullable', 'integer', Rule::exists('projects', 'id')],
+            'expense_lines.*.machine_id'     => ['nullable', 'integer', Rule::exists('fixed_assets', 'id')->where(fn ($q) => $q->where('asset_type', 'machinery'))],
             'expense_lines.*.description'    => ['nullable', 'string', 'max:500'],
             'expense_lines.*.amount'         => ['nullable', 'numeric', 'min:0'],
             'expense_lines.*.tax_rate'       => ['nullable', 'numeric', 'min:0', 'max:100'],
