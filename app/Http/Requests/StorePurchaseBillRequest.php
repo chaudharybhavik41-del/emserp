@@ -15,6 +15,10 @@ class StorePurchaseBillRequest extends FormRequest
 
     public function rules(): array
     {
+        $expenseMachineRule = Schema::hasTable('machines')
+            ? ['nullable', 'integer', Rule::exists('machines', 'id')]
+            : ['nullable'];
+
         $rules = [
             'supplier_id'        => ['required', 'integer', Rule::exists('parties', 'id')],
             'supplier_branch_id' => ['nullable', 'integer'],

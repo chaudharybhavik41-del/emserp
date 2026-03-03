@@ -28,6 +28,7 @@
                         <th style="width: 12%">Issue No</th>
                         <th style="width: 10%">Date</th>
                         <th style="width: 22%">Project</th>
+                        <th style="width: 16%">Purpose / Machine</th>
                         <th style="width: 22%">Contractor / Person</th>
                         <th style="width: 12%">Requisition</th>
                         <th style="width: 10%">Status</th>
@@ -44,6 +45,16 @@
                                     {{ $issue->project->code }} - {{ $issue->project->name }}
                                 @else
                                     -
+                                @endif
+                            </td>
+                            <td>
+                                @if(($issue->issue_purpose ?? 'general') === 'machine_spare')
+                                    <span class="badge bg-info text-dark">Machine Spare</span>
+                                    <div class="small text-muted mt-1">
+                                        {{ $issue->machine?->code ? ($issue->machine->code . ' - ') : '' }}{{ $issue->machine?->name ?: '-' }}
+                                    </div>
+                                @else
+                                    <span class="badge bg-secondary">General</span>
                                 @endif
                             </td>
                             <td>
@@ -114,7 +125,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-3">
+                            <td colspan="8" class="text-center text-muted py-3">
                                 No store issues yet.
                             </td>
                         </tr>

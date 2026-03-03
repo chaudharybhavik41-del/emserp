@@ -4,7 +4,6 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use RuntimeException;
 
 /**
  * Accounting: Hierarchical (Tally-style) Account Code Prefixes
@@ -138,16 +137,27 @@ return new class extends Migration
                 foreach ($oldPrefixes as $oldPrefix) {
                     $oldPrefix = (string) $oldPrefix;
 
-                    // Update only numeric 7-digit codes: oldPrefix + 3 digits
-                    DB::statement(
-                        "UPDATE accounts
-                         SET code = CONCAT(?, RIGHT(code, 3))
-                         WHERE company_id = ?
-                           AND code REGEXP '^[0-9]+$'
-                           AND LENGTH(code) = 7
-                           AND code LIKE CONCAT(?, '%')",
-                        [$newPrefix, $companyId, $oldPrefix]
-                    );
+                    // Update only numeric 7-digit codes: oldPrefix + 3 digits.
+                    // Keep this logic DB-driver neutral (SQLite-compatible).
+                    DB::table('accounts')
+                        ->where('company_id', $companyId)
+                        ->where('code', 'like', $oldPrefix . '%')
+                        ->orderBy('id')
+                        ->chunkById(500, function ($accounts) use ($newPrefix) {
+                            foreach ($accounts as $account) {
+                                $code = (string) ($account->code ?? '');
+                                if (! preg_match('/^\d{7}$/', $code)) {
+                                    continue;
+                                }
+
+                                DB::table('accounts')
+                                    ->where('id', (int) $account->id)
+                                    ->update([
+                                        'code' => $newPrefix . substr($code, -3),
+                                        'updated_at' => now(),
+                                    ]);
+                            }
+                        });
                 }
             }
 
@@ -168,15 +178,24 @@ return new class extends Migration
                 $prefix = (string) $prefix;
 
                 // Max of the last 3 digits for numeric codes like PREFIX### in this company.
-                $maxSuffix = DB::table('accounts')
+                $maxSuffix = 0;
+                $codes = DB::table('accounts')
                     ->where('company_id', $companyId)
-                    ->whereRaw("code REGEXP '^[0-9]+$'")
-                    ->whereRaw('LENGTH(code) = 7')
                     ->where('code', 'like', $prefix . '%')
-                    ->selectRaw('MAX(CAST(RIGHT(code, 3) AS UNSIGNED)) as mx')
-                    ->value('mx');
+                    ->pluck('code');
 
-                $maxSuffix = (int) ($maxSuffix ?: 0);
+                foreach ($codes as $code) {
+                    $code = (string) $code;
+                    if (! preg_match('/^\d{7}$/', $code)) {
+                        continue;
+                    }
+
+                    $suffix = (int) substr($code, -3);
+                    if ($suffix > $maxSuffix) {
+                        $maxSuffix = $suffix;
+                    }
+                }
+
                 $next = $maxSuffix > 0 ? ($maxSuffix + 1) : 1;
 
                 DB::table('account_code_sequences')
@@ -191,8 +210,14 @@ return new class extends Migration
 
         // 5) Add company_id + prefix uniqueness guardrail (prevents duplicate series like 3099 reused)
         try {
-            $idx = DB::select("SHOW INDEX FROM account_code_sequences WHERE Key_name = 'acc_code_seq_company_prefix_uq'");
-            if (empty($idx)) {
+            if (DB::getDriverName() === 'mysql') {
+                $idx = DB::select("SHOW INDEX FROM account_code_sequences WHERE Key_name = 'acc_code_seq_company_prefix_uq'");
+                if (empty($idx)) {
+                    Schema::table('account_code_sequences', function (Blueprint $table) {
+                        $table->unique(['company_id', 'prefix'], 'acc_code_seq_company_prefix_uq');
+                    });
+                }
+            } else {
                 Schema::table('account_code_sequences', function (Blueprint $table) {
                     $table->unique(['company_id', 'prefix'], 'acc_code_seq_company_prefix_uq');
                 });
@@ -205,7 +230,6 @@ return new class extends Migration
     public function down(): void
     {
         // Not reversible safely (would require restoring old prefixes + codes).
-        throw new RuntimeException('Down migration is not supported for hierarchical account code migration.');
+        throw new \RuntimeException('Down migration is not supported for hierarchical account code migration.');
     }
 };
-

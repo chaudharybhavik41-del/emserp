@@ -12,9 +12,18 @@ use App\Models\Production\ProductionPlanItem;
 use App\Services\Production\ProductionAudit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProductionDispatchController extends Controller
 {
+    protected function activityNeedsTraceability($code, $name, $isFitup): bool
+    {
+        $codeText = strtoupper((string) $code);
+        $nameText = strtoupper((string) $name);
+
+        return (bool) $isFitup || str_contains($codeText, 'CUT') || str_contains($nameText, 'CUT');
+    }
+
     public function __construct()
     {
         $this->middleware('permission:production.dispatch.view')->only(['index', 'show']);
@@ -24,15 +33,80 @@ class ProductionDispatchController extends Controller
 
     public function index(Project $project)
     {
-        $dispatches = ProductionDispatch::query()
+        $query = ProductionDispatch::query()
             ->where('project_id', $project->id)
-            ->with(['client', 'plan'])
+            ->with(['client', 'plan']);
+
+        $q = trim((string) request('q', ''));
+        if ($q !== '') {
+            $query->where(function ($builder) use ($q) {
+                $builder->where('dispatch_number', 'like', '%' . $q . '%')
+                    ->orWhere('vehicle_number', 'like', '%' . $q . '%')
+                    ->orWhere('lr_number', 'like', '%' . $q . '%')
+                    ->orWhere('transporter_name', 'like', '%' . $q . '%')
+                    ->orWhereHas('client', function ($clientQuery) use ($q) {
+                        $clientQuery->where('name', 'like', '%' . $q . '%');
+                    })
+                    ->orWhereHas('plan', function ($planQuery) use ($q) {
+                        $planQuery->where('plan_number', 'like', '%' . $q . '%');
+                    });
+            });
+        }
+
+        $status = trim((string) request('status', ''));
+        if ($status !== '') {
+            $query->where('status', $status);
+        }
+
+        if ($clientId = (int) request('client_party_id', 0)) {
+            $query->where('client_party_id', $clientId);
+        }
+
+        if ($planId = (int) request('production_plan_id', 0)) {
+            $query->where('production_plan_id', $planId);
+        }
+
+        $dateFrom = trim((string) request('date_from', ''));
+        if ($dateFrom !== '') {
+            $query->whereDate('dispatch_date', '>=', $dateFrom);
+        }
+
+        $dateTo = trim((string) request('date_to', ''));
+        if ($dateTo !== '') {
+            $query->whereDate('dispatch_date', '<=', $dateTo);
+        }
+
+        $sort = (string) request('sort', '');
+        $dir = strtolower((string) request('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $sortable = ['dispatch_number', 'dispatch_date', 'status', 'total_qty', 'total_weight_kg', 'created_at', 'id'];
+        if ($sort !== '' && in_array($sort, $sortable, true)) {
+            $query->orderBy($sort, $dir);
+        } else {
+            $query->orderByDesc('id');
+        }
+
+        $perPage = (int) request('per_page', 25);
+        if (! in_array($perPage, [10, 25, 50, 100], true)) {
+            $perPage = 25;
+        }
+
+        $dispatches = $query->paginate($perPage)->withQueryString();
+
+        $clients = Party::query()
+            ->where('is_client', true)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $plans = ProductionPlan::query()
+            ->where('project_id', $project->id)
             ->orderByDesc('id')
-            ->paginate(20);
+            ->get(['id', 'plan_number']);
 
         return view('projects.production_dispatches.index', [
             'project' => $project,
             'dispatches' => $dispatches,
+            'clients' => $clients,
+            'plans' => $plans,
         ]);
     }
 
@@ -184,6 +258,40 @@ class ProductionDispatchController extends Controller
             return back()->withInput()->with('error', 'Selected components not found in the plan.');
         }
 
+        $traceabilityPendingByItem = [];
+        if (Schema::hasColumn('production_dpr_lines', 'traceability_done')) {
+            $traceRows = DB::table('production_dpr_lines as dl')
+                ->join('production_dprs as dpr', 'dpr.id', '=', 'dl.production_dpr_id')
+                ->join('production_activities as pa', 'pa.id', '=', 'dpr.production_activity_id')
+                ->where('dpr.production_plan_id', $plan->id)
+                ->where('dpr.status', 'approved')
+                ->where('dl.is_completed', 1)
+                ->whereIn('dl.production_plan_item_id', $planItems->keys()->all())
+                ->select([
+                    'dl.production_plan_item_id as plan_item_id',
+                    'dl.traceability_done',
+                    'pa.code as activity_code',
+                    'pa.name as activity_name',
+                    'pa.is_fitupp as activity_is_fitupp',
+                ])
+                ->get();
+
+            foreach ($traceRows as $row) {
+                $planItemId = (int) ($row->plan_item_id ?? 0);
+                if ($planItemId <= 0) {
+                    continue;
+                }
+
+                if (! $this->activityNeedsTraceability($row->activity_code ?? null, $row->activity_name ?? null, $row->activity_is_fitupp ?? false)) {
+                    continue;
+                }
+
+                if ((int) ($row->traceability_done ?? 0) !== 1) {
+                    $traceabilityPendingByItem[$planItemId] = true;
+                }
+            }
+        }
+
         // Build dispatched qty map (exclude cancelled)
         $alreadyDispatchedMap = ProductionDispatchLine::query()
             ->join('production_dispatches as pd', 'pd.id', '=', 'production_dispatch_lines.production_dispatch_id')
@@ -218,6 +326,13 @@ class ProductionDispatchController extends Controller
                 if (! $bomItemsById[$pi->bom_item_id]->effectiveBillable($bomItemsById)) {
                     return back()->withInput()->with('error', "Component {$pi->assembly_mark} is not marked billable for dispatch (check BOM billable flags).");
                 }
+            }
+
+            if (($traceabilityPendingByItem[(int) $planItemId] ?? false) === true) {
+                $mark = trim((string) ($pi->assembly_mark ?? ''));
+                $label = $mark !== '' ? $mark : ((string) ($pi->item_code ?? ('Item#' . $planItemId)));
+
+                return back()->withInput()->with('error', "Cannot dispatch {$label}: traceability is pending on completed DPR lines.");
             }
 
             $planned = (float) ($pi->planned_qty ?? 0);

@@ -158,6 +158,12 @@ $initNet = (float) ($bill->net_payable ?? 0);
 /* Description column bigger */
 #expense-lines-table th:nth-child(3),
 #expense-lines-table td:nth-child(3) {
+    min-width: 180px;
+}
+
+/* Description column bigger */
+#expense-lines-table th:nth-child(4),
+#expense-lines-table td:nth-child(4) {
     min-width: 250px;
 }
 
@@ -288,10 +294,17 @@ $initNet = (float) ($bill->net_payable ?? 0);
             <!-- Supplier Select -->
             <div class="flex-grow-1">
                 <select name="supplier_id" id="supplier_id"
-                    class="form-select form-select-sm select2-basic @error('supplier_id') is-invalid @enderror">
+                    class="form-select form-select-sm select2-basic @error('supplier_id') is-invalid @enderror"
+                    data-company-gst-state="{{ $companyGstStateCode }}">
                     <option value="">-- Select Supplier --</option>
                     @foreach($suppliers as $s)
-                        <option value="{{ $s->id }}" {{ (string) old('supplier_id', $bill->supplier_id) === (string) $s->id ? 'selected' : '' }}>
+                        @php
+                            $gstState = $s->gst_state_code ?: (preg_match('/^\d{2}/', (string) $s->gstin) ? substr((string) $s->gstin, 0, 2) : '');
+                        @endphp
+                        <option value="{{ $s->id }}"
+                            data-gst-state="{{ $gstState }}"
+                            data-state="{{ $s->state }}"
+                            {{ (string) old('supplier_id', $bill->supplier_id) === (string) $s->id ? 'selected' : '' }}>
                             {{ $s->name }}
                         </option>
                     @endforeach
@@ -315,7 +328,10 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
         <div class="col-lg-5">
             <label class="form-label">Supplier GSTIN / Branch</label>
-            <select name="supplier_branch_id" id="supplier_branch_id" class="form-select form-select-sm">
+            <select name="supplier_branch_id"
+                    id="supplier_branch_id"
+                    class="form-select form-select-sm @error('supplier_branch_id') is-invalid @enderror"
+                    data-selected="{{ old('supplier_branch_id', $bill->supplier_branch_id ?? '') }}">
                 <option value="">-- Use Primary GSTIN --</option>
             </select>
 
@@ -336,40 +352,64 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
         <div class="col-md-3">
             <label class="form-label">Bill Date <span class="text-danger">*</span></label>
-            <input type="date" name="bill_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="bill_date"
+                   id="bill_date"
+                   class="form-control form-control-sm @error('bill_date') is-invalid @enderror"
+                   value="{{ old('bill_date', optional($bill->bill_date)->format('Y-m-d') ?? now()->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Posting Date <span class="text-danger">*</span></label>
-            <input type="date" name="posting_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="posting_date"
+                   id="posting_date"
+                   class="form-control form-control-sm @error('posting_date') is-invalid @enderror"
+                   value="{{ old('posting_date', optional($bill->posting_date)->format('Y-m-d') ?? optional($bill->bill_date)->format('Y-m-d') ?? now()->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Due Date</label>
-            <input type="date" name="due_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="due_date"
+                   class="form-control form-control-sm @error('due_date') is-invalid @enderror"
+                   value="{{ old('due_date', optional($bill->due_date)->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Bill No <span class="text-danger">*</span></label>
-            <input type="text" name="bill_number" class="form-control form-control-sm">
+            <input type="text"
+                   name="bill_number"
+                   class="form-control form-control-sm @error('bill_number') is-invalid @enderror"
+                   value="{{ old('bill_number', $bill->bill_number) }}">
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Invoice No (Supplier)</label>
-            <input type="text" name="reference_no" class="form-control form-control-sm">
+            <input type="text"
+                   name="reference_no"
+                   id="invoice_number"
+                   class="form-control form-control-sm @error('reference_no') is-invalid @enderror"
+                   value="{{ old('reference_no', $bill->reference_no) }}">
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Challan No</label>
-            <input type="text" name="challan_number" class="form-control form-control-sm">
+            <input type="text"
+                   name="challan_number"
+                   id="challan_number"
+                   class="form-control form-control-sm @error('challan_number') is-invalid @enderror"
+                   value="{{ old('challan_number', $bill->challan_number) }}">
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Project</label>
-            <select name="project_id" class="form-select form-select-sm select2-basic">
+            <select name="project_id"
+                    id="project_id"
+                    class="form-select form-select-sm select2-basic @error('project_id') is-invalid @enderror">
                 <option value="">-- Select Project --</option>
                 @foreach($projects as $p)
-                    <option value="{{ $p->id }}">
+                    <option value="{{ $p->id }}" {{ (string) old('project_id', $bill->project_id ?? optional($bill->purchaseOrder)->project_id) === (string) $p->id ? 'selected' : '' }}>
                         {{ $p->code }} - {{ $p->name }}
                     </option>
                 @endforeach
@@ -389,31 +429,46 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
         <div class="col-md-4">
             <label class="form-label">Linked Purchase Order</label>
-            <input type="text" class="form-control form-control-sm" placeholder="(Fetch GRN/PO to link)" readonly>
+            <input type="text"
+                   id="purchase_order_display"
+                   class="form-control form-control-sm"
+                   value="{{ $bill->purchaseOrder ? ($bill->purchaseOrder->code . ' - ' . optional($bill->purchaseOrder->project)->name) : '' }}"
+                   placeholder="(Fetch GRN/PO to link)"
+                   readonly>
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Currency</label>
-            <input type="text" name="currency" class="form-control form-control-sm" value="INR">
+            <input type="text"
+                   name="currency"
+                   class="form-control form-control-sm"
+                   value="{{ old('currency', $bill->currency ?? 'INR') }}">
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Exchange Rate</label>
-            <input type="number" step="0.0001" name="exchange_rate" class="form-control form-control-sm" value="1">
+            <input type="number"
+                   step="0.0001"
+                   name="exchange_rate"
+                   class="form-control form-control-sm"
+                   value="{{ old('exchange_rate', $bill->exchange_rate ?? 1) }}">
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Status</label>
             <select name="status" class="form-select form-select-sm">
-                <option value="draft">Draft</option>
-                <option value="posted">Posted</option>
-                <option value="cancelled">Cancelled</option>
+                @php $st = old('status', $bill->status ?? 'draft'); @endphp
+                <option value="draft" {{ $st === 'draft' ? 'selected' : '' }}>Draft</option>
+                <option value="posted" {{ $st === 'posted' ? 'selected' : '' }}>Posted</option>
+                <option value="cancelled" {{ $st === 'cancelled' ? 'selected' : '' }}>Cancelled</option>
             </select>
         </div>
 
         <div class="col-md-12">
             <label class="form-label">Remarks</label>
-            <textarea name="remarks" rows="2" class="form-control form-control-sm"></textarea>
+            <textarea name="remarks"
+                      rows="2"
+                      class="form-control form-control-sm">{{ old('remarks', $bill->remarks) }}</textarea>
         </div>
 
     </div>

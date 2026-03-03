@@ -8,10 +8,13 @@ use App\Models\Project;
 use App\Models\StoreStockItem;
 use App\Models\Uom;
 use App\Models\User;
+use App\Services\ApprovalNotificationService;
 use App\Services\Production\GeofenceService;
+use App\Services\Production\ProductionAudit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Http\JsonResponse;
 
 class ProductionDprController extends Controller
 {
@@ -22,6 +25,8 @@ class ProductionDprController extends Controller
         $this->middleware('permission:production.dpr.create')->only(['create','store']);
         $this->middleware('permission:production.dpr.submit')->only(['submit']);
         $this->middleware('permission:production.dpr.approve')->only(['approve']);
+        $this->middleware('permission:production.dpr.update')->only(['cancel', 'reopen']);
+        $this->middleware('permission:production.dpr.view|production.dpr.create')->only(['lookupPlans']);
     }
 
     /**
@@ -44,50 +49,138 @@ class ProductionDprController extends Controller
         return $cache;
     }
 
-    protected function resolveProjectId(Request $request, $project = null): ?int
+    protected function resolveProjectId(Request $request, $project = null): int
     {
-        $projectId = 0;
-
-        if (is_object($project)) {
-            $projectId = (int) ($project->id ?? 0);
-        } else {
-            $projectId = (int) ($project ?? 0);
-        }
-
+        $projectId = is_object($project) ? (int) ($project->id ?? 0) : (int) ($project ?? 0);
         if ($projectId <= 0) {
             $projectId = (int) $request->integer('project_id');
         }
 
-        return $projectId > 0 ? $projectId : null;
+        return $projectId;
     }
 
-    protected function resolveProjectIdFromDpr(int $dprId): ?int
+    protected function resolveProjectAndDprIds($project = null, $productionDpr = null): array
     {
-        $projectId = DB::table('production_dprs as d')
+        // Project-scoped route: /projects/{project}/production-dprs/{production_dpr}
+        if ($productionDpr !== null) {
+            $projectId = is_object($project) ? (int) ($project->id ?? 0) : (int) ($project ?? 0);
+            $dprId = is_object($productionDpr) ? (int) ($productionDpr->id ?? 0) : (int) ($productionDpr ?? 0);
+            return [$projectId, $dprId];
+        }
+
+        // Global route: /production/production-dprs/{production_dpr}
+        $dprId = is_object($project) ? (int) ($project->id ?? 0) : (int) ($project ?? 0);
+        if ($dprId <= 0) {
+            return [0, 0];
+        }
+
+        $projectId = (int) DB::table('production_dprs as d')
             ->join('production_plans as p', 'p.id', '=', 'd.production_plan_id')
             ->where('d.id', $dprId)
             ->value('p.project_id');
 
-        return $projectId ? (int) $projectId : null;
+        return [$projectId, $dprId];
     }
+
+    protected function activityNeedsTraceability($activity): bool
+    {
+        $code = strtoupper((string) ($activity->code ?? ''));
+        $name = strtoupper((string) ($activity->name ?? ''));
+        $isFitup = (bool) ($activity->is_fitupp ?? false);
+
+        return $isFitup || str_contains($code, 'CUT') || str_contains($name, 'CUT');
+    }
+
+    protected function calculateQtyByMethod(
+        string $method,
+        object $lineMeta,
+        string $activityCode = '',
+        ?string $billingUomCode = null
+    ): array {
+        $itemLabel = trim((string) ($lineMeta->item_code ?? ''));
+        if ($itemLabel === '') {
+            $itemLabel = trim((string) ($lineMeta->assembly_mark ?? ''));
+        }
+        if ($itemLabel === '') {
+            $itemLabel = 'Line#' . (int) ($lineMeta->line_id ?? 0);
+        }
+
+        $plannedQty = (float) ($lineMeta->planned_qty ?? 0);
+
+        if ($method === 'nos') {
+            if ($plannedQty <= 0) {
+                return [null, "Planned qty is missing for {$itemLabel}."];
+            }
+
+            return [$plannedQty, null];
+        }
+
+        if ($method === 'kg_from_weight') {
+            $weightKg = (float) ($lineMeta->planned_weight_kg ?? 0);
+            if ($weightKg <= 0) {
+                return [null, "Planned weight is missing for {$itemLabel}."];
+            }
+
+            if ($billingUomCode === 'MT') {
+                $weightKg = $weightKg / 1000;
+            }
+
+            return [$weightKg, null];
+        }
+
+        if ($method === 'sqm_from_area') {
+            $unitArea = (float) ($lineMeta->unit_area_m2 ?? 0);
+            if ($plannedQty <= 0 || $unitArea <= 0) {
+                return [null, "Unit area or planned qty is missing for {$itemLabel}."];
+            }
+
+            return [$unitArea * $plannedQty, null];
+        }
+
+        if ($method === 'meter_from_len') {
+            $cutLen = (float) ($lineMeta->unit_cut_length_m ?? 0);
+            $weldLen = (float) ($lineMeta->unit_weld_length_m ?? 0);
+            if ($plannedQty <= 0) {
+                return [null, "Planned qty is missing for {$itemLabel}."];
+            }
+
+            $code = strtoupper($activityCode);
+            $unitLen = 0.0;
+
+            if (str_contains($code, 'WELD') && $weldLen > 0) {
+                $unitLen = $weldLen;
+            } elseif (str_contains($code, 'CUT') && $cutLen > 0) {
+                $unitLen = $cutLen;
+            } else {
+                $unitLen = $weldLen > 0 ? $weldLen : $cutLen;
+            }
+
+            if ($unitLen <= 0) {
+                return [null, "Unit length metric is missing for {$itemLabel}."];
+            }
+
+            $meters = $unitLen * $plannedQty;
+            if ($billingUomCode === 'KM') {
+                $meters = $meters / 1000;
+            }
+
+            return [$meters, null];
+        }
+
+        return [null, 'Unsupported calculation method: ' . $method];
+    }
+
 
     public function index(Request $request, $project = null)
     {
         $projectId = $this->resolveProjectId($request, $project);
 
-        $rowsQuery = DB::table('production_dprs as d')
+        $query = DB::table('production_dprs as d')
             ->join('production_plans as p', 'p.id', '=', 'd.production_plan_id')
-            ->leftJoin('projects as pr', 'pr.id', '=', 'p.project_id')
+            ->join('projects as pr', 'pr.id', '=', 'p.project_id')
             ->leftJoin('production_activities as a', 'a.id', '=', 'd.production_activity_id')
             ->leftJoin('parties as c', 'c.id', '=', 'd.contractor_party_id')
             ->leftJoin('users as u', 'u.id', '=', 'd.worker_user_id')
-            ->orderByDesc('d.id');
-
-        if ($projectId) {
-            $rowsQuery->where('p.project_id', $projectId);
-        }
-
-        $rows = $rowsQuery
             ->select([
                 'd.*',
                 'p.plan_number',
@@ -98,51 +191,135 @@ class ProductionDprController extends Controller
                 'a.code as activity_code',
                 'c.name as contractor_name',
                 'u.name as worker_name',
-            ])
-            ->paginate(25);
+            ]);
 
-        $projects = Project::query()
+        if ($projectId > 0) {
+            $query->where('p.project_id', $projectId);
+        }
+
+        $q = trim((string) $request->get('q', ''));
+        if ($q !== '') {
+            $query->where(function ($builder) use ($q) {
+                $builder->where('p.plan_number', 'like', '%' . $q . '%')
+                    ->orWhere('a.name', 'like', '%' . $q . '%')
+                    ->orWhere('a.code', 'like', '%' . $q . '%')
+                    ->orWhere('d.shift', 'like', '%' . $q . '%')
+                    ->orWhere('d.status', 'like', '%' . $q . '%')
+                    ->orWhere('c.name', 'like', '%' . $q . '%')
+                    ->orWhere('u.name', 'like', '%' . $q . '%');
+            });
+        }
+
+        if ($planId = (int) $request->get('production_plan_id', 0)) {
+            $query->where('d.production_plan_id', $planId);
+        }
+
+        if ($activityId = (int) $request->get('production_activity_id', 0)) {
+            $query->where('d.production_activity_id', $activityId);
+        }
+
+        if ($status = trim((string) $request->get('status', ''))) {
+            $query->where('d.status', $status);
+        }
+
+        $dateFrom = trim((string) $request->get('date_from', ''));
+        if ($dateFrom !== '') {
+            $query->whereDate('d.dpr_date', '>=', $dateFrom);
+        }
+
+        $dateTo = trim((string) $request->get('date_to', ''));
+        if ($dateTo !== '') {
+            $query->whereDate('d.dpr_date', '<=', $dateTo);
+        }
+
+        $sort = (string) $request->get('sort', '');
+        $dir = strtolower((string) $request->get('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $sortable = [
+            'dpr_date' => 'd.dpr_date',
+            'plan_number' => 'p.plan_number',
+            'activity_name' => 'a.name',
+            'status' => 'd.status',
+            'created_at' => 'd.created_at',
+            'id' => 'd.id',
+        ];
+        if ($sort !== '' && isset($sortable[$sort])) {
+            $query->orderBy($sortable[$sort], $dir);
+        } else {
+            $query->orderByDesc('d.id');
+        }
+
+        $perPage = (int) $request->get('per_page', 25);
+        if (! in_array($perPage, [10, 25, 50, 100], true)) {
+            $perPage = 25;
+        }
+
+        $rows = $query->paginate($perPage)->withQueryString();
+
+        $projects = DB::table('projects')
+            ->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END")
             ->orderBy('code')
             ->orderBy('name')
-            ->get(['id', 'code', 'name']);
+            ->get(['id', 'code', 'name', 'status']);
+
+        $plans = DB::table('production_plans')
+            ->when($projectId > 0, fn ($builder) => $builder->where('project_id', $projectId))
+            ->orderByDesc('id')
+            ->get(['id', 'plan_number']);
+
+        $activities = DB::table('production_activities')
+            ->where('is_active', 1)
+            ->orderBy('default_sequence')
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
 
         return view('production.dprs.index', [
             'projectId' => $projectId,
             'rows' => $rows,
+            'plans' => $plans,
+            'activities' => $activities,
             'projects' => $projects,
         ]);
     }
 
     public function create(Request $request, $project = null)
     {
-        $projectId = $this->resolveProjectId($request, $project) ?? 0;
-        $projects = Project::query()
-            ->orderBy('code')
-            ->orderBy('name')
-            ->get(['id', 'code', 'name']);
+        $projectId = $this->resolveProjectId($request, $project);
 
-        $plans = collect();
-        $cuttingPlans = collect();
-        $stockPlates = collect();
-        $activities = DB::table('production_activities')
-            ->where('is_active', 1)
-            ->orderBy('default_sequence')
+        $projects = Project::query()
+            ->select(['id', 'code', 'name', 'status'])
+            ->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END")
+            ->orderBy('code')
             ->orderBy('name')
             ->get();
 
+        $projectRow = Project::query()
+            ->select(['id', 'code', 'name'])
+            ->find($projectId > 0 ? $projectId : null);
+
+        $plans = collect();
         if ($projectId > 0) {
             $plans = DB::table('production_plans')
                 ->where('project_id', $projectId)
                 ->where('status', 'approved')
                 ->orderByDesc('id')
                 ->get();
+        }
+
+        $activities = DB::table('production_activities')
+            ->where('is_active', 1)
+            ->orderBy('default_sequence')
+            ->orderBy('name')
+            ->get();
 
         // Cutting plan is optional for most activities, but required when activity is CUTTING.
         // We load project-level cutting plans here and filter client-side by selected plan's BOM.
+        $cuttingPlans = collect();
+        if ($projectId > 0) {
             $cuttingPlans = DB::table('cutting_plans')
                 ->where('project_id', $projectId)
                 ->orderByDesc('id')
                 ->get(['id', 'bom_id', 'name', 'grade', 'thickness_mm', 'status']);
+        }
         // Attach cutting plan plate sizes (W x L x Thk) for matching Store plates on DPR create.
         // NOTE: Cutting plan header does not store width/length; those are in cutting_plan_plates.
         if (Schema::hasTable('cutting_plan_plates') && $cuttingPlans->count() > 0) {
@@ -231,33 +408,33 @@ class ProductionDprController extends Controller
 
         // Store plates/stock selection (used for Cutting traceability: plate no / heat no linking)
         // Kept lightweight: only latest 500 available plates for this project (or common store).
-            if (Schema::hasTable('store_stock_items')) {
-                $stockPlates = DB::table('store_stock_items as s')
-                    ->join('items as it', 'it.id', '=', 's.item_id')
-                    ->where('s.status', 'available')
-                    ->where('s.material_category', 'steel_plate')
-                    ->where(function ($q) use ($projectId) {
-                        $q->whereNull('s.project_id')->orWhere('s.project_id', $projectId);
-                    })
-                    ->orderByDesc('s.id')
-                    ->limit(500)
-                    ->get([
-                        's.id',
-                        's.item_id',
-                        'it.name as item_name',
-                        's.material_category',
-                        's.project_id',
-                        's.grade',
-                        's.thickness_mm',
-                        's.width_mm',
-                        's.length_mm',
-                        's.plate_number',
-                        's.heat_number',
-                        's.mtc_number',
-                        's.qty_pcs_available',
-                        's.weight_kg_available',
-                    ]);
-            }
+        $stockPlates = collect();
+        if (Schema::hasTable('store_stock_items')) {
+            $stockPlates = DB::table('store_stock_items as s')
+                ->join('items as it', 'it.id', '=', 's.item_id')
+                ->where('s.status', 'available')
+                ->where('s.material_category', 'steel_plate')
+                ->where(function ($q) use ($projectId) {
+                    $q->whereNull('s.project_id')->orWhere('s.project_id', $projectId);
+                })
+                ->orderByDesc('s.id')
+                ->limit(500)
+                ->get([
+                    's.id',
+                    's.item_id',
+                    'it.name as item_name',
+                    's.material_category',
+                    's.project_id',
+                    's.grade',
+                    's.thickness_mm',
+                    's.width_mm',
+                    's.length_mm',
+                    's.plate_number',
+                    's.heat_number',
+                    's.mtc_number',
+                    's.qty_pcs_available',
+                    's.weight_kg_available',
+                ]);
         }
 
         $contractors = Party::query()
@@ -272,6 +449,7 @@ class ProductionDprController extends Controller
 
         return view('production.dprs.create', [
             'projectId' => $projectId,
+            'project' => $projectRow,
             'projects' => $projects,
             'plans' => $plans,
             'activities' => $activities,
@@ -282,11 +460,41 @@ class ProductionDprController extends Controller
         ]);
     }
 
+    public function lookupPlans(Request $request, $project): JsonResponse
+    {
+        $projectId = is_object($project) ? (int) ($project->id ?? 0) : (int) $project;
+        if ($projectId <= 0) {
+            return response()->json([
+                'plans' => [],
+                'default_plan_id' => null,
+            ]);
+        }
+
+        $plans = DB::table('production_plans')
+            ->where('project_id', $projectId)
+            ->where('status', 'approved')
+            ->orderByDesc('id')
+            ->get(['id', 'plan_number', 'bom_id']);
+
+        return response()->json([
+            'plans' => $plans->map(fn ($plan) => [
+                'id' => (int) ($plan->id ?? 0),
+                'plan_number' => (string) ($plan->plan_number ?? ''),
+                'bom_id' => (int) ($plan->bom_id ?? 0),
+            ])->values(),
+            'default_plan_id' => (int) ($plans->first()->id ?? 0) ?: null,
+        ]);
+    }
+
     public function store(Request $request, $project = null)
     {
         $projectId = $this->resolveProjectId($request, $project);
+        if ($projectId <= 0) {
+            return back()->withInput()->with('error', 'Please select a project first.');
+        }
 
         $rules = [
+            'project_id' => ['nullable', 'integer'],
             'production_plan_id' => ['required','integer'],
             'production_activity_id' => ['required','integer'],
             'cutting_plan_id' => ['nullable','integer'],
@@ -305,17 +513,6 @@ class ProductionDprController extends Controller
 
         $data = $request->validate($rules);
 
-        if (! $projectId && ! empty($data['production_plan_id'])) {
-            $projectId = DB::table('production_plans')
-                ->where('id', (int) $data['production_plan_id'])
-                ->value('project_id');
-            $projectId = $projectId ? (int) $projectId : null;
-        }
-
-        if (! $projectId) {
-            return back()->withErrors(['project_id' => 'Please select a project.'])->withInput();
-        }
-
         $plan = DB::table('production_plans')
             ->where('id', (int) $data['production_plan_id'])
             ->where('project_id', $projectId)
@@ -333,6 +530,41 @@ class ProductionDprController extends Controller
         if (! $activity) {
             return back()->withErrors(['production_activity_id' => 'Invalid activity.'])->withInput();
         }
+
+        $requiresMachine = (int) ($activity->requires_machine ?? 0) === 1;
+
+        $machineId = $data['machine_id'] ?? null;
+        if ($machineId === '' || $machineId === 0 || $machineId === '0') {
+            $machineId = null;
+        } else {
+            $machineId = (int) $machineId;
+        }
+
+        if ($requiresMachine && ! $machineId) {
+            return back()
+                ->withErrors(['machine_id' => 'Machine is required for the selected activity.'])
+                ->withInput();
+        }
+
+        if ($machineId && Schema::hasTable('machines')) {
+            $machineQuery = DB::table('machines')
+                ->where('id', (int) $machineId)
+                ->where('is_active', 1)
+                ->where('status', 'active');
+
+            if (Schema::hasColumn('machines', 'deleted_at')) {
+                $machineQuery->whereNull('deleted_at');
+            }
+
+            $validMachine = $machineQuery->exists();
+            if (! $validMachine) {
+                return back()
+                    ->withErrors(['machine_id' => 'Selected machine is not active/available.'])
+                    ->withInput();
+            }
+        }
+
+        $data['machine_id'] = $machineId;
 
         $activityCode = strtoupper((string) ($activity->code ?? ''));
         $isCutting = str_contains($activityCode, 'CUT');
@@ -510,7 +742,7 @@ class ProductionDprController extends Controller
             ->where('pia.production_activity_id', (int) $data['production_activity_id'])
             ->where('pia.is_enabled', 1)
             ->where('pia.status', 'pending')
-            ->whereIn('pia.qc_status', ['na','passed'])
+            ->whereIn('pia.qc_status', ['na', 'passed', 'failed'])
             ->select([
                 'pia.id as pia_id',
                 'pia.production_plan_item_id as item_id',
@@ -561,9 +793,9 @@ class ProductionDprController extends Controller
                 'production_activity_id' => (int) $data['production_activity_id'],
                 'dpr_date' => $data['dpr_date'],
                 'shift' => $data['shift'] ?? null,
-                'contractor_party_id' => $data['contractor_party_id'] ?: null,
-                'worker_user_id' => $data['worker_user_id'] ?: null,
-                'machine_id' => $data['machine_id'] ?: null,
+                'contractor_party_id' => ($data['contractor_party_id'] ?? null) ?: null,
+                'worker_user_id' => ($data['worker_user_id'] ?? null) ?: null,
+                'machine_id' => ($data['machine_id'] ?? null) ?: null,
                 'geo_latitude' => null,
                 'geo_longitude' => null,
                 'geo_accuracy_m' => null,
@@ -636,9 +868,8 @@ class ProductionDprController extends Controller
 
     public function show(Request $request, $project = null, $production_dpr = null)
     {
-        $dprId = (int) $production_dpr;
-        $projectId = $this->resolveProjectId($request, $project) ?? $this->resolveProjectIdFromDpr($dprId);
-        if (! $projectId) {
+        [$projectId, $dprId] = $this->resolveProjectAndDprIds($project, $production_dpr);
+        if ($projectId <= 0 || $dprId <= 0) {
             abort(404);
         }
 
@@ -702,52 +933,15 @@ class ProductionDprController extends Controller
             ])
             ->get();
 
-        // -------------------------------------------------------
-        // Remaining Qty helper (UI)
-        // -------------------------------------------------------
-        // Show "Done till date" (excluding this DPR) and "Remaining"
-        // so users can avoid entering qty beyond planned qty.
-        $piaIds = $lines->pluck('production_plan_item_activity_id')
-            ->filter(fn ($v) => (int) $v > 0)
-            ->map(fn ($v) => (int) $v)
-            ->unique()
-            ->values()
-            ->all();
-
-        $doneQtyByPia = [];
-        if (! empty($piaIds)) {
-            $doneQtyByPia = DB::table('production_dpr_lines as dl')
-                ->join('production_dprs as d', 'd.id', '=', 'dl.production_dpr_id')
-                ->whereIn('d.status', ['submitted', 'approved'])
-                ->where('d.id', '!=', $dprId)
-                ->whereIn('dl.production_plan_item_activity_id', $piaIds)
-                ->where('dl.is_completed', 1)
-                ->groupBy('dl.production_plan_item_activity_id')
-                ->selectRaw('dl.production_plan_item_activity_id as pia_id, COALESCE(SUM(dl.qty),0) as qty_sum')
-                ->pluck('qty_sum', 'pia_id')
-                ->map(fn ($v) => (float) $v)
-                ->all();
-        }
-
-        foreach ($lines as $ln) {
-            $planned = (float) ($ln->planned_qty ?? 0);
-            $piaId = (int) ($ln->production_plan_item_activity_id ?? 0);
-            $done = $piaId > 0 ? (float) ($doneQtyByPia[$piaId] ?? 0) : 0.0;
-
-            $remaining = $planned - $done;
-            if ($remaining < 0) {
-                $remaining = 0.0;
-            }
-
-            // Attach computed fields for Blade UI
-            $ln->qty_done_before = $done;
-            $ln->qty_remaining_before = $remaining;
-        }
-
         $uoms = Uom::orderBy('code')->get()->keyBy('id');
+
+        $projectRow = Project::query()
+            ->select(['id', 'code', 'name'])
+            ->find($projectId);
 
         return view('production.dprs.show', [
             'projectId' => $projectId,
+            'project' => $projectRow,
             'dpr' => $dpr,
             'lines' => $lines,
             'uoms' => $uoms,
@@ -756,9 +950,8 @@ class ProductionDprController extends Controller
 
     public function submit(Request $request, $project = null, $production_dpr = null)
     {
-        $dprId = (int) $production_dpr;
-        $projectId = $this->resolveProjectId($request, $project) ?? $this->resolveProjectIdFromDpr($dprId);
-        if (! $projectId) {
+        [$projectId, $dprId] = $this->resolveProjectAndDprIds($project, $production_dpr);
+        if ($projectId <= 0 || $dprId <= 0) {
             abort(404);
         }
 
@@ -779,9 +972,15 @@ class ProductionDprController extends Controller
 
         $dpr = DB::table('production_dprs as d')
             ->join('production_plans as p', 'p.id', '=', 'd.production_plan_id')
+            ->join('production_activities as a', 'a.id', '=', 'd.production_activity_id')
             ->where('d.id', $dprId)
             ->where('p.project_id', $projectId)
-            ->select('d.*')
+            ->select([
+                'd.*',
+                'a.code as activity_code',
+                'a.calculation_method',
+                'a.billing_uom_id',
+            ])
             ->first();
 
         if (! $dpr) abort(404);
@@ -803,104 +1002,80 @@ class ProductionDprController extends Controller
                 ->withInput();
         }
 
-        // -------------------------------------------------------
-        // Qty validation (server-side)
-        // -------------------------------------------------------
-        // Entered qty must not exceed remaining qty:
-        // Remaining = planned_qty - (qty already reported in OTHER submitted/approved DPRs)
-        // We exclude current DPR because it is being edited right now.
-        $payloadLines = $data['lines'] ?? [];
+        $calcMethod = (string) ($dpr->calculation_method ?? 'manual');
+        $calculatedByLineId = [];
 
-        $lineIds = [];
-        foreach ($payloadLines as $r) {
-            if (isset($r['id'])) {
-                $lineIds[] = (int) $r['id'];
-            }
-        }
-        $lineIds = array_values(array_unique(array_filter($lineIds, fn ($v) => $v > 0)));
+        if (in_array($calcMethod, ['kg_from_weight', 'meter_from_len', 'sqm_from_area', 'nos'], true)) {
+            $lineIds = collect($data['lines'] ?? [])
+                ->pluck('id')
+                ->map(fn ($value) => (int) $value)
+                ->filter(fn ($value) => $value > 0)
+                ->unique()
+                ->values()
+                ->all();
 
-        $metaById = [];
-        $piaIds = [];
-
-        if (! empty($lineIds)) {
-            $metaRows = DB::table('production_dpr_lines as l')
+            $lineMetaById = DB::table('production_dpr_lines as l')
                 ->leftJoin('production_plan_items as i', 'i.id', '=', 'l.production_plan_item_id')
                 ->where('l.production_dpr_id', $dprId)
                 ->whereIn('l.id', $lineIds)
                 ->select([
-                    'l.id',
-                    'l.production_plan_item_id',
-                    'l.production_plan_item_activity_id',
-                    'i.planned_qty',
-                    'i.item_type',
+                    'l.id as line_id',
+                    'l.qty_uom_id',
                     'i.item_code',
                     'i.assembly_mark',
+                    'i.planned_qty',
+                    'i.planned_weight_kg',
+                    'i.unit_area_m2',
+                    'i.unit_cut_length_m',
+                    'i.unit_weld_length_m',
                 ])
-                ->get();
+                ->get()
+                ->keyBy('line_id');
 
-            foreach ($metaRows as $mr) {
-                $metaById[(int) $mr->id] = $mr;
-                if (! empty($mr->production_plan_item_activity_id)) {
-                    $piaIds[] = (int) $mr->production_plan_item_activity_id;
+            $billingUomId = ! empty($dpr->billing_uom_id) ? (int) $dpr->billing_uom_id : null;
+            $billingUomCode = null;
+            if ($billingUomId) {
+                $billingUomCode = strtoupper((string) DB::table('uoms')->where('id', $billingUomId)->value('code'));
+                if ($billingUomCode === '') {
+                    $billingUomCode = null;
                 }
             }
-        }
 
-        $piaIds = array_values(array_unique(array_filter($piaIds, fn ($v) => $v > 0)));
+            $calcErrors = [];
+            foreach (($data['lines'] ?? []) as $lineInput) {
+                $lineId = (int) ($lineInput['id'] ?? 0);
+                if ($lineId <= 0 || ! isset($lineMetaById[$lineId])) {
+                    continue;
+                }
 
-        $doneQtyByPia = [];
-        if (! empty($piaIds)) {
-            $doneQtyByPia = DB::table('production_dpr_lines as dl')
-                ->join('production_dprs as d', 'd.id', '=', 'dl.production_dpr_id')
-                ->whereIn('d.status', ['submitted', 'approved'])
-                ->where('d.id', '!=', $dprId)
-                ->whereIn('dl.production_plan_item_activity_id', $piaIds)
-                ->where('dl.is_completed', 1)
-                ->groupBy('dl.production_plan_item_activity_id')
-                ->selectRaw('dl.production_plan_item_activity_id as pia_id, COALESCE(SUM(dl.qty),0) as qty_sum')
-                ->pluck('qty_sum', 'pia_id')
-                ->map(fn ($v) => (float) $v)
-                ->all();
-        }
+                $isCompleted = isset($lineInput['is_completed']) ? 1 : 0;
+                if ($isCompleted !== 1) {
+                    continue;
+                }
 
-        $qtyErrors = [];
-        foreach ($payloadLines as $idx => $r) {
-            $lineId = (int) ($r['id'] ?? 0);
-            $meta = $metaById[$lineId] ?? null;
-            if (! $meta) {
-                continue;
+                [$qty, $error] = $this->calculateQtyByMethod(
+                    $calcMethod,
+                    $lineMetaById[$lineId],
+                    (string) ($dpr->activity_code ?? ''),
+                    $billingUomCode
+                );
+
+                if ($error !== null) {
+                    $calcErrors[] = $error;
+                    continue;
+                }
+
+                $calculatedByLineId[$lineId] = [
+                    'qty' => round((float) $qty, 3),
+                    'qty_uom_id' => $billingUomId ?: ((int) ($lineMetaById[$lineId]->qty_uom_id ?? 0) ?: null),
+                ];
             }
 
-            $isCompleted = isset($r['is_completed']) ? 1 : 0;
-            if ($isCompleted !== 1) {
-                continue;
+            if (! empty($calcErrors)) {
+                return back()
+                    ->with('error', 'Cannot auto-calculate DPR qty. ' . implode(' ', array_values(array_unique($calcErrors))))
+                    ->withInput();
             }
-
-            $enteredQty = (float) ($r['qty'] ?? 0);
-            $plannedQty = (float) ($meta->planned_qty ?? 0);
-
-            $piaId = (int) ($meta->production_plan_item_activity_id ?? 0);
-            $alreadyQty = $piaId > 0 ? (float) ($doneQtyByPia[$piaId] ?? 0) : 0.0;
-
-            $remainingQty = $plannedQty - $alreadyQty;
-            if ($remainingQty < 0) {
-                $remainingQty = 0.0;
-            }
-
-            // Upper bound check
-            if ($enteredQty > $remainingQty + 0.000001) {
-                $label = ($meta->item_type === 'assembly')
-                    ? ($meta->assembly_mark ?: ('#' . $meta->production_plan_item_id))
-                    : ($meta->item_code ?: ('#' . $meta->production_plan_item_id));
-
-                $qtyErrors['lines.' . $idx . '.qty'] =
-                    'Qty for ' . $label . ' exceeds remaining qty. ' .
-                    'Planned: ' . $plannedQty . ', Already: ' . $alreadyQty . ', Remaining: ' . $remainingQty . '.';
-            }
-        }
-
-        if (! empty($qtyErrors)) {
-            return back()->withErrors($qtyErrors)->withInput();
         }
 
 
@@ -949,7 +1124,7 @@ class ProductionDprController extends Controller
             $finalOverrideReason = trim((string)($data['geo_override_reason'] ?? ''));
         }
 
-        DB::transaction(function () use ($data, $dprId, $finalGeoStatus, $finalOverrideReason) {
+        DB::transaction(function () use ($data, $dprId, $finalGeoStatus, $finalOverrideReason, $calculatedByLineId) {
             $now = now();
 
             DB::table('production_dprs')->where('id', $dprId)->update([
@@ -977,14 +1152,20 @@ class ProductionDprController extends Controller
 
                 // Checkbox handling: if not present, it's unchecked
                 $isCompleted = isset($r['is_completed']) ? 1 : 0;
-                $qty = $isCompleted ? (float) ($r['qty'] ?? 0) : 0.0;
+                $qty = (float) ($r['qty'] ?? 0);
+                $qtyUomId = $r['qty_uom_id'] ?? $line->qty_uom_id;
+
+                if ($isCompleted === 1 && isset($calculatedByLineId[$lineId])) {
+                    $qty = (float) $calculatedByLineId[$lineId]['qty'];
+                    $qtyUomId = $calculatedByLineId[$lineId]['qty_uom_id'];
+                }
 
                 DB::table('production_dpr_lines')
                     ->where('id', $lineId)
                     ->update([
                         'is_completed' => $isCompleted,
                         'qty' => $qty,
-                        'qty_uom_id' => $r['qty_uom_id'] ?? $line->qty_uom_id,
+                        'qty_uom_id' => $qtyUomId,
                         'minutes_spent' => $r['minutes_spent'] ?? null,
                         'remarks' => $r['remarks'] ?? null,
                         'updated_at' => $now,
@@ -992,15 +1173,32 @@ class ProductionDprController extends Controller
             }
         });
 
+        $notifier = app(ApprovalNotificationService::class);
+        $notifier->notifyApproversByPermission(
+            'production.dpr.approve',
+            'DPR Approval Required',
+            "DPR #{$dprId} is pending approval.",
+            [
+                'module' => 'production_dpr',
+                'production_dpr_id' => $dprId,
+                'project_id' => $projectId,
+            ],
+            $notifier->safeRoute('projects.production-dprs.show', [
+                'project' => $projectId,
+                'production_dpr' => $dprId,
+            ]),
+            'warning',
+            auth()->id()
+        );
+
         return redirect(url('/projects/'.$projectId.'/production-dprs/'.$dprId))
             ->with('success','DPR submitted. Awaiting approval.');
     }
 
     public function approve(Request $request, $project = null, $production_dpr = null)
     {
-        $dprId = (int) $production_dpr;
-        $projectId = $this->resolveProjectId($request, $project) ?? $this->resolveProjectIdFromDpr($dprId);
-        if (! $projectId) {
+        [$projectId, $dprId] = $this->resolveProjectAndDprIds($project, $production_dpr);
+        if ($projectId <= 0 || $dprId <= 0) {
             abort(404);
         }
 
@@ -1012,6 +1210,9 @@ class ProductionDprController extends Controller
             ->select([
                 'd.*',
                 'a.requires_qc',
+                'a.code',
+                'a.name',
+                'a.is_fitupp',
             ])
             ->first();
 
@@ -1029,7 +1230,9 @@ class ProductionDprController extends Controller
             return back()->with('error', 'Cannot approve DPR because no items are marked as Done.');
         }
 
-        DB::transaction(function () use ($dpr, $dprId, $projectId) {
+        $traceabilityRequired = $this->activityNeedsTraceability($dpr);
+
+        DB::transaction(function () use ($dpr, $dprId, $projectId, $traceabilityRequired) {
             $now = now();
 
             DB::table('production_dprs')->where('id', $dprId)->update([
@@ -1074,10 +1277,12 @@ class ProductionDprController extends Controller
                         'updated_at' => $now,
                     ]);
                 } else {
+                    $markDone = (! $traceabilityRequired) || ((int) ($l->traceability_done ?? 0) === 1);
+
                     DB::table('production_plan_item_activities')
                         ->where('id', (int) $l->production_plan_item_activity_id)
                         ->update([
-                            'status' => 'done',
+                            'status' => $markDone ? 'done' : 'in_progress',
                             'qc_status' => 'na',
                             'updated_at' => $now,
                         ]);
@@ -1096,13 +1301,143 @@ class ProductionDprController extends Controller
                             'status' => $pending ? 'in_progress' : 'done',
                             'updated_at' => $now,
                         ]);
+
+                    // Keep assembly lifecycle in sync:
+                    // When the plan item is fully DONE, any assemblies created for this plan item
+                    // should also be marked as COMPLETED.
+                    if (! $pending && Schema::hasTable('production_assemblies')) {
+                        DB::table('production_assemblies')
+                            ->where('production_plan_item_id', (int) $l->production_plan_item_id)
+                            ->where('status', '!=', 'completed')
+                            ->update([
+                                'status' => 'completed',
+                                'updated_at' => $now,
+                            ]);
+                    }
                 }
             }
         });
 
+        $notifier = app(ApprovalNotificationService::class);
+        $notifier->notifyUsers(
+            [
+                $dpr->submitted_by ?? null,
+                $dpr->created_by ?? null,
+                $dpr->worker_user_id ?? null,
+            ],
+            'DPR Approved',
+            "DPR #{$dprId} has been approved.",
+            [
+                'module' => 'production_dpr',
+                'production_dpr_id' => $dprId,
+                'project_id' => $projectId,
+            ],
+            $notifier->safeRoute('projects.production-dprs.show', [
+                'project' => $projectId,
+                'production_dpr' => $dprId,
+            ]),
+            'success'
+        );
+
         return redirect(url('/projects/'.$projectId.'/production-dprs/'.$dprId))
             ->with('success','DPR approved.');
     }
+
+    public function cancel(Request $request, $project = null, $production_dpr = null)
+    {
+        [$projectId, $dprId] = $this->resolveProjectAndDprIds($project, $production_dpr);
+        if ($projectId <= 0 || $dprId <= 0) {
+            abort(404);
+        }
+
+        $dpr = DB::table('production_dprs as d')
+            ->join('production_plans as p', 'p.id', '=', 'd.production_plan_id')
+            ->where('d.id', $dprId)
+            ->where('p.project_id', $projectId)
+            ->select('d.*')
+            ->first();
+
+        if (! $dpr) {
+            abort(404);
+        }
+
+        $status = (string) ($dpr->status ?? '');
+        if ($status === 'cancelled') {
+            return back()->with('error', 'DPR is already cancelled.');
+        }
+
+        if (! in_array($status, ['draft', 'submitted'], true)) {
+            return back()->with('error', 'Only draft/submitted DPR can be cancelled.');
+        }
+
+        DB::table('production_dprs')->where('id', $dprId)->update([
+            'status' => 'cancelled',
+            'updated_by' => auth()->id(),
+            'updated_at' => now(),
+        ]);
+
+        ProductionAudit::log(
+            $projectId,
+            'dpr.cancel',
+            'production_dpr',
+            $dprId,
+            'DPR cancelled',
+            [
+                'old_status' => $status,
+                'new_status' => 'cancelled',
+            ]
+        );
+
+        return redirect(url('/projects/' . $projectId . '/production-dprs/' . $dprId))
+            ->with('success', 'DPR cancelled.');
+    }
+
+    public function reopen(Request $request, $project = null, $production_dpr = null)
+    {
+        [$projectId, $dprId] = $this->resolveProjectAndDprIds($project, $production_dpr);
+        if ($projectId <= 0 || $dprId <= 0) {
+            abort(404);
+        }
+
+        $dpr = DB::table('production_dprs as d')
+            ->join('production_plans as p', 'p.id', '=', 'd.production_plan_id')
+            ->where('d.id', $dprId)
+            ->where('p.project_id', $projectId)
+            ->select('d.*')
+            ->first();
+
+        if (! $dpr) {
+            abort(404);
+        }
+
+        $status = (string) ($dpr->status ?? '');
+        if (! in_array($status, ['submitted', 'cancelled'], true)) {
+            return back()->with('error', 'Only submitted/cancelled DPR can be reopened to draft.');
+        }
+
+        DB::table('production_dprs')->where('id', $dprId)->update([
+            'status' => 'draft',
+            'submitted_by' => null,
+            'submitted_at' => null,
+            'approved_by' => null,
+            'approved_at' => null,
+            'updated_by' => auth()->id(),
+            'updated_at' => now(),
+        ]);
+
+        ProductionAudit::log(
+            $projectId,
+            'dpr.reopen',
+            'production_dpr',
+            $dprId,
+            'DPR reopened to draft',
+            [
+                'old_status' => $status,
+                'new_status' => 'draft',
+            ]
+        );
+
+        return redirect(url('/projects/' . $projectId . '/production-dprs/' . $dprId))
+            ->with('success', 'DPR reopened (draft).');
+    }
 }
-
-

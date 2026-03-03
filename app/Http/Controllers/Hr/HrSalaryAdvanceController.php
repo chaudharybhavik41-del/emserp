@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrSalaryAdvance;
 use Carbon\Carbon;
-use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -111,7 +110,7 @@ class HrSalaryAdvanceController extends Controller
             ->with('success', 'Salary advance deleted successfully.');
     }
 
-    public function approve(Request $request, HrSalaryAdvance $advance, NotificationService $notificationService): RedirectResponse
+    public function approve(Request $request, HrSalaryAdvance $advance): RedirectResponse
     {
         $validated = $request->validate([
             'approved_amount' => 'nullable|numeric|min:0',
@@ -132,19 +131,10 @@ class HrSalaryAdvanceController extends Controller
             'rejection_reason' => null,
         ]);
 
-        $notificationService->sendApprovalDecisionNotifications(
-            approver: auth()->user(),
-            requester: $advance->createdBy ?? $advance->employee?->user,
-            documentLabel: 'Salary Advance ' . ($advance->advance_number ?: ('#' . $advance->id)),
-            decision: 'approved',
-            url: route('hr.advances.salary-advances.show', $advance),
-            meta: ['hr_salary_advance_id' => $advance->id]
-        );
-
         return back()->with('success', 'Salary advance approved successfully.');
     }
 
-    public function reject(Request $request, HrSalaryAdvance $advance, NotificationService $notificationService): RedirectResponse
+    public function reject(Request $request, HrSalaryAdvance $advance): RedirectResponse
     {
         $validated = $request->validate([
             'rejection_reason' => 'required|string|max:1000',
@@ -156,16 +146,6 @@ class HrSalaryAdvanceController extends Controller
             'approved_by' => auth()->id(),
             'approved_at' => now(),
         ]);
-
-        $notificationService->sendApprovalDecisionNotifications(
-            approver: auth()->user(),
-            requester: $advance->createdBy ?? $advance->employee?->user,
-            documentLabel: 'Salary Advance ' . ($advance->advance_number ?: ('#' . $advance->id)),
-            decision: 'rejected',
-            url: route('hr.advances.salary-advances.show', $advance),
-            remarks: $validated['rejection_reason'],
-            meta: ['hr_salary_advance_id' => $advance->id]
-        );
 
         return back()->with('success', 'Salary advance rejected successfully.');
     }

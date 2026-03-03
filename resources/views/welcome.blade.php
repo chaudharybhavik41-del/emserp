@@ -6,7 +6,8 @@
 
     <meta charset="utf-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    @include('partials.pwa_head')
 
     <title>{{ config('app.name', 'EMS Infra ERP') }}</title>
 

@@ -2,6 +2,7 @@
 
 namespace App\Models\Production;
 
+use App\Models\StoreStockItem;
 use App\Models\Uom;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +17,7 @@ class ProductionDprLine extends Model
         'production_dpr_id',
         'production_plan_item_id',
         'production_plan_item_activity_id',
+        'mother_stock_item_id',
         'production_assembly_id',
         'is_completed',
         'remarks',
@@ -50,5 +52,10 @@ class ProductionDprLine extends Model
     public function qtyUom()
     {
         return $this->belongsTo(Uom::class, 'qty_uom_id');
+    }
+
+    public function motherStockItem()
+    {
+        return $this->belongsTo(StoreStockItem::class, 'mother_stock_item_id');
     }
 }

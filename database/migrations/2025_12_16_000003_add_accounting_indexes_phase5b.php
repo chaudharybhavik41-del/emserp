@@ -14,6 +14,24 @@ return new class extends Migration
      */
     private function indexExists(string $table, string $indexName): bool
     {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'sqlite') {
+            if (! preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+                return false;
+            }
+
+            $rows = DB::select(sprintf('PRAGMA index_list("%s")', $table));
+
+            foreach ($rows as $row) {
+                if ((string) ($row->name ?? '') === $indexName) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         $database = DB::connection()->getDatabaseName();
 
         $rows = DB::select(

@@ -6,6 +6,7 @@ use App\Models\Accounting\Account;
 use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherLine;
 use App\Models\MaterialReceiptLine;
+use App\Models\MachineSpareConsumption;
 use App\Models\PurchaseBillLine;
 use App\Models\StoreIssue;
 use App\Models\StoreIssueLine;
@@ -14,6 +15,7 @@ use App\Models\ActivityLog;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Carbon;
 use RuntimeException;
 
@@ -82,10 +84,13 @@ class StoreIssuePostingService
 
         $companyId = Config::get('accounting.default_company_id', 1);
         $projectId = $issue->project_id;
+        $isMachineSpareIssue = Schema::hasColumn('store_issues', 'issue_purpose')
+            && (string) ($issue->issue_purpose ?? 'general') === 'machine_spare';
 
         // Resolve configured accounts
         $wipCode        = Config::get('accounting.store.project_wip_material_account_code');
         $factoryExpCode = Config::get('accounting.store.factory_consumable_expense_account_code');
+        $machineSpareExpCode = Config::get('accounting.store.machine_maintenance_spare_expense_account_code', 'WIP-MACHINE');
 
         if (! $wipCode) {
             throw new RuntimeException('Config accounting.store.project_wip_material_account_code is not set.');
@@ -93,9 +98,15 @@ class StoreIssuePostingService
         if (! $factoryExpCode) {
             throw new RuntimeException('Config accounting.store.factory_consumable_expense_account_code is not set.');
         }
+        if ($isMachineSpareIssue && ! $machineSpareExpCode) {
+            throw new RuntimeException('Config accounting.store.machine_maintenance_spare_expense_account_code is not set.');
+        }
 
         $wipAccount           = Account::where('code', $wipCode)->first();
         $factoryExpenseAccount = Account::where('code', $factoryExpCode)->first();
+        $machineSpareExpenseAccount = $isMachineSpareIssue
+            ? Account::where('code', $machineSpareExpCode)->first()
+            : null;
 
         if (! $wipAccount) {
             throw new RuntimeException('Project WIP account not found for code: ' . $wipCode);
@@ -103,8 +114,19 @@ class StoreIssuePostingService
         if (! $factoryExpenseAccount) {
             throw new RuntimeException('Factory consumable expense account not found for code: ' . $factoryExpCode);
         }
+        if ($isMachineSpareIssue && ! $machineSpareExpenseAccount) {
+            throw new RuntimeException('Machine maintenance spare expense account not found for code: ' . $machineSpareExpCode);
+        }
 
-        return DB::transaction(function () use ($issue, $companyId, $projectId, $wipAccount, $factoryExpenseAccount) {
+        return DB::transaction(function () use (
+            $issue,
+            $companyId,
+            $projectId,
+            $isMachineSpareIssue,
+            $wipAccount,
+            $factoryExpenseAccount,
+            $machineSpareExpenseAccount
+        ) {
             // Lock header to avoid double posting in concurrent requests
             $issue = StoreIssue::whereKey($issue->getKey())
                 ->lockForUpdate()
@@ -180,7 +202,9 @@ class StoreIssuePostingService
                 }
 
                 // Determine debit account based on project or factory usage
-                $debitAccount = $projectId ? $wipAccount : $factoryExpenseAccount;
+                $debitAccount = $isMachineSpareIssue
+                    ? $machineSpareExpenseAccount
+                    : ($projectId ? $wipAccount : $factoryExpenseAccount);
 
                 // Grouped debits/credits
                 $debits[$debitAccount->id]        = ($debits[$debitAccount->id] ?? 0) + $amount;
@@ -231,10 +255,12 @@ class StoreIssuePostingService
             $voucher->save();
 
             $lineNo = 1;
+            $hasVoucherLineMachineDimension = Schema::hasColumn('voucher_lines', 'machine_id');
+            $issueMachineId = $this->resolveIssueMachineId($issue);
 
             // Post debit lines
             foreach ($debits as $accountId => $amount) {
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
@@ -244,12 +270,18 @@ class StoreIssuePostingService
                     'credit'         => 0,
                     'reference_type' => StoreIssue::class,
                     'reference_id'   => $issue->id,
-                ]);
+                ];
+
+                if ($hasVoucherLineMachineDimension) {
+                    $lineData['machine_id'] = $issueMachineId;
+                }
+
+                VoucherLine::create($lineData);
             }
 
             // Post credit lines
             foreach ($credits as $accountId => $amount) {
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
@@ -259,7 +291,13 @@ class StoreIssuePostingService
                     'credit'         => round($amount, 2),
                     'reference_type' => StoreIssue::class,
                     'reference_id'   => $issue->id,
-                ]);
+                ];
+
+                if ($hasVoucherLineMachineDimension) {
+                    $lineData['machine_id'] = $issueMachineId;
+                }
+
+                VoucherLine::create($lineData);
             }
 
             // Finalize posting (validates balance + normalizes amount_base)
@@ -365,5 +403,37 @@ class StoreIssuePostingService
         $amount = $avgRate * $issueQty;
 
         return round($amount, 2);
+    }
+
+    /**
+     * Resolve machine dimension for a Store Issue using machine spare consumption mapping.
+     * Returns a machine only when mapping is unambiguous (exactly one distinct machine).
+     */
+    protected function resolveIssueMachineId(StoreIssue $issue): ?int
+    {
+        if (
+            Schema::hasColumn('store_issues', 'machine_id')
+            && ! empty($issue->machine_id)
+        ) {
+            return (int) $issue->machine_id;
+        }
+
+        $storeIssueId = (int) $issue->id;
+        if ($storeIssueId <= 0 || ! Schema::hasTable('machine_spare_consumptions')) {
+            return null;
+        }
+
+        $machineIds = MachineSpareConsumption::query()
+            ->where('store_issue_id', $storeIssueId)
+            ->whereNotNull('machine_id')
+            ->distinct()
+            ->pluck('machine_id')
+            ->values();
+
+        if ($machineIds->count() !== 1) {
+            return null;
+        }
+
+        return (int) $machineIds->first();
     }
 }

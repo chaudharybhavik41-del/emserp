@@ -98,6 +98,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Browser push subscriptions registered by this user.
+     */
+    public function pushSubscriptions()
+    {
+        return $this->hasMany(PwaPushSubscription::class);
+    }
+
+    /**
      * Check if user account is active.
      */
     public function isActive(): bool

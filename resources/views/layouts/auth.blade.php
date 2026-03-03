@@ -2,9 +2,10 @@
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    @include('partials.pwa_head')
 
     <title>
         @hasSection('title')
@@ -184,6 +185,16 @@
 
                                 {{-- Content from child view --}}
                                 @yield('content')
+
+                                <button type="button"
+                                        class="btn btn-outline-primary auth-btn w-100 mt-3 d-none js-pwa-install"
+                                        aria-label="Install app"
+                                        title="Install app">
+                                    <i class="bi bi-download me-2"></i> Install App
+                                </button>
+                                <div id="pwaNetworkBadge"
+                                     class="badge rounded-pill text-bg-warning d-none mt-2"
+                                     aria-live="polite"></div>
 
                                 <p class="text-center text-body-secondary small mt-4 mb-0">
                                     &copy; {{ date('Y') }} {{ config('app.name') }}

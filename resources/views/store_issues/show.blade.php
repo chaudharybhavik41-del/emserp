@@ -119,11 +119,27 @@
                         @endif
                     </div>
                     <div class="col-md-3">
+                        <strong>Purpose:</strong><br>
+                        @if(($issue->issue_purpose ?? 'general') === 'machine_spare')
+                            <span class="badge bg-info text-dark">Machine Spare</span>
+                        @else
+                            <span class="badge bg-secondary">General</span>
+                        @endif
+                    </div>
+                    <div class="col-md-3">
                         <strong>Store Requisition:</strong><br>
                         @if($issue->requisition)
                             <a href="{{ route('store-requisitions.show', $issue->requisition) }}">
                                 {{ $issue->requisition->requisition_number }}
                             </a>
+                        @else
+                            -
+                        @endif
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Machine:</strong><br>
+                        @if($issue->machine)
+                            {{ $issue->machine->code ? ($issue->machine->code . ' - ') : '' }}{{ $issue->machine->name }}
                         @else
                             -
                         @endif
@@ -310,6 +326,5 @@
 
     </div>
 @endsection
-
 
 

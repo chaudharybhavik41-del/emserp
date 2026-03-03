@@ -2,10 +2,12 @@
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
     <meta name="csrf-token" content="{{ csrf_token() }}">
-<link rel="icon" type="image/x-icon" href="{{ asset('ems-favicon.ico') }}">
+    @include('partials.pwa_head')
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="icon" type="image/x-icon" href="{{ asset('ems-favicon.ico') }}">
 
     <title  class="sdd">
         @hasSection('title')
@@ -15,7 +17,6 @@
         @endif
     </title>
 
-    <style></style>
     {{-- Theme bootstrapper (prevents flash). Uses Bootstrap 5.3 color modes via data-bs-theme --}}
     <script>
         (function () {
@@ -56,27 +57,239 @@
     <link rel="stylesheet" href="{{ asset('css/erp-color-modes.css') }}">
 
     {{-- Per-page extra styles --}}
-    <style>/* Sidebar default width */
-.erp-sidebar-wrapper {
-    width: 260px;
-    transition: all 0.3s ease;
-}
-
-/* Hide sidebar on desktop */
-.sidebar-collapsed .erp-sidebar-wrapper {
-    margin-left: -260px;
-}
-
-/* Smooth main expand */
+    <style>
 .erp-main-scroll {
     transition: all 0.3s ease;
 }
 
+.erp-mobile-offcanvas {
+    --bs-offcanvas-width: min(94vw, 380px);
+}
+.erp-mobile-offcanvas .erp-sidebar {
+    width: 100%;
+    max-width: none;
+    box-shadow: none;
+}
 
+.erp-module-topnav {
+    border-top: 1px solid var(--bs-border-color-translucent);
+    background: var(--bs-tertiary-bg);
+    position: relative;
+    z-index: 1300;
+    overflow: visible;
+}
+
+.erp-module-topnav .container-fluid {
+    overflow: visible;
+}
+
+.erp-module-topbar {
+    width: 100%;
+    max-width: none;
+    display: block;
+    flex: 0 0 auto;
+    min-height: 0;
+    box-shadow: none;
+    border-right: 0 !important;
+    position: relative;
+    z-index: 1200;
+    overflow: visible;
+}
+
+.erp-module-topbar .erp-sidebar-nav {
+    overflow: visible !important;
+    height: auto;
+    min-height: auto;
+}
+
+.erp-module-topbar .erp-sidebar-nav > .p-2 {
+    padding: 0.4rem 0.35rem;
+    overflow: visible;
+    position: relative;
+}
+
+.erp-module-topbar-list {
+    display: flex;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    gap: 0.3rem;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0 0 0.15rem;
+    white-space: nowrap;
+}
+
+.erp-module-topbar-list::-webkit-scrollbar {
+    height: 6px;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section {
+    position: relative;
+    margin-bottom: 0 !important;
+    flex: 0 0 auto;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header,
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link {
+    width: 4.45rem !important;
+    min-width: 4.45rem;
+    min-height: 3.18rem;
+    height: auto;
+    padding: 0.25rem 0.2rem !important;
+    border-radius: 0.62rem;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.12rem;
+    text-align: center;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span {
+    display: inline-flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.12rem;
+    line-height: 1.05;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > i,
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > i {
+    margin: 0 !important;
+    font-size: 0.95rem;
+    line-height: 1;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > span,
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > span {
+    display: block !important;
+    font-size: 0.58rem !important;
+    font-weight: 600;
+    line-height: 1.05;
+    white-space: normal;
+    text-transform: none !important;
+    letter-spacing: 0;
+    max-width: 100%;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > .erp-chevron {
+    display: none !important;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link.active::before {
+    display: none;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse,
+.erp-module-topbar-list > .erp-sidebar-section > .collapsing {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    min-width: 16rem;
+    width: max-content;
+    max-width: min(72rem, 96vw);
+    z-index: 3000;
+    padding: 0.35rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.75rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+    transform: translateX(var(--erp-flyout-shift, 0));
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse {
+    display: none;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapsing {
+    display: block;
+    height: auto !important;
+    transition: none !important;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section.is-align-end > .collapse,
+.erp-module-topbar-list > .erp-sidebar-section.is-align-end > .collapsing {
+    left: auto;
+    right: 0;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse.show {
+    display: block;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .erp-module-topbar-list > .erp-sidebar-section:hover > .collapse,
+    .erp-module-topbar-list > .erp-sidebar-section:focus-within > .collapse {
+        display: block;
+    }
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse > ul {
+    margin: 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(10, minmax(0, auto));
+    grid-auto-columns: minmax(11.5rem, 13.5rem);
+    align-content: start;
+    gap: 0.2rem 0.35rem;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse > ul > li {
+    min-width: 0;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .collapse .erp-nav-link {
+    white-space: normal;
+}
+
+@media (max-width: 767.98px) {
+    .erp-module-topnav {
+        display: none !important;
+    }
+
+    .erp-main-scroll > .container-fluid {
+        padding: 0.75rem !important;
+    }
+    .erp-main-card {
+        border-radius: 0.5rem;
+        padding: 0.875rem !important;
+    }
+    .erp-main-card .card-header,
+    .erp-main-card .card-body {
+        padding-left: 0.875rem;
+        padding-right: 0.875rem;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .erp-topbar-right {
+        gap: 0.35rem !important;
+    }
+    .erp-topbar-right .btn-sm,
+    .erp-topbar-right .dropdown-toggle {
+        --bs-btn-padding-y: 0.2rem;
+        --bs-btn-padding-x: 0.45rem;
+    }
+    #themeToggle {
+        display: none !important;
+    }
+    .notifications-dropdown {
+        min-width: min(92vw, 360px) !important;
+        max-width: 92vw !important;
+    }
+}
 </style>
     @stack('styles')
 </head>
-<body class="bg-body-tertiary">
+<body class="bg-body-tertiary erp-shell">
+<a class="erp-skip-link" href="#main-content">Skip to content</a>
 {{-- 
     FIXED LAYOUT: 
     - Header is fixed at top
@@ -92,28 +305,17 @@
             <div class="d-flex align-items-center justify-content-between py-2">
 
                 {{-- Left: mobile menu + logo + breadcrumb --}}
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 erp-topbar-left">
 
-                    {{-- Mobile sidebar toggle --}}
-                    {{-- <button class="btn btn-outline-secondary btn-sm d-inline-flex d-md-none me-1"
-                            type="button"
-                            data-bs-toggle="offcanvas"
-                            data-bs-target="#sidebarOffcanvas"
-                            aria-controls="sidebarOffcanvas"
-                            aria-label="Toggle navigation">
-                        <i class="bi bi-list"></i>
-                    </button> --}}
-<button class="btn btn-outline-secondary btn-sm d-inline-flex d-md-none me-1"
+<button class="btn btn-outline-secondary btn-sm d-inline-flex me-1"
         type="button"
+        id="sidebarToggle"
         data-bs-toggle="offcanvas"
         data-bs-target="#sidebarOffcanvas"
         aria-controls="sidebarOffcanvas"
-        aria-label="Toggle navigation">
-    <i class="bi bi-list"></i>
-</button>
-<button class="btn btn-sm erp-hamburger-btn me-2 d-none d-lg-inline-flex" type="button" id="sidebarToggle"
-    aria-label="Toggle navigation">
-    <i class="bi bi-list"></i>
+        aria-label="Open module navigation">
+    <i class="bi bi-grid-3x3-gap"></i>
+    <span class="ms-1 d-none d-lg-inline">Modules</span>
 </button>
 
 
@@ -138,7 +340,7 @@
                 </div>
 
                 {{-- Right: per-page content + notifications + theme + user menu --}}
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 erp-topbar-right">
                     @hasSection('topbar_right')
                         @yield('topbar_right')
                     @endif
@@ -170,7 +372,7 @@
                                 @endif
                             </button>
 
-                            <div class="dropdown-menu dropdown-menu-end p-0 notifications-dropdown" aria-labelledby="notifDropdownBtn" style="min-width: 360px; max-width: 420px;">
+                            <div class="dropdown-menu dropdown-menu-end p-0 notifications-dropdown" aria-labelledby="notifDropdownBtn">
                                 <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
                                     <div class="fw-semibold small">Notifications</div>
                                     <a class="small text-decoration-none" href="{{ route('notifications.index') }}">
@@ -234,6 +436,27 @@
                             </div>
                         </div>
 
+                        <span id="pwaNetworkBadge" class="badge text-bg-warning d-none" aria-live="polite"></span>
+                        <span id="pwaSyncBadge" class="badge text-bg-info d-none" aria-live="polite"></span>
+                        <button
+                            class="btn btn-outline-secondary btn-sm d-none js-pwa-enable-notifications"
+                            type="button"
+                            aria-label="Enable browser alerts"
+                            title="Enable browser alerts"
+                        >
+                            <i class="bi bi-bell-fill me-1"></i>
+                            <span class="d-none d-xl-inline">Alerts</span>
+                        </button>
+                        <button
+                            class="btn btn-outline-secondary btn-sm d-none js-pwa-install"
+                            type="button"
+                            aria-label="Install app"
+                            title="Install app"
+                        >
+                            <i class="bi bi-download me-1"></i>
+                            <span class="d-none d-xl-inline">Install</span>
+                        </button>
+
                         {{-- Dark mode toggle --}}
                         <button
                             class="btn btn-outline-secondary btn-sm"
@@ -289,39 +512,42 @@
         </div>
     </header>
 
-    {{-- Main area: sidebar + content (fills remaining height) --}}
-    <div class="d-flex flex-grow-1 overflow-hidden">
-
-        {{-- Desktop sidebar (independent scroll) --}}
-        <aside   id="desktopSidebar" class="border-end bg-body d-none d-md-flex flex-column erp-sidebar-wrapper">
-            @include('partials.sidebar', ['sidebarId' => 'desktop'])
-        </aside>
-
-        {{-- Main content (independent scroll) --}}
-        <main class="flex-grow-1 overflow-auto erp-main-scroll">
-            <div class="container-fluid p-3">
-
-                {{-- Flash messages --}}
-                @include('partials.flash')
-
-                {{-- Optional page header (title + actions) --}}
-                @hasSection('page_header')
-                    <div class="d-flex flex-column gap-2 flex-sm-row flex-sm-wrap align-items-sm-center justify-content-sm-between mb-3">
-                        @yield('page_header')
-                    </div>
-                @endif
-
-                {{-- Main page wrapper with soft shadow --}}
-                <div class="erp-main-card">
-                    @yield('content')
-                </div>
+    @auth
+        <nav class="erp-module-topnav flex-shrink-0">
+            <div class="container-fluid px-2">
+                @include('partials.sidebar', ['sidebarId' => 'topbar', 'navigationMode' => 'topbar'])
             </div>
-        </main>
-    </div>
+        </nav>
+    @endauth
+
+    {{-- Full-width main content --}}
+    <main id="main-content" class="flex-grow-1 overflow-auto erp-main-scroll" role="main" tabindex="-1">
+        <div class="container-fluid p-3 erp-content-wrap">
+
+            {{-- Flash messages --}}
+            @include('partials.flash')
+
+            {{-- Optional page header (title + actions) --}}
+            @hasSection('page_header')
+                <div class="d-flex flex-column gap-2 flex-sm-row flex-sm-wrap align-items-sm-center justify-content-sm-between mb-3">
+                    @yield('page_header')
+                </div>
+            @endif
+
+            {{-- Main page wrapper with soft shadow --}}
+            <div class="erp-main-card">
+                @yield('content')
+            </div>
+        </div>
+    </main>
 </div>
 
-{{-- Mobile offcanvas sidebar --}}
-<div class="offcanvas offcanvas-start" tabindex="-1" id="sidebarOffcanvas" aria-labelledby="sidebarOffcanvasLabel">
+{{-- Global offcanvas module navigation --}}
+<div class="offcanvas offcanvas-start erp-mobile-offcanvas"
+     tabindex="-1"
+     id="sidebarOffcanvas"
+     aria-labelledby="sidebarOffcanvasLabel"
+     data-bs-scroll="true">
     <div class="offcanvas-header">
         <h5 class="offcanvas-title small text-uppercase text-body-secondary" id="sidebarOffcanvasLabel">
             {{ config('app.name', 'EMS Infra ERP') }}
@@ -350,24 +576,176 @@
 <script>
     document.addEventListener("DOMContentLoaded", function () {
 
-        const toggleBtn = document.getElementById("sidebarToggle");
+        const mobileSidebarEl = document.getElementById('sidebarOffcanvas');
 
-        toggleBtn.addEventListener("click", function () {
+        // Mobile UX: close offcanvas after clicking a menu link.
+        if (mobileSidebarEl) {
+            mobileSidebarEl.addEventListener('click', function (event) {
+                const link = event.target.closest('a[data-erp-menu-item][href]');
+                if (!link || !window.bootstrap) return;
+                const offcanvas = bootstrap.Offcanvas.getInstance(mobileSidebarEl);
+                if (offcanvas) offcanvas.hide();
+            });
+        }
 
-            // MOBILE
-            if (window.innerWidth < 768) {
-                let offcanvas = new bootstrap.Offcanvas(
-                    document.getElementById('sidebarOffcanvas')
-                );
-                offcanvas.toggle();
-            }
+        const topbarNav = document.querySelector('.erp-module-topbar');
+        if (topbarNav) {
+            const topbarSections = Array.from(topbarNav.querySelectorAll('.erp-module-topbar-list > .erp-sidebar-section'));
+            const isHoverCapable = function () {
+                return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+            };
 
-            // DESKTOP
-            else {
-                document.body.classList.toggle("sidebar-collapsed");
-            }
+            const getPanel = function (section) {
+                return Array.from(section.children).find(function (node) {
+                    return node.classList && (node.classList.contains('collapse') || node.classList.contains('collapsing'));
+                }) || null;
+            };
 
-        });
+            const getToggle = function (section) {
+                return Array.from(section.children).find(function (node) {
+                    return node.classList && node.classList.contains('erp-accordion-header') && node.hasAttribute('data-erp-section-toggle');
+                }) || null;
+            };
+
+            const updateFlyoutAlignment = function (section) {
+                const panel = getPanel(section);
+                if (!panel) return;
+
+                section.classList.remove('is-align-end');
+                panel.style.removeProperty('--erp-flyout-shift');
+
+                const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+                const viewportPadding = 8;
+                const isVisible = panel.classList.contains('show') || panel.classList.contains('collapsing');
+                const prevDisplay = panel.style.display;
+                const prevVisibility = panel.style.visibility;
+
+                if (!isVisible) {
+                    panel.style.display = 'block';
+                    panel.style.visibility = 'hidden';
+                }
+
+                let rect = panel.getBoundingClientRect();
+                if (rect.right > viewportWidth - viewportPadding) {
+                    section.classList.add('is-align-end');
+                    rect = panel.getBoundingClientRect();
+                }
+
+                if (rect.left < viewportPadding) {
+                    panel.style.setProperty('--erp-flyout-shift', `${viewportPadding - rect.left}px`);
+                } else if (rect.right > viewportWidth - viewportPadding) {
+                    panel.style.setProperty('--erp-flyout-shift', `${(viewportWidth - viewportPadding) - rect.right}px`);
+                }
+
+                if (!isVisible) {
+                    panel.style.display = prevDisplay;
+                    panel.style.visibility = prevVisibility;
+                }
+            };
+
+            const closeSection = function (section) {
+                const panel = getPanel(section);
+                const toggle = getToggle(section);
+                if (panel) {
+                    panel.classList.remove('show', 'collapsing');
+                    panel.style.height = '';
+                    panel.style.removeProperty('--erp-flyout-shift');
+                }
+                section.classList.remove('is-open', 'is-align-end');
+                if (toggle) {
+                    toggle.setAttribute('aria-expanded', 'false');
+                }
+            };
+
+            const closeAllSections = function (exceptSection) {
+                topbarSections.forEach(function (section) {
+                    if (exceptSection && section === exceptSection) return;
+                    closeSection(section);
+                });
+            };
+
+            const openSection = function (section) {
+                const panel = getPanel(section);
+                const toggle = getToggle(section);
+                if (!panel || !toggle) return;
+                closeAllSections(section);
+                section.classList.add('is-open');
+                panel.classList.remove('collapsing');
+                panel.style.height = '';
+                panel.classList.add('show');
+                toggle.setAttribute('aria-expanded', 'true');
+                updateFlyoutAlignment(section);
+            };
+
+            topbarSections.forEach(function (section) {
+                const panel = getPanel(section);
+                const toggle = getToggle(section);
+                const directLink = Array.from(section.children).find(function (node) {
+                    return node.tagName === 'A' && node.classList && node.classList.contains('erp-nav-link');
+                }) || null;
+
+                if (toggle && panel) {
+                    toggle.removeAttribute('data-bs-toggle');
+
+                    toggle.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (section.classList.contains('is-open')) {
+                            closeSection(section);
+                        } else {
+                            openSection(section);
+                        }
+                    });
+
+                    section.addEventListener('mouseenter', function () {
+                        if (!isHoverCapable()) return;
+                        openSection(section);
+                    });
+
+                    section.addEventListener('mouseleave', function () {
+                        if (!isHoverCapable()) return;
+                        closeSection(section);
+                    });
+
+                    panel.querySelectorAll('a').forEach(function (link) {
+                        link.addEventListener('click', function () {
+                            closeAllSections();
+                        });
+                    });
+                } else if (directLink) {
+                    directLink.addEventListener('click', function () {
+                        closeAllSections();
+                    });
+
+                    section.addEventListener('mouseenter', function () {
+                        if (!isHoverCapable()) return;
+                        closeAllSections();
+                    });
+                }
+            });
+
+            window.addEventListener('resize', function () {
+                topbarSections.forEach(function (section) {
+                    if (section.classList.contains('is-open')) {
+                        updateFlyoutAlignment(section);
+                    }
+                });
+            });
+
+            document.addEventListener('click', function (event) {
+                if (event.target.closest('.erp-module-topbar')) return;
+                closeAllSections();
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key !== 'Escape') return;
+                closeAllSections();
+            });
+
+            window.addEventListener('load', function () {
+                closeAllSections();
+            });
+        }
 
     });
 </script>

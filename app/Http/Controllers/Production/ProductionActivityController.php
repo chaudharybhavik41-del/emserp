@@ -23,11 +23,17 @@ class ProductionActivityController extends Controller
     {
         $q = trim((string) $request->get('q', ''));
         $status = (string) $request->get('status', 'active'); // active|inactive|all
+        $appliesToRaw = (string) $request->get('applies_to', '');
+        $legacyAppliesToMap = [
+            'fg' => 'part',
+            'sub_assembly' => 'assembly',
+        ];
+        $appliesTo = $legacyAppliesToMap[$appliesToRaw] ?? $appliesToRaw;
+        $requiresMachine = (string) $request->get('requires_machine', '');
+        $requiresQc = (string) $request->get('requires_qc', '');
 
         $query = ProductionActivity::query()
-            ->with('billingUom')
-            ->orderBy('default_sequence')
-            ->orderBy('name');
+            ->with('billingUom');
 
         if ($q !== '') {
             $query->where(function ($qb) use ($q) {
@@ -42,12 +48,39 @@ class ProductionActivityController extends Controller
             $query->where('is_active', false);
         }
 
-        $activities = $query->paginate(25)->withQueryString();
+        if (in_array($appliesTo, ['part', 'assembly', 'both'], true)) {
+            $query->where('applies_to', $appliesTo);
+        }
+
+        if (in_array($requiresMachine, ['1', '0'], true)) {
+            $query->where('requires_machine', $requiresMachine === '1');
+        }
+
+        if (in_array($requiresQc, ['1', '0'], true)) {
+            $query->where('requires_qc', $requiresQc === '1');
+        }
+
+        $sort = (string) $request->get('sort', '');
+        $dir = strtolower((string) $request->get('dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $sortable = ['default_sequence', 'code', 'name', 'applies_to', 'calculation_method', 'is_active', 'updated_at', 'created_at'];
+        if ($sort !== '' && in_array($sort, $sortable, true)) {
+            $query->orderBy($sort, $dir);
+        } else {
+            $query->orderBy('default_sequence')->orderBy('name');
+        }
+
+        $perPage = (int) $request->get('per_page', 25);
+        if (! in_array($perPage, [10, 25, 50, 100], true)) {
+            $perPage = 25;
+        }
+
+        $activities = $query->paginate($perPage)->withQueryString();
 
         return view('production.activities.index', [
             'activities' => $activities,
             'q' => $q,
             'status' => $status,
+            'appliesTo' => $appliesTo,
         ]);
     }
 

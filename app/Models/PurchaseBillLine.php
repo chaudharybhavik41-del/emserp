@@ -6,6 +6,7 @@ use App\Models\Accounting\Account;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseBillLine extends Model
 {
@@ -74,5 +75,11 @@ class PurchaseBillLine extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'account_id');
+    }
+
+    public function fixedAssetLinks(): HasMany
+    {
+        return $this->hasMany(FixedAssetLink::class, 'source_line_id')
+            ->where('source_type', 'purchase_bill');
     }
 }

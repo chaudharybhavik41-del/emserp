@@ -16,13 +16,15 @@ return new class extends Migration
         DB::statement("UPDATE machines SET status='active' WHERE status IS NULL OR status='' OR status='0'");
         DB::statement("UPDATE machines SET status='active' WHERE status IN ('operational','issued')");
 
-        // Enforce the enum that the code expects
-        DB::statement("
-            ALTER TABLE machines
-            MODIFY COLUMN status
-            ENUM('active','under_maintenance','breakdown','retired','disposed')
-            NOT NULL DEFAULT 'active'
-        ");
+        // Enforce enum only on MySQL (SQLite/Postgres syntax differs).
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("
+                ALTER TABLE machines
+                MODIFY COLUMN status
+                ENUM('active','under_maintenance','breakdown','retired','disposed')
+                NOT NULL DEFAULT 'active'
+            ");
+        }
     }
 
     public function down(): void

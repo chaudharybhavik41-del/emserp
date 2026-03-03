@@ -16,6 +16,9 @@ class UpdatePurchaseBillRequest extends FormRequest
     public function rules(): array
     {
         $billId = $this->route('bill')?->id ?? $this->route('purchase_bill')?->id ?? $this->route('id');
+        $expenseMachineRule = Schema::hasTable('machines')
+            ? ['nullable', 'integer', Rule::exists('machines', 'id')]
+            : ['nullable'];
 
         $rules = [
             'supplier_id'        => ['required', 'integer', Rule::exists('parties', 'id')],

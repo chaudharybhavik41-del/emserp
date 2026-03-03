@@ -14,6 +14,7 @@ use App\Models\StoreStockItem;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Carbon;
 use RuntimeException;
 
@@ -60,10 +61,16 @@ class StoreReturnPostingService
 
         $companyId = (int) Config::get('accounting.default_company_id', 1);
         $projectId = $return->project_id;
+        $return->loadMissing('issue');
+        $linkedIssue = $return->issue;
+        $isMachineSpareReturn = $linkedIssue
+            && Schema::hasColumn('store_issues', 'issue_purpose')
+            && (string) ($linkedIssue->issue_purpose ?? 'general') === 'machine_spare';
 
         // Resolve configured accounts (same as Store Issue)
         $wipCode        = Config::get('accounting.store.project_wip_material_account_code');
         $factoryExpCode = Config::get('accounting.store.factory_consumable_expense_account_code');
+        $machineSpareExpCode = Config::get('accounting.store.machine_maintenance_spare_expense_account_code', 'WIP-MACHINE');
 
         if (! $wipCode) {
             throw new RuntimeException('Config accounting.store.project_wip_material_account_code is not set.');
@@ -71,9 +78,15 @@ class StoreReturnPostingService
         if (! $factoryExpCode) {
             throw new RuntimeException('Config accounting.store.factory_consumable_expense_account_code is not set.');
         }
+        if ($isMachineSpareReturn && ! $machineSpareExpCode) {
+            throw new RuntimeException('Config accounting.store.machine_maintenance_spare_expense_account_code is not set.');
+        }
 
         $wipAccount            = Account::where('code', $wipCode)->first();
         $factoryExpenseAccount = Account::where('code', $factoryExpCode)->first();
+        $machineSpareExpenseAccount = $isMachineSpareReturn
+            ? Account::where('code', $machineSpareExpCode)->first()
+            : null;
 
         if (! $wipAccount) {
             throw new RuntimeException('Project WIP account not found for code: ' . $wipCode);
@@ -81,8 +94,19 @@ class StoreReturnPostingService
         if (! $factoryExpenseAccount) {
             throw new RuntimeException('Factory consumable expense account not found for code: ' . $factoryExpCode);
         }
+        if ($isMachineSpareReturn && ! $machineSpareExpenseAccount) {
+            throw new RuntimeException('Machine maintenance spare expense account not found for code: ' . $machineSpareExpCode);
+        }
 
-        return DB::transaction(function () use ($return, $companyId, $projectId, $wipAccount, $factoryExpenseAccount) {
+        return DB::transaction(function () use (
+            $return,
+            $companyId,
+            $projectId,
+            $isMachineSpareReturn,
+            $wipAccount,
+            $factoryExpenseAccount,
+            $machineSpareExpenseAccount
+        ) {
             // Lock header to avoid double posting in concurrent requests
             $return = StoreReturn::whereKey($return->getKey())
                 ->lockForUpdate()
@@ -100,7 +124,7 @@ class StoreReturnPostingService
                 return null;
             }
 
-            $return->loadMissing('lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.item');
+            $return->loadMissing('issue', 'lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.item');
 
             // Group amounts by debit/credit account
             $debits  = []; // [account_id => amount]
@@ -162,7 +186,9 @@ class StoreReturnPostingService
                 }
 
                 // Credit account is reversal of Store Issue debit side
-                $creditAccount = $projectId ? $wipAccount : $factoryExpenseAccount;
+                $creditAccount = $isMachineSpareReturn
+                    ? $machineSpareExpenseAccount
+                    : ($projectId ? $wipAccount : $factoryExpenseAccount);
 
                 $debits[$inventoryAccount->id]      = ($debits[$inventoryAccount->id] ?? 0) + $amount;
                 $credits[$creditAccount->id]        = ($credits[$creditAccount->id] ?? 0) + $amount;
@@ -210,10 +236,18 @@ class StoreReturnPostingService
             $voucher->save();
 
             $lineNo = 1;
+            $hasVoucherLineMachineDimension = Schema::hasColumn('voucher_lines', 'machine_id');
+            $issueMachineId = (
+                $hasVoucherLineMachineDimension
+                && $return->issue
+                && Schema::hasColumn('store_issues', 'machine_id')
+            )
+                ? ((int) ($return->issue->machine_id ?? 0) ?: null)
+                : null;
 
             // Debit (Inventory)
             foreach ($debits as $accountId => $amount) {
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
@@ -223,12 +257,16 @@ class StoreReturnPostingService
                     'credit'         => 0,
                     'reference_type' => StoreReturn::class,
                     'reference_id'   => $return->id,
-                ]);
+                ];
+                if ($hasVoucherLineMachineDimension) {
+                    $lineData['machine_id'] = $issueMachineId;
+                }
+                VoucherLine::create($lineData);
             }
 
             // Credit (WIP / Expense)
             foreach ($credits as $accountId => $amount) {
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
@@ -238,7 +276,11 @@ class StoreReturnPostingService
                     'credit'         => round($amount, 2),
                     'reference_type' => StoreReturn::class,
                     'reference_id'   => $return->id,
-                ]);
+                ];
+                if ($hasVoucherLineMachineDimension) {
+                    $lineData['machine_id'] = $issueMachineId;
+                }
+                VoucherLine::create($lineData);
             }
 
             // Finalize posting

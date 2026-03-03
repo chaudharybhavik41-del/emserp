@@ -27,6 +27,7 @@ class VoucherLine extends Model
     ];
 
     protected $casts = [
+        'machine_id' => 'integer',
         'debit'  => 'decimal:2',
         'credit' => 'decimal:2',
     ];
@@ -64,5 +65,10 @@ class VoucherLine extends Model
     public function billAllocations(): HasMany
     {
         return $this->hasMany(AccountBillAllocation::class, 'voucher_line_id');
+    }
+
+    public function fixedAssetLinks(): HasMany
+    {
+        return $this->hasMany(FixedAssetLink::class, 'voucher_line_id');
     }
 }

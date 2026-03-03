@@ -1,0 +1,180 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - button "Open module navigation" [ref=e8] [cursor=pointer]:
+            - generic [ref=e9]: 
+            - generic [ref=e10]: Modules
+          - link "EMS Infra Project LLP EMS Infra Project LLP" [ref=e11] [cursor=pointer]:
+            - /url: https://emsinfra.co.in/dashboard
+            - img "EMS Infra Project LLP" [ref=e12]
+            - generic [ref=e13]: EMS Infra Project LLP
+        - generic [ref=e14]:
+          - button "Notifications" [ref=e16] [cursor=pointer]:
+            - generic [ref=e17]: 
+          - button "Enable browser alerts" [ref=e18] [cursor=pointer]:
+            - generic [ref=e19]: 
+            - generic [ref=e20]: Alerts
+          - text: 
+          - button "Switch to dark mode" [ref=e21] [cursor=pointer]:
+            - generic [ref=e22]: 
+          - generic [ref=e23]:
+            - button " QA Prod Sep Bot" [ref=e24] [cursor=pointer]:
+              - generic [ref=e25]: 
+              - generic [ref=e26]: QA Prod Sep Bot
+            - text:  
+    - navigation [ref=e27]:
+      - navigation [ref=e29]:
+        - list [ref=e32]:
+          - listitem [ref=e33]:
+            - link " Reports Hub" [ref=e34] [cursor=pointer]:
+              - /url: https://emsinfra.co.in/reports-hub
+              - generic [ref=e35]: 
+              - generic [ref=e36]: Reports Hub
+          - listitem [ref=e37]:
+            - button " Core & Settings" [ref=e38] [cursor=pointer]:
+              - generic [ref=e39]:
+                - generic [ref=e40]: 
+                - generic [ref=e41]: Core & Settings
+              - text: 
+            - text:            
+          - listitem [ref=e42]:
+            - button " Security & Audit" [ref=e43] [cursor=pointer]:
+              - generic [ref=e44]:
+                - generic [ref=e45]: 
+                - generic [ref=e46]: Security & Audit
+              - text: 
+            - text:   
+          - listitem [ref=e47]:
+            - button " Support" [ref=e48] [cursor=pointer]:
+              - generic [ref=e49]:
+                - generic [ref=e50]: 
+                - generic [ref=e51]: Support
+              - text: 
+            - text:  
+          - listitem [ref=e52]:
+            - button " Material Masters" [ref=e53] [cursor=pointer]:
+              - generic [ref=e54]:
+                - generic [ref=e55]: 
+                - generic [ref=e56]: Material Masters
+              - text: 
+            - text:     
+          - listitem [ref=e57]:
+            - button " CRM" [ref=e58] [cursor=pointer]:
+              - generic [ref=e59]:
+                - generic [ref=e60]: 
+                - generic [ref=e61]: CRM
+              - text: 
+            - text:   
+          - listitem [ref=e62]:
+            - button " HR" [ref=e63] [cursor=pointer]:
+              - generic [ref=e64]:
+                - generic [ref=e65]: 
+                - generic [ref=e66]: HR
+              - text: 
+            - text:                                         
+          - listitem [ref=e67]:
+            - button " Purchase" [ref=e68] [cursor=pointer]:
+              - generic [ref=e69]:
+                - generic [ref=e70]: 
+                - generic [ref=e71]: Purchase
+              - text: 
+            - text:    
+          - listitem [ref=e72]:
+            - button " Store" [ref=e73] [cursor=pointer]:
+              - generic [ref=e74]:
+                - generic [ref=e75]: 
+                - generic [ref=e76]: Store
+              - text: 
+            - text:                       
+          - listitem [ref=e77]:
+            - button " Accounting" [ref=e78] [cursor=pointer]:
+              - generic [ref=e79]:
+                - generic [ref=e80]: 
+                - generic [ref=e81]: Accounting
+              - text: 
+            - text:                                      
+          - listitem [ref=e82]:
+            - button " Production" [ref=e83] [cursor=pointer]:
+              - generic [ref=e84]:
+                - generic [ref=e85]: 
+                - generic [ref=e86]: Production
+              - text: 
+            - text:         
+          - listitem [ref=e87]:
+            - button " Projects" [ref=e88] [cursor=pointer]:
+              - generic [ref=e89]:
+                - generic [ref=e90]: 
+                - generic [ref=e91]: Projects
+              - text: 
+            - text:  
+          - listitem [ref=e92]:
+            - button " Storage" [ref=e93] [cursor=pointer]:
+              - generic [ref=e94]:
+                - generic [ref=e95]: 
+                - generic [ref=e96]: Storage
+              - text: 
+            - text:  
+          - listitem [ref=e97]:
+            - button " Task Management" [ref=e98] [cursor=pointer]:
+              - generic [ref=e99]:
+                - generic [ref=e100]: 
+                - generic [ref=e101]: Task Management
+              - text: 
+            - text:      
+    - main [ref=e102]:
+      - generic [ref=e103]:
+        - generic [ref=e105]:
+          - heading "Dashboard" [level=1] [ref=e106]
+          - text: Interactive KPIs & trends across modules.
+        - generic [ref=e107]:
+          - tablist [ref=e108]:
+            - tab "Overview" [selected] [ref=e109] [cursor=pointer]
+            - tab "Operations" [ref=e110] [cursor=pointer]
+            - tab "Finance" [ref=e111] [cursor=pointer]
+          - tabpanel [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e117]:
+                - heading "Welcome back" [level=5] [ref=e118]
+                - paragraph [ref=e119]: You are logged in as QA Prod Sep Bot.
+                - generic [ref=e120]:
+                  - link "Leads" [ref=e121] [cursor=pointer]:
+                    - /url: https://emsinfra.co.in/crm/leads
+                  - link "Quotations" [ref=e122] [cursor=pointer]:
+                    - /url: https://emsinfra.co.in/crm/quotations
+                  - link "Projects" [ref=e123] [cursor=pointer]:
+                    - /url: https://emsinfra.co.in/projects
+                  - link "GRN" [ref=e124] [cursor=pointer]:
+                    - /url: https://emsinfra.co.in/material-receipts
+                  - link "Vouchers" [ref=e125] [cursor=pointer]:
+                    - /url: https://emsinfra.co.in/accounting/vouchers
+              - generic [ref=e127]:
+                - generic [ref=e131]:
+                  - generic [ref=e132]:
+                    - generic [ref=e133]: Net (MTD)
+                    - generic [ref=e134]: "0"
+                    - generic [ref=e135]: Receipts − Payments
+                  - generic [ref=e136]: 
+                - generic [ref=e140]:
+                  - generic [ref=e141]:
+                    - generic [ref=e142]: Cash/Bank Net
+                    - generic [ref=e143]: "-1,54,94,497.66"
+                    - generic [ref=e144]: Ledger net (posted)
+                  - generic [ref=e145]: 
+                - generic [ref=e149]:
+                  - generic [ref=e150]:
+                    - generic [ref=e151]: GRN (MTD)
+                    - generic [ref=e152]: "0"
+                    - generic [ref=e153]: Material receipts
+                  - generic [ref=e154]: 
+                - generic [ref=e158]:
+                  - generic [ref=e159]:
+                    - generic [ref=e160]: Issues (MTD)
+                    - generic [ref=e161]: "0"
+                    - generic [ref=e162]: Store issues posted
+                  - generic [ref=e163]: 
+            - generic [ref=e164]: "Tip: Explore Operations and Finance tabs for charts."
+  - text:                                                                                                                                                      

@@ -4,12 +4,12 @@
 
 @section('content')
 @php
-    $pid = (int) ($projectId ?? 0);
+    $projectId = (int) ($projectId ?? request()->integer('project_id') ?? 0);
 @endphp
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="mb-0"><i class="bi bi-plus-circle"></i> Create Production Plan from BOM</h2>
-        <a href="{{ $pid > 0 ? route('projects.production-plans.index', ['project' => $pid]) : url('/projects') }}" class="btn btn-outline-secondary">
+        <a href="{{ $projectId > 0 ? route('projects.production-plans.index', ['project' => $projectId]) : route('production.production-plans.index') }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Back
         </a>
     </div>
@@ -26,10 +26,11 @@
 
     <div class="card">
         <div class="card-body">
-            <form method="GET" action="{{ $pid > 0 ? route('projects.production-plans.from-bom', ['project' => $pid]) : url()->current() }}" class="row g-2 mb-3">
+            <form method="GET" action="{{ route('production.production-plans.index') }}" class="row g-2 mb-3">
                 <div class="col-md-8">
                     <label class="form-label">Select Project</label>
-                    <select name="project_id" class="form-select" onchange="this.form.submit()">
+                    <select name="project_id" class="form-select"
+                        onchange="if (this.value) { window.location.href='{{ url('/projects') }}/' + this.value + '/production-plans/from-bom'; } else { window.location.href='{{ route('production.production-plans.index') }}'; }">
                         <option value="">— Select —</option>
                         @foreach($projects as $p)
                             <option value="{{ $p->id }}" {{ (string)$projectId === (string)$p->id ? 'selected' : '' }}>
@@ -39,13 +40,13 @@
                     </select>
                 </div>
                 <div class="col-md-4 d-flex align-items-end justify-content-end">
-                    <a href="{{ url()->current() }}" class="btn btn-outline-secondary">
+                    <a href="{{ route('production.production-plans.index') }}" class="btn btn-outline-secondary">
                         Reset
                     </a>
                 </div>
             </form>
 
-            <form method="POST" action="{{ $pid > 0 ? route('projects.production-plans.from-bom.store', ['project' => $pid]) : url()->current() }}">
+            <form method="POST" action="{{ $projectId > 0 ? route('projects.production-plans.from-bom.store', ['project' => $projectId]) : '#' }}">
                 @csrf
                 <input type="hidden" name="project_id" value="{{ $projectId }}">
 

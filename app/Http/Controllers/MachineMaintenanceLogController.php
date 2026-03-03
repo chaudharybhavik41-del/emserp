@@ -18,6 +18,8 @@ use App\Services\MaintenanceScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class MachineMaintenanceLogController extends Controller
 {
@@ -52,7 +54,13 @@ class MachineMaintenanceLogController extends Controller
     {
         $validated = $request->validate([
             'machine_id' => 'required|exists:machines,id',
-            'maintenance_plan_id' => 'nullable|exists:machine_maintenance_plans,id',
+            'maintenance_plan_id' => [
+                'nullable',
+                Rule::exists('machine_maintenance_plans', 'id')->where(function ($q) use ($request) {
+                    $machineId = (int) $request->input('machine_id');
+                    return $q->where('machine_id', $machineId);
+                }),
+            ],
 
             // DB enum: preventive, breakdown, predictive, calibration, inspection
             'maintenance_type' => 'required|in:preventive,breakdown,predictive,calibration,inspection',
@@ -160,7 +168,14 @@ class MachineMaintenanceLogController extends Controller
         ]);
 
         // For importing spare consumption (mandatory Store Issue source)
-        $storeIssues = StoreIssue::orderByDesc('issue_date')->limit(200)->get();
+        $storeIssues = StoreIssue::query()
+            ->where(function ($q) use ($maintenance_log) {
+                $q->where('machine_id', $maintenance_log->machine_id)
+                    ->orWhereNull('machine_id'); // keep legacy compatibility
+            })
+            ->orderByDesc('issue_date')
+            ->limit(200)
+            ->get();
 
         return view('machine_maintenance.logs.show', [
             'log' => $maintenance_log,
@@ -181,7 +196,12 @@ class MachineMaintenanceLogController extends Controller
     public function update(Request $request, MachineMaintenanceLog $maintenance_log)
     {
         $validated = $request->validate([
-            'maintenance_plan_id' => 'nullable|exists:machine_maintenance_plans,id',
+            'maintenance_plan_id' => [
+                'nullable',
+                Rule::exists('machine_maintenance_plans', 'id')->where(function ($q) use ($maintenance_log) {
+                    return $q->where('machine_id', (int) $maintenance_log->machine_id);
+                }),
+            ],
             'maintenance_type' => 'required|in:preventive,breakdown,predictive,calibration,inspection',
 
             'scheduled_date' => 'nullable|date',
@@ -270,12 +290,25 @@ class MachineMaintenanceLogController extends Controller
             $issue = StoreIssue::with(['lines.stockItem', 'lines.item', 'lines.uom'])
                 ->findOrFail($storeIssueId);
 
+            // Safety: prevent importing a store issue that belongs to a different machine.
+            if (! empty($issue->machine_id) && (int) $issue->machine_id !== (int) $maintenance_log->machine_id) {
+                throw ValidationException::withMessages([
+                    'store_issue_id' => 'Selected Store Issue belongs to another machine.',
+                ]);
+            }
+
             // Prevent double-import: replace existing lines for this (log + store_issue)
             MachineSpareConsumption::where('machine_maintenance_log_id', $maintenance_log->id)
                 ->where('store_issue_id', $storeIssueId)
                 ->delete();
 
             foreach ($issue->lines as $line) {
+                if (! empty($line->machine_id) && (int) $line->machine_id !== (int) $maintenance_log->machine_id) {
+                    throw ValidationException::withMessages([
+                        'store_issue_id' => 'Selected Store Issue contains lines tagged to another machine.',
+                    ]);
+                }
+
                 $qty = (float) ($line->issued_weight_kg ?? 0);
                 if ($qty <= 0) {
                     $qty = (float) ($line->issued_qty_pcs ?? 0);

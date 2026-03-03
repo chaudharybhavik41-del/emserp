@@ -10,8 +10,6 @@ use App\Models\ClientRaBillLine;
 use App\Models\Party;
 use App\Models\Project;
 use App\Models\Uom;
-use App\Models\User;
-use App\Services\NotificationService;
 use App\Services\Accounting\SalesPostingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -453,7 +451,7 @@ class ClientRaBillController extends Controller
     /**
      * Submit for approval
      */
-    public function submit(ClientRaBill $clientRa, NotificationService $notificationService)
+    public function submit(ClientRaBill $clientRa)
     {
         if ($clientRa->status !== 'draft') {
             return back()->with('error', 'Only draft RA Bills can be submitted.');
@@ -467,32 +465,13 @@ class ClientRaBillController extends Controller
         $clientRa->updated_by = Auth::id();
         $clientRa->save();
 
-        $url = route('accounting.client-ra.show', $clientRa);
-        $notificationService->sendSystemAlertToUsers(
-            User::permission('client_ra.approve')->get(),
-            'Approval Required',
-            'Approval required for Client RA Bill ' . ($clientRa->ra_number ?: ('#' . $clientRa->id)) . '.',
-            ['client_ra_bill_id' => $clientRa->id],
-            $url,
-            'warning',
-            'approval'
-        );
-        $notificationService->sendSystemAlertToCurrentUser(
-            'Submitted for Approval',
-            'Client RA Bill ' . ($clientRa->ra_number ?: ('#' . $clientRa->id)) . ' was submitted for approval.',
-            ['client_ra_bill_id' => $clientRa->id],
-            $url,
-            'info',
-            'approval'
-        );
-
         return back()->with('success', 'RA Bill submitted for approval.');
     }
 
     /**
      * Approve RA Bill
      */
-    public function approve(ClientRaBill $clientRa, NotificationService $notificationService)
+    public function approve(ClientRaBill $clientRa)
     {
         if (!$clientRa->canBeApproved()) {
             return back()->with('error', 'RA Bill cannot be approved in current state.');
@@ -504,22 +483,13 @@ class ClientRaBillController extends Controller
         $clientRa->updated_by = Auth::id();
         $clientRa->save();
 
-        $notificationService->sendApprovalDecisionNotifications(
-            approver: Auth::user(),
-            requester: $clientRa->creator,
-            documentLabel: 'Client RA Bill ' . ($clientRa->ra_number ?: ('#' . $clientRa->id)),
-            decision: 'approved',
-            url: route('accounting.client-ra.show', $clientRa),
-            meta: ['client_ra_bill_id' => $clientRa->id]
-        );
-
         return back()->with('success', 'RA Bill approved successfully.');
     }
 
     /**
      * Reject RA Bill
      */
-    public function reject(Request $request, ClientRaBill $clientRa, NotificationService $notificationService)
+    public function reject(Request $request, ClientRaBill $clientRa)
     {
         if ($clientRa->status !== 'submitted') {
             return back()->with('error', 'Only submitted RA Bills can be rejected.');
@@ -534,16 +504,6 @@ class ClientRaBillController extends Controller
             "\n[Rejected: " . $request->rejection_reason . "]";
         $clientRa->updated_by = Auth::id();
         $clientRa->save();
-
-        $notificationService->sendApprovalDecisionNotifications(
-            approver: Auth::user(),
-            requester: $clientRa->creator,
-            documentLabel: 'Client RA Bill ' . ($clientRa->ra_number ?: ('#' . $clientRa->id)),
-            decision: 'rejected',
-            url: route('accounting.client-ra.show', $clientRa),
-            remarks: $request->rejection_reason,
-            meta: ['client_ra_bill_id' => $clientRa->id]
-        );
 
         return back()->with('success', 'RA Bill rejected.');
     }
