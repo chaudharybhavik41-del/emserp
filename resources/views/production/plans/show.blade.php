@@ -8,9 +8,6 @@
     $routeProject = request()->route('project');
     $projectId = $routeProject?->id ?? (int)($plan->project_id ?? 0);
     $planId = (int)($plan->id ?? 0);
-    $taskIndexRoute = \Illuminate\Support\Facades\Route::has('tasks.index') ? 'tasks.index' : null;
-    $taskBoardRoute = \Illuminate\Support\Facades\Route::has('task-board.index') ? 'task-board.index' : null;
-    $taskCreateRoute = \Illuminate\Support\Facades\Route::has('tasks.create') ? 'tasks.create' : null;
 @endphp
 
 <div class="container-fluid">
@@ -27,27 +24,6 @@
             <a href="{{ url('/projects/'.$projectId.'/production-plans') }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left"></i> Back
             </a>
-
-            @can('tasks.view')
-                @if($taskIndexRoute)
-                    <a href="{{ route($taskIndexRoute, ['project' => $projectId, 'bom' => $plan->bom_id, 'q' => $plan->plan_number]) }}" class="btn btn-outline-secondary">
-                        <i class="bi bi-list-task"></i> Related Tasks
-                    </a>
-                @endif
-                @if($taskBoardRoute)
-                    <a href="{{ route($taskBoardRoute, ['project' => $projectId, 'bom' => $plan->bom_id]) }}" class="btn btn-outline-secondary">
-                        <i class="bi bi-kanban"></i> Task Board
-                    </a>
-                @endif
-            @endcan
-
-            @can('tasks.create')
-                @if($taskCreateRoute)
-                    <a href="{{ route($taskCreateRoute, ['project' => $projectId, 'bom' => $plan->bom_id, 'title' => 'Production Plan '. $plan->plan_number .' follow-up', 'description' => 'Linked from Production Plan '. $plan->plan_number]) }}" class="btn btn-outline-primary">
-                        <i class="bi bi-plus-circle"></i> Add Task
-                    </a>
-                @endif
-            @endcan
 
             @if($plan->status === 'draft')
                 @can('production.plan.update')
@@ -67,6 +43,24 @@
                     </form>
                 @endcan
             @endif
+
+            @can('production.plan.update')
+                @if(in_array($plan->status, ['draft', 'approved'], true))
+                    <form method="POST" action="{{ url('/projects/'.$projectId.'/production-plans/'.$planId.'/cancel') }}" onsubmit="return confirm('Cancel this production plan?');">
+                        @csrf
+                        <button class="btn btn-outline-danger">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </button>
+                    </form>
+                @elseif($plan->status === 'cancelled')
+                    <form method="POST" action="{{ url('/projects/'.$projectId.'/production-plans/'.$planId.'/reopen') }}" onsubmit="return confirm('Reopen this plan as draft?');">
+                        @csrf
+                        <button class="btn btn-outline-warning">
+                            <i class="bi bi-arrow-clockwise"></i> Reopen
+                        </button>
+                    </form>
+                @endif
+            @endcan
         </div>
     </div>
 

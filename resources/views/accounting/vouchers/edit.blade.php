@@ -97,6 +97,9 @@
                                         <th>#</th>
                                         <th>Account</th>
                                         <th>Cost Center</th>
+                                        @if($hasMachineLineDimension)
+                                            <th>Machine</th>
+                                        @endif
                                         <th>Description</th>
                                         <th>Debit</th>
                                         <th>Credit</th>
@@ -128,6 +131,18 @@
                                                     @endforeach
                                                 </select>
                                             </td>
+                                            @if($hasMachineLineDimension)
+                                                <td>
+                                                    <select name="lines[{{ $i }}][machine_id]" class="form-select form-select-sm">
+                                                        <option value="">-- none --</option>
+                                                        @foreach($machines as $machine)
+                                                            <option value="{{ $machine->id }}" @selected((string) old("lines.$i.machine_id", $ln?->machine_id) === (string) $machine->id)>
+                                                                {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                </td>
+                                            @endif
                                             <td>
                                                 <input type="text" name="lines[{{ $i }}][description]" class="form-control form-control-sm"
                                                     value="{{ old("lines.$i.description", $ln?->description) }}">
@@ -148,13 +163,13 @@
                                 </tbody>
                                 <tfoot>
                                     <tr>
-                                        <th colspan="4" class="text-end">Total</th>
+                                        <th colspan="{{ $hasMachineLineDimension ? 5 : 4 }}" class="text-end">Total</th>
                                         <th id="total-debit">0.00</th>
                                         <th id="total-credit">0.00</th>
                                         <th id="total-diff">0.00</th>
                                     </tr>
                                     <tr>
-                                        <td colspan="7" class="text-center">
+                                        <td colspan="{{ $hasMachineLineDimension ? 8 : 7 }}" class="text-center">
                                             <span id="balance-status" class="fw-bold text-danger">Voucher not matched balanced</span>
                                         </td>
                                     </tr>
@@ -223,6 +238,16 @@
                                             @endforeach
                                         </select>
                                     </td>
+                                    @if($hasMachineLineDimension)
+                                    <td>
+                                        <select name="lines[${lineIndex}][machine_id]" class="form-select form-select-sm">
+                                            <option value="">-- none --</option>
+                                            @foreach($machines as $machine)
+                                                <option value="{{ $machine->id }}">{{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    </td>
+                                    @endif
                                     <td><input type="text" name="lines[${lineIndex}][description]" class="form-control form-control-sm"></td>
                                     <td><input type="number" step="0.01" name="lines[${lineIndex}][debit]" class="form-control form-control-sm debit"></td>
                                     <td><input type="number" step="0.01" name="lines[${lineIndex}][credit]" class="form-control form-control-sm credit"></td>

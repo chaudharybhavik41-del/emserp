@@ -91,6 +91,24 @@
                             @endif
                         </dd>
 
+                        <dt class="col-sm-4">Purpose</dt>
+                        <dd class="col-sm-8">
+                            @if(($requisition->issue_purpose ?? 'general') === 'machine_spare')
+                                <span class="badge bg-info text-dark">Machine Spare</span>
+                            @else
+                                <span class="badge bg-secondary">General</span>
+                            @endif
+                        </dd>
+
+                        <dt class="col-sm-4">Machine</dt>
+                        <dd class="col-sm-8">
+                            @if($requisition->machine)
+                                {{ $requisition->machine->code ? ($requisition->machine->code . ' - ') : '' }}{{ $requisition->machine->name }}
+                            @else
+                                -
+                            @endif
+                        </dd>
+
                         <dt class="col-sm-4">Contractor</dt>
                         <dd class="col-sm-8">
                             {{ $requisition->contractor->name ?? '-' }}

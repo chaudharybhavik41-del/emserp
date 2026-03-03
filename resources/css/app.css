@@ -529,3 +529,186 @@ body.modal-open .erp-quick-action {
 .collapsing {
   visibility: visible !important;
 }
+
+/* ============================================================================
+   INDUSTRIAL UX BASELINE (PRE-PWA)
+   ============================================================================ */
+
+:root {
+    --erp-shell-bg: #f6f8fb;
+    --erp-surface: #ffffff;
+    --erp-border-soft: #e2e8f0;
+}
+
+html,
+body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+body.erp-shell {
+    background: var(--erp-shell-bg);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+.erp-content-wrap {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+.erp-main-scroll,
+.erp-main-scroll > .container-fluid {
+    min-width: 0;
+}
+
+.erp-main-card {
+    border: 1px solid var(--erp-border-soft);
+}
+
+.erp-main-card .card {
+    border-radius: 0.5rem;
+}
+
+.erp-topbar-left,
+.erp-topbar-right {
+    min-width: 0;
+}
+
+.erp-topbar-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.js-pwa-install {
+    align-items: center;
+    white-space: nowrap;
+}
+
+.js-pwa-enable-notifications {
+    align-items: center;
+    white-space: nowrap;
+}
+
+#pwaNetworkBadge {
+    white-space: nowrap;
+}
+
+#pwaSyncBadge {
+    white-space: nowrap;
+}
+
+.notifications-dropdown {
+    min-width: 360px;
+    max-width: min(92vw, 420px);
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+}
+
+.erp-mobile-offcanvas .offcanvas-header {
+    padding-top: calc(0.75rem + env(safe-area-inset-top));
+}
+
+.erp-mobile-offcanvas .offcanvas-body {
+    display: flex;
+    min-height: 0;
+    padding: 0;
+}
+
+.erp-mobile-offcanvas .erp-sidebar {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+}
+
+.erp-skip-link {
+    position: fixed;
+    left: 0.75rem;
+    top: -3rem;
+    z-index: 1085;
+    background: #0d6efd;
+    color: #fff;
+    padding: 0.4rem 0.65rem;
+    border-radius: 0.4rem;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.erp-skip-link:focus {
+    top: 0.75rem;
+    color: #fff;
+}
+
+.form-control,
+.form-select,
+.btn {
+    border-radius: 0.5rem;
+}
+
+.table-responsive {
+    position: relative;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive::before,
+.table-responsive::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 14px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease-out;
+    z-index: 2;
+}
+
+.table-responsive::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0));
+}
+
+.table-responsive::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0));
+}
+
+.table-responsive.is-overflowing.show-left::before {
+    opacity: 1;
+}
+
+.table-responsive.is-overflowing.show-right::after {
+    opacity: 1;
+}
+
+@media (max-width: 991.98px) {
+    .btn,
+    .form-control,
+    .form-select,
+    .input-group-text {
+        min-height: 2.35rem;
+    }
+
+    .form-control,
+    .form-select {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .erp-main-card .table {
+        font-size: 0.9rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

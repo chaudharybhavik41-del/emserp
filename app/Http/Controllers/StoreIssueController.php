@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Party;
 use App\Models\Project;
+use App\Models\Machine;
 use App\Models\StoreIssue;
 use App\Models\StoreIssueLine;
 use App\Models\StoreReturnLine;
@@ -49,6 +50,7 @@ class StoreIssueController extends Controller
                 'item_name'          => $line->item?->name,
                 'uom_id'             => $line->uom_id,
                 'uom_name'           => $line->uom?->name,
+                'machine_id'         => $line->machine_id,
                 // For Store Issue (non-raw), issued_weight_kg acts as the generic issued quantity.
                 'qty'                => (float) ($line->issued_weight_kg ?? 0),
             ];
@@ -66,7 +68,7 @@ class StoreIssueController extends Controller
 
     public function index(): View
     {
-        $issues = StoreIssue::with(['project', 'contractor', 'requisition', 'voucher'])
+        $issues = StoreIssue::with(['project', 'contractor', 'requisition', 'machine', 'voucher'])
             ->orderByDesc('id')
             ->paginate(20);
 
@@ -77,13 +79,14 @@ class StoreIssueController extends Controller
     {
         $projects    = Project::orderBy('code')->get();
         $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
+        $machines    = Machine::orderBy('code')->orderBy('name')->get(['id', 'code', 'name', 'current_project_id']);
 
         $selectedRequisitionId = $request->query('store_requisition_id')
             ? (int) $request->query('store_requisition_id')
             : null;
 
         // Only requisitions with at least one line pending
-        $requisitions = StoreRequisition::with(['project', 'contractor'])
+        $requisitions = StoreRequisition::with(['project', 'contractor', 'machine'])
             ->whereHas('lines', function ($q) {
                 $q->whereColumn('issued_qty', '<', 'required_qty');
             })
@@ -98,6 +101,7 @@ class StoreIssueController extends Controller
             $selectedRequisition = StoreRequisition::with([
                 'project',
                 'contractor',
+                'machine',
                 'lines.item.uom',
             ])->find($selectedRequisitionId);
 
@@ -112,6 +116,20 @@ class StoreIssueController extends Controller
                 }
                 $pendingItemIds = array_values(array_unique(array_filter($pendingItemIds)));
             }
+        }
+
+        $selectedIssuePurpose = $selectedRequisition
+            ? (string) ($selectedRequisition->issue_purpose ?: 'general')
+            : (string) $request->query('issue_purpose', 'general');
+        if (! in_array($selectedIssuePurpose, ['general', 'machine_spare'], true)) {
+            $selectedIssuePurpose = 'general';
+        }
+
+        $selectedMachineId = $selectedRequisition
+            ? (int) ($selectedRequisition->machine_id ?? 0)
+            : (int) $request->query('machine_id');
+        if ($selectedMachineId <= 0) {
+            $selectedMachineId = null;
         }
 
         // Only non-raw material should be issued via Store Issue
@@ -147,15 +165,35 @@ class StoreIssueController extends Controller
             });
         }
 
+        if ($selectedIssuePurpose === 'machine_spare') {
+            $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
+            $excludedCategoryCodes = $this->machineSpareExcludedCategoryCodes();
+
+            if (! empty($allowedTypeCodes)) {
+                $stockItemsQuery->whereHas('item.type', function ($q) use ($allowedTypeCodes) {
+                    $q->whereIn('code', $allowedTypeCodes);
+                });
+            }
+
+            if (! empty($excludedCategoryCodes)) {
+                $stockItemsQuery->whereDoesntHave('item.category', function ($cat) use ($excludedCategoryCodes) {
+                    $cat->whereIn('code', $excludedCategoryCodes);
+                });
+            }
+        }
+
         $limit = $selectedRequisition ? 1000 : 200;
         $stockItems = $stockItemsQuery->limit($limit)->get();
 
         return view('store_issues.create', [
             'projects'              => $projects,
             'contractors'           => $contractors,
+            'machines'              => $machines,
             'requisitions'          => $requisitions,
             'selectedRequisitionId' => $selectedRequisitionId,
             'selectedRequisition'   => $selectedRequisition,
+            'selectedIssuePurpose'  => $selectedIssuePurpose,
+            'selectedMachineId'     => $selectedMachineId,
             'stockItems'            => $stockItems,
         ]);
     }
@@ -190,7 +228,9 @@ class StoreIssueController extends Controller
     {
         $rules = [
             'issue_date'             => ['required', 'date'],
+            'issue_purpose'          => ['nullable', 'string', 'in:general,machine_spare'],
             'project_id'             => ['nullable', 'integer', 'exists:projects,id'],
+            'machine_id'             => ['nullable', 'integer', 'exists:machines,id'],
             'store_requisition_id'   => ['nullable', 'integer', 'exists:store_requisitions,id'],
             'contractor_party_id'    => ['nullable', 'integer', 'exists:parties,id'],
             'contractor_person_name' => ['nullable', 'string', 'max:100'],
@@ -218,6 +258,25 @@ class StoreIssueController extends Controller
 
         $data = $request->validate($rules);
 
+        $inputIssuePurpose = (string) ($data['issue_purpose'] ?? 'general');
+        if (! in_array($inputIssuePurpose, ['general', 'machine_spare'], true)) {
+            $inputIssuePurpose = 'general';
+        }
+
+        if (empty($data['store_requisition_id'])) {
+            if ($inputIssuePurpose === 'machine_spare' && empty($data['machine_id'])) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['machine_id' => 'Machine is required for machine spare issue.']);
+            }
+
+            if ($inputIssuePurpose === 'general' && empty($data['project_id'])) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['project_id' => 'Project is required for general store issue.']);
+            }
+        }
+
         DB::beginTransaction();
 
         try {
@@ -237,19 +296,49 @@ class StoreIssueController extends Controller
                 $requisitionLinesById = $requisition->lines->keyBy('id');
             }
 
+            $resolvedIssuePurpose = $requisition
+                ? (string) ($requisition->issue_purpose ?: 'general')
+                : $inputIssuePurpose;
+            if (! in_array($resolvedIssuePurpose, ['general', 'machine_spare'], true)) {
+                $resolvedIssuePurpose = 'general';
+            }
+
+            $resolvedMachineId = $requisition
+                ? (int) ($requisition->machine_id ?? 0)
+                : (int) ($data['machine_id'] ?? 0);
+            $resolvedMachineId = $resolvedMachineId > 0 ? $resolvedMachineId : null;
+
+            if ($resolvedIssuePurpose === 'machine_spare' && ! $resolvedMachineId) {
+                throw new \RuntimeException('Machine is required for machine spare issue.');
+            }
+
+            $resolvedProjectId = $requisition
+                ? ((int) ($requisition->project_id ?? 0) ?: null)
+                : ((int) ($data['project_id'] ?? 0) ?: null);
+
+            if ($resolvedIssuePurpose === 'machine_spare' && ! $resolvedProjectId && $resolvedMachineId) {
+                $resolvedProjectId = Machine::query()
+                    ->whereKey($resolvedMachineId)
+                    ->value('current_project_id');
+            }
+
+            if ($resolvedIssuePurpose === 'general' && ! $resolvedProjectId) {
+                throw new \RuntimeException('Project is required for general store issue.');
+            }
+
             // --------- Issue header ----------
             $issue                       = new StoreIssue();
             $issue->issue_date           = $data['issue_date'];
             $issue->store_requisition_id = $data['store_requisition_id'] ?? null;
+            $issue->issue_purpose        = $resolvedIssuePurpose;
+            $issue->machine_id           = $resolvedIssuePurpose === 'machine_spare' ? $resolvedMachineId : null;
+            $issue->project_id           = $resolvedProjectId;
 
             if ($requisition) {
-                // For requisition-based issues, header is taken from requisition
-                $issue->project_id             = $requisition->project_id;
+                // For requisition-based issues, counterparty is taken from requisition.
                 $issue->contractor_party_id    = $requisition->contractor_party_id;
                 $issue->contractor_person_name = $requisition->contractor_person_name;
             } else {
-                // General issue: project is optional
-                $issue->project_id             = $data['project_id'] ?? null;
                 $issue->contractor_party_id    = $data['contractor_party_id'] ?? null;
                 $issue->contractor_person_name = $data['contractor_person_name'] ?? null;
             }
@@ -275,7 +364,7 @@ class StoreIssueController extends Controller
             // --------- Lines ----------
             foreach ($data['lines'] as $lineData) {
                 /** @var StoreStockItem $stock */
-                $stock = StoreStockItem::with('item')
+                $stock = StoreStockItem::with(['item.type', 'item.category'])
                     ->lockForUpdate()
                     ->where('status', 'available')
                     ->findOrFail($lineData['store_stock_item_id']);
@@ -287,6 +376,20 @@ class StoreIssueController extends Controller
                 // Store Issue is only for non-raw material
                 if (in_array($stock->material_category, ['steel_plate', 'steel_section'], true)) {
                     throw new \RuntimeException('Raw material cannot be issued via Store Issue. Use production / DPR flow.');
+                }
+
+                if ($resolvedIssuePurpose === 'machine_spare') {
+                    $typeCode = strtoupper((string) ($stock->item?->type?->code ?? ''));
+                    $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
+                    if (! in_array($typeCode, $allowedTypeCodes, true)) {
+                        throw new \RuntimeException('Selected item is not allowed for machine spare issue.');
+                    }
+
+                    $fuelCategoryCode = strtoupper((string) ($stock->item?->category?->code ?? ''));
+                    $excludedCategoryCodes = $this->machineSpareExcludedCategoryCodes();
+                    if ($fuelCategoryCode !== '' && in_array($fuelCategoryCode, $excludedCategoryCodes, true)) {
+                        throw new \RuntimeException('Selected stock category is not allowed in machine spare issue flow.');
+                    }
                 }
 
                 // Project scope + ownership guard
@@ -370,6 +473,7 @@ class StoreIssueController extends Controller
                 $issueLine->store_stock_item_id = $stock->id;
                 $issueLine->item_id             = $stock->item_id;
                 $issueLine->uom_id              = $stock->item?->uom_id;
+                $issueLine->machine_id          = $issue->machine_id;
                 // For non-raw items the true quantity is stored in issued_weight_kg (generic qty)
                 $issueLine->issued_qty_pcs      = 1;
                 $issueLine->issued_weight_kg    = $issueQty;
@@ -493,7 +597,16 @@ class StoreIssueController extends Controller
 
     public function show(StoreIssue $storeIssue): View
     {
-        $storeIssue->load(['project', 'contractor', 'lines.item', 'lines.uom', 'lines.stockItem.project']);
+        $storeIssue->load([
+            'project',
+            'contractor',
+            'machine',
+            'requisition.machine',
+            'lines.item',
+            'lines.uom',
+            'lines.machine',
+            'lines.stockItem.project',
+        ]);
 
         $returnedByLine = collect();
 
@@ -510,5 +623,39 @@ class StoreIssueController extends Controller
             'issue'          => $storeIssue,
             'returnedByLine' => $returnedByLine,
         ]);
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareAllowedTypeCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['CONSUMABLE']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        $normalized = array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
+
+        return $normalized ?: ['CONSUMABLE'];
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareExcludedCategoryCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_excluded_material_category_codes', ['FUEL', 'FUELS']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
     }
 }

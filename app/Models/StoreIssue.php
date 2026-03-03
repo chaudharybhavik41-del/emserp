@@ -42,6 +42,11 @@ class StoreIssue extends Model
         return $this->belongsTo(Party::class, 'contractor_party_id');
     }
 
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(Machine::class, 'machine_id');
+    }
+
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -89,6 +94,8 @@ class StoreIssue extends Model
             'contractor_party_id',
             'contractor_person_name',
             'issued_to_user_id',
+            'issue_purpose',
+            'machine_id',
             // we *don’t* lock remarks here so minor text notes can still be added
         ];
     }

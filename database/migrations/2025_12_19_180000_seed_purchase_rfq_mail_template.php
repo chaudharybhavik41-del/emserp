@@ -26,6 +26,18 @@ return new class extends Migration
         if (Schema::hasColumn('mail_templates', 'subject')) {
             $payload['subject'] = 'RFQ {{rfq_code}} - Quotation Request';
         }
+        if (Schema::hasColumn('mail_templates', 'body')) {
+            $payload['body'] = '<p>Dear {{vendor_name}},</p>
+<p>Please share your best quotation for the attached RFQ <strong>{{rfq_code}}</strong>.</p>
+<ul>
+  <li>RFQ Date: {{rfq_date}}</li>
+  <li>Due Date: {{due_date}}</li>
+  <li>Project: {{project}}</li>
+  <li>Department: {{department}}</li>
+  <li>Items: {{items_count}} ({{items_short}})</li>
+</ul>
+<p>Regards,<br>{{company_name}}</p>';
+        }
         if (Schema::hasColumn('mail_templates', 'body_html')) {
             $payload['body_html'] = '<p>Dear {{vendor_name}},</p>
 <p>Please share your best quotation for the attached RFQ <strong>{{rfq_code}}</strong>.</p>

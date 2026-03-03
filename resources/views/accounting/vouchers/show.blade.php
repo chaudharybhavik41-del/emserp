@@ -229,6 +229,19 @@
                                 @if($line->costCenter)
                                     <div class="text-muted">Cost Center: {{ $line->costCenter->name }}</div>
                                 @endif
+                                @if($line->machine)
+                                    <div class="text-muted">Machine: {{ $line->machine->code ? ($line->machine->code . ' - ') : '' }}{{ $line->machine->name }}</div>
+                                @endif
+                                @if($line->fixedAssetLinks && $line->fixedAssetLinks->count())
+                                    <div class="mt-1">
+                                        <span class="text-muted">Linked Assets:</span>
+                                        @foreach($line->fixedAssetLinks->pluck('machine')->filter()->unique('id') as $assetMachine)
+                                            <a href="{{ route('machines.show', $assetMachine) }}" class="badge text-bg-light border text-decoration-none">
+                                                {{ $assetMachine->code ?: ('M#' . $assetMachine->id) }}
+                                            </a>
+                                        @endforeach
+                                    </div>
+                                @endif
                             </td>
                             <td class="small">{{ $line->description ?: '-' }}</td>
                             <td class="small text-end">{{ number_format((float)$line->debit, 2) }}</td>

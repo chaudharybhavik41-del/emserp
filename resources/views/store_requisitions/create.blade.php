@@ -29,9 +29,38 @@
                         @enderror
                     </div>
                     <div class="col-md-3">
+                        <label class="form-label">Issue Purpose</label>
+                        <select name="issue_purpose" id="issue-purpose"
+                                class="form-select form-select-sm @error('issue_purpose') is-invalid @enderror" required>
+                            @php $purpose = old('issue_purpose', 'general'); @endphp
+                            <option value="general" {{ $purpose === 'general' ? 'selected' : '' }}>General</option>
+                            <option value="machine_spare" {{ $purpose === 'machine_spare' ? 'selected' : '' }}>Machine Spare</option>
+                        </select>
+                        @error('issue_purpose')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Machine (for Spare)</label>
+                        <select name="machine_id" id="machine-id"
+                                class="form-select form-select-sm @error('machine_id') is-invalid @enderror">
+                            <option value="">-- Select Machine --</option>
+                            @foreach($machines as $machine)
+                                <option value="{{ $machine->id }}"
+                                        data-project-id="{{ (int) ($machine->current_project_id ?? 0) }}"
+                                    {{ (int) old('machine_id') === (int) $machine->id ? 'selected' : '' }}>
+                                    {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('machine_id')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Project</label>
                         <select name="project_id" id="project-id"
-                                class="form-select form-select-sm @error('project_id') is-invalid @enderror" required>
+                                class="form-select form-select-sm @error('project_id') is-invalid @enderror">
                             <option value="">-- Select Project --</option>
                             @foreach($projects as $project)
                                 <option value="{{ $project->id }}"
@@ -79,11 +108,11 @@
                 </div>
 
                 <div class="row g-3 mt-2">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label class="form-label">Requested By (User)</label>
                         <input type="text" class="form-control form-control-sm" value="{{ auth()->user()->name }}" disabled>
                     </div>
-                    <div class="col-md-8">
+                    <div class="col-md-9">
                         <label class="form-label">Remarks</label>
                         <textarea name="remarks" class="form-control form-control-sm" rows="2">{{ old('remarks') }}</textarea>
                     </div>
@@ -148,8 +177,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             let lineIndex = 0;
 
-            // Only non-raw items (non_raw_only=1) will be returned from this endpoint
-            const ITEM_SEARCH_URL = '{{ route('ajax.items.search', ['non_raw_only' => 1]) }}';
+            const ITEM_SEARCH_URL = '{{ route('ajax.items.search') }}';
 
             // AJAX endpoint that returns brands which have AVAILABLE stock for selected item
             const BRAND_OPTIONS_URL = '{{ route('ajax.store-requisitions.available-brands') }}';
@@ -169,6 +197,30 @@
             function getProjectId() {
                 const el = document.getElementById('project-id');
                 return el ? (el.value || '') : '';
+            }
+
+            function getPurpose() {
+                const el = document.getElementById('issue-purpose');
+                return el ? (el.value || 'general') : 'general';
+            }
+
+            function togglePurposeFields() {
+                const purpose = getPurpose();
+                const machineEl = document.getElementById('machine-id');
+                const projectEl = document.getElementById('project-id');
+
+                if (machineEl) {
+                    const enabled = purpose === 'machine_spare';
+                    machineEl.disabled = !enabled;
+                    machineEl.required = enabled;
+                    if (!enabled) {
+                        machineEl.value = '';
+                    }
+                }
+
+                if (projectEl) {
+                    projectEl.required = purpose === 'general';
+                }
             }
 
             async function refreshBrandOptionsForRow(row, itemId) {
@@ -276,7 +328,16 @@
                         dataType: 'json',
                         delay: 250,
                         data: function (params) {
-                            return { q: params.term || '' };
+                            const payload = {
+                                q: params.term || '',
+                                non_raw_only: 1
+                            };
+
+                            if (getPurpose() === 'machine_spare') {
+                                payload.purpose = 'machine_spare';
+                            }
+
+                            return payload;
                         },
                         processResults: function (data) {
                             const results = (data && data.results) ? data.results : [];
@@ -362,7 +423,31 @@
                 });
             }
 
+            const purposeEl = document.getElementById('issue-purpose');
+            if (purposeEl) {
+                purposeEl.addEventListener('change', function () {
+                    togglePurposeFields();
+                });
+            }
+
+            const machineEl = document.getElementById('machine-id');
+            if (machineEl) {
+                machineEl.addEventListener('change', function () {
+                    if (getPurpose() !== 'machine_spare') {
+                        return;
+                    }
+
+                    const opt = machineEl.selectedOptions[0];
+                    const projectId = parseInt(opt?.dataset?.projectId || '0', 10);
+                    if (projectId > 0 && projectEl && !projectEl.value) {
+                        projectEl.value = String(projectId);
+                        projectEl.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+
             // Add initial row
+            togglePurposeFields();
             addLineRow();
         });
     </script>

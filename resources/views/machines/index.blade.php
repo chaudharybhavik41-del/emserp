@@ -4,11 +4,16 @@
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2><i class="bi bi-gear-fill"></i> Machines</h2>
-        @can('machinery.machine.create')
-        <a href="{{ route('machines.create') }}" class="btn btn-primary">
-            <i class="bi bi-plus-circle"></i> Add New Machine
-        </a>
-        @endcan
+        <div class="d-flex gap-2">
+            @can('machinery.machine.create')
+            <a href="{{ route('machines.import-opening') }}" class="btn btn-outline-primary">
+                <i class="bi bi-upload"></i> Import Opening CSV
+            </a>
+            <a href="{{ route('machines.create') }}" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Add New Machine
+            </a>
+            @endcan
+        </div>
     </div>
 
     <!-- Search & Filters -->
@@ -67,6 +72,7 @@
                             <th>Category</th>
                             <th>Make/Model</th>
                             <th>Serial Number</th>
+                            <th class="text-end">Opening WDV</th>
                             <th>Status</th>
                             <th>Assignment</th>
                             <th>Actions</th>
@@ -93,6 +99,13 @@
                                 @endif
                             </td>
                             <td><small>{{ $machine->serial_number }}</small></td>
+                            <td class="text-end">
+                                @if((float) ($machine->opening_wdv ?? 0) > 0)
+                                    {{ number_format((float) $machine->opening_wdv, 2) }}
+                                @else
+                                    <span class="text-muted">-</span>
+                                @endif
+                            </td>
                             <td>
                                 <span class="badge bg-{{ $machine->getStatusBadgeClass() }}">
                                     {{ ucfirst(str_replace('_', ' ', $machine->status)) }}
@@ -140,7 +153,7 @@
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="8" class="text-center py-4">
+                            <td colspan="9" class="text-center py-4">
                                 <i class="bi bi-inbox fs-1 text-muted"></i>
                                 <p class="text-muted">No machines found.</p>
                                 @can('machinery.machine.create')

@@ -61,7 +61,7 @@
             </div>
 
             <!-- Purchase Details -->
-            @if($machine->supplier || $machine->purchase_date)
+            @if($machine->supplier || $machine->purchase_date || $machine->opening_date || ($machine->opening_wdv ?? 0) > 0 || ($machine->opening_cost ?? 0) > 0 || ($machine->opening_accum_depr ?? 0) > 0)
             <div class="card mb-3">
                 <div class="card-header"><strong>Purchase Information</strong></div>
                 <div class="card-body">
@@ -108,6 +108,30 @@
                         <div class="col-md-9">₹{{ number_format($machine->purchase_price, 2) }}</div>
                     </div>
                     @endif
+
+                    @if($machine->opening_date || ($machine->opening_wdv ?? 0) > 0 || ($machine->opening_cost ?? 0) > 0 || ($machine->opening_accum_depr ?? 0) > 0)
+                    <hr>
+                    <div class="row mb-2">
+                        <div class="col-md-3"><strong>Opening Date:</strong></div>
+                        <div class="col-md-9">{{ $machine->opening_date?->format('d-M-Y') ?? '-' }}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-md-3"><strong>Opening WDV:</strong></div>
+                        <div class="col-md-9">₹{{ number_format((float) ($machine->opening_wdv ?? 0), 2) }}</div>
+                    </div>
+                    @if(($machine->opening_cost ?? 0) > 0)
+                    <div class="row mb-2">
+                        <div class="col-md-3"><strong>Opening Cost:</strong></div>
+                        <div class="col-md-9">₹{{ number_format((float) $machine->opening_cost, 2) }}</div>
+                    </div>
+                    @endif
+                    @if(($machine->opening_accum_depr ?? 0) > 0)
+                    <div class="row mb-2">
+                        <div class="col-md-3"><strong>Opening Accum. Depr.:</strong></div>
+                        <div class="col-md-9">₹{{ number_format((float) $machine->opening_accum_depr, 2) }}</div>
+                    </div>
+                    @endif
+                    @endif
                     @if($machine->warranty_months > 0)
                     <div class="row mb-2">
                         <div class="col-md-3"><strong>Warranty:</strong></div>
@@ -152,6 +176,12 @@
                         <strong>Active:</strong><br>
                         <span class="badge bg-{{ $machine->is_active ? 'success' : 'secondary' }} fs-6">
                             {{ $machine->is_active ? 'Yes' : 'No' }}
+                        </span>
+                    </div>
+                    <div class="mt-3">
+                        <strong>Allowed in Fuel Issue:</strong><br>
+                        <span class="badge bg-{{ $machine->allow_fuel_issue ? 'success' : 'secondary' }} fs-6">
+                            {{ $machine->allow_fuel_issue ? 'Yes' : 'No' }}
                         </span>
                     </div>
                 </div>

@@ -10,6 +10,7 @@ use App\Models\Production\ProductionActivity;
 use App\Models\Production\ProductionPlan;
 use App\Models\Production\ProductionPlanItem;
 use App\Models\Production\ProductionPlanItemActivity;
+use App\Services\ApprovalNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -322,6 +323,25 @@ class ProductionPlanFromBomController extends Controller
 
             return $plan;
         });
+
+        $notifier = app(ApprovalNotificationService::class);
+        $notifier->notifyApproversByPermission(
+            'production.plan.approve',
+            'Production Plan Approval Required',
+            "Production Plan {$plan->plan_number} is pending approval.",
+            [
+                'module' => 'production_plan',
+                'production_plan_id' => $plan->id,
+                'project_id' => $project->id,
+                'bom_id' => $bom->id,
+            ],
+            $notifier->safeRoute('projects.production-plans.show', [
+                'project' => $project->id,
+                'production_plan' => $plan->id,
+            ]),
+            'warning',
+            auth()->id()
+        );
 
         return redirect()
             ->route('projects.production-plans.show', [

@@ -197,6 +197,7 @@
                         <th class="text-end">CGST</th>
                         <th class="text-end">SGST</th>
                         <th class="text-end">IGST</th>
+                        <th>Linked Assets</th>
                         <th class="text-end">Total</th>
                     </tr>
                     </thead>
@@ -219,6 +220,20 @@
                             <td class="text-end">{{ number_format((float) $line->cgst_amount, 2) }}</td>
                             <td class="text-end">{{ number_format((float) $line->sgst_amount, 2) }}</td>
                             <td class="text-end">{{ number_format((float) $line->igst_amount, 2) }}</td>
+                            <td>
+                                @php
+                                    $linkedMachines = $line->fixedAssetLinks?->pluck('machine')->filter()->unique('id') ?? collect();
+                                @endphp
+                                @if($linkedMachines->count())
+                                    @foreach($linkedMachines as $assetMachine)
+                                        <a href="{{ route('machines.show', $assetMachine) }}" class="badge text-bg-light border text-decoration-none mb-1">
+                                            {{ $assetMachine->code ?: ('M#' . $assetMachine->id) }}
+                                        </a>
+                                    @endforeach
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
                             <td class="text-end">{{ number_format((float) $line->total_amount, 2) }}</td>
                         </tr>
                     @endforeach
@@ -230,6 +245,7 @@
                         <th class="text-end">{{ number_format((float) $itemCgst, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemSgst, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemIgst, 2) }}</th>
+                        <th></th>
                         <th class="text-end fw-semibold">{{ number_format((float) $itemTotal, 2) }}</th>
                     </tr>
                     </tfoot>
@@ -252,6 +268,7 @@
                             <th>#</th>
                             <th>Ledger</th>
                             <th>Project</th>
+                            <th>Machine</th>
                             <th>Desc</th>
                             <th class="text-center">RCM</th>
                             <th class="text-end">Basic</th>
@@ -283,6 +300,13 @@
                                         <span class="text-muted">—</span>
                                     @endif
                                 </td>
+                                <td>
+                                    @if($line->machine)
+                                        {{ $line->machine->code ? ($line->machine->code . ' - ') : '' }}{{ $line->machine->name }}
+                                    @else
+                                        <span class="text-muted">—</span>
+                                    @endif
+                                </td>
                                 <td>{{ $line->description ?: '—' }}</td>
                                 <td class="text-center">
                                     @if($line->is_reverse_charge)
@@ -301,7 +325,7 @@
                         </tbody>
                         <tfoot>
                         <tr>
-                            <th colspan="5" class="text-end">Totals</th>
+                            <th colspan="6" class="text-end">Totals</th>
                             <th class="text-end">{{ number_format((float) $expBasic, 2) }}</th>
                             <th class="text-end">{{ number_format((float) $expCgst, 2) }}</th>
                             <th class="text-end">{{ number_format((float) $expSgst, 2) }}</th>
@@ -555,6 +579,3 @@
     </div>
 </div>
 @endsection
-
-
-

@@ -83,6 +83,9 @@
                         <th>#</th>
                         <th>Account</th>
                         <th>Cost Center</th>
+                        @if($hasMachineLineDimension)
+                            <th>Machine</th>
+                        @endif
                         <th>Description</th>
                         <th>Debit</th>
                         <th>Credit</th>
@@ -109,6 +112,18 @@
                                 @endforeach
                             </select>
                         </td>
+                        @if($hasMachineLineDimension)
+                            <td>
+                                <select name="lines[{{ $i }}][machine_id]" class="form-select form-select-sm">
+                                    <option value="">-- none --</option>
+                                    @foreach($machines as $machine)
+                                        <option value="{{ $machine->id }}" @selected((string) old('lines.'.$i.'.machine_id') === (string) $machine->id)>
+                                            {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            </td>
+                        @endif
                         <td>
                             <input type="text" name="lines[{{ $i }}][description]" class="form-control form-control-sm">
                         </td>
@@ -126,7 +141,7 @@
                 </tbody>
                 <tfoot>
                     <tr>
-                        <th colspan="4" class="text-end">Total</th>
+                        <th colspan="{{ $hasMachineLineDimension ? 5 : 4 }}" class="text-end">Total</th>
                         <th id="total-debit">0.00</th>
                         <th id="total-credit">0.00</th>
                         <th id="total-diff">0.00</th>
@@ -185,6 +200,16 @@
                         @endforeach
                     </select>
                 </td>
+                @if($hasMachineLineDimension)
+                <td>
+                    <select name="lines[${lineIndex}][machine_id]" class="form-select form-select-sm">
+                        <option value="">-- none --</option>
+                        @foreach($machines as $machine)
+                            <option value="{{ $machine->id }}">{{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}</option>
+                        @endforeach
+                    </select>
+                </td>
+                @endif
                 <td>
                     <input type="text" name="lines[${lineIndex}][description]" class="form-control form-control-sm">
                 </td>

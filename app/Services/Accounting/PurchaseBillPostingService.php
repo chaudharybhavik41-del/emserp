@@ -5,12 +5,15 @@ namespace App\Services\Accounting;
 use App\Models\Accounting\Account;
 use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherLine;
+use App\Models\FixedAssetLink;
+use App\Models\Machine;
 use App\Models\PurchaseBill;
 use App\Models\PurchaseOrder;
 use App\Models\ActivityLog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class PurchaseBillPostingService
@@ -146,6 +149,7 @@ class PurchaseBillPostingService
 
         // Phase-B: project expense lines => separate list (posted to WIP-OTHER with cost_center_id per project)
         $projectExpenseLines = [];
+        $machineExpenseLines = [];
 
         // RCM GST lines (Phase-B: will be posted as self-entry split by project)
         $rcmTaxLines = [];
@@ -194,12 +198,25 @@ class PurchaseBillPostingService
                     'project_id'  => $lineProjectId,
                     'amount'      => $amount,
                     'description' => $desc,
+                    'machine_id'  => (int) ($exp->machine_id ?? 0) ?: null,
                 ];
             } else {
                 // Normal (non-project) behaviour
                 $accountId = $exp->account_id ?? null;
                 if ($accountId) {
-                    $debitByAccount[$accountId] = ($debitByAccount[$accountId] ?? 0) + $amount;
+                    $machineId = (int) ($exp->machine_id ?? 0);
+                    if ($machineId > 0) {
+                        $machineExpenseLines[] = [
+                            'account_id' => (int) $accountId,
+                            'amount' => $amount,
+                            'description' => ! empty($exp->description)
+                                ? (string) $exp->description
+                                : ('Purchase Expense - ' . $bill->bill_number),
+                            'machine_id' => $machineId,
+                        ];
+                    } else {
+                        $debitByAccount[$accountId] = ($debitByAccount[$accountId] ?? 0) + $amount;
+                    }
                 }
             }
 
@@ -240,6 +257,7 @@ class PurchaseBillPostingService
             $roundOff,
             $voucherProjectId,
             $projectExpenseLines,
+            $machineExpenseLines,
             $wipOtherAccountId
         ) {
             // Capture old bill attributes for audit
@@ -277,6 +295,8 @@ class PurchaseBillPostingService
             $voucher->save();
 
             $lineNo = 1;
+            $hasMachineDimension = Schema::hasColumn('voucher_lines', 'machine_id');
+            $itemDebitVoucherLineIdByAccount = [];
 
             // 2) Debit grouped material / expense / asset accounts
             foreach ($debitByAccount as $accountId => $amount) {
@@ -290,7 +310,7 @@ class PurchaseBillPostingService
                     throw new RuntimeException('Debit account not found for id: ' . $accountId);
                 }
 
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $acc->id,
@@ -298,7 +318,41 @@ class PurchaseBillPostingService
                     'description'    => 'Purchase - ' . $bill->bill_number,
                     'debit'          => round($amount, 2),
                     'credit'         => 0,
-                ]);
+                ];
+
+                if ($hasMachineDimension) {
+                    $lineData['machine_id'] = null;
+                }
+
+                $createdLine = VoucherLine::create($lineData);
+                $itemDebitVoucherLineIdByAccount[(int) $acc->id] = (int) $createdLine->id;
+            }
+
+            // 2a) Debit non-project machine-tagged expense lines
+            if (! empty($machineExpenseLines)) {
+                foreach ($machineExpenseLines as $mx) {
+                    $amount = (float) ($mx['amount'] ?? 0);
+                    $accountId = (int) ($mx['account_id'] ?? 0);
+                    if ($amount <= 0 || $accountId <= 0) {
+                        continue;
+                    }
+
+                    $lineData = [
+                        'voucher_id' => $voucher->id,
+                        'line_no' => $lineNo++,
+                        'account_id' => $accountId,
+                        'cost_center_id' => $voucherCostCenterId,
+                        'description' => substr((string) ($mx['description'] ?? ('Purchase Expense - ' . $bill->bill_number)), 0, 250),
+                        'debit' => round($amount, 2),
+                        'credit' => 0,
+                    ];
+
+                    if ($hasMachineDimension) {
+                        $lineData['machine_id'] = (int) ($mx['machine_id'] ?? 0) ?: null;
+                    }
+
+                    VoucherLine::create($lineData);
+                }
             }
 
             // 2b) Debit Project WIP-OTHER for project expense lines
@@ -327,7 +381,7 @@ class PurchaseBillPostingService
 
                     $desc = (string) ($pe['description'] ?? ('Project Expense - ' . $bill->bill_number));
 
-                    VoucherLine::create([
+                    $lineData = [
                         'voucher_id'     => $voucher->id,
                         'line_no'        => $lineNo++,
                         'account_id'     => $wipAcc->id,
@@ -335,7 +389,13 @@ class PurchaseBillPostingService
                         'description'    => $desc,
                         'debit'          => round($amount, 2),
                         'credit'         => 0,
-                    ]);
+                    ];
+
+                    if ($hasMachineDimension) {
+                        $lineData['machine_id'] = (int) ($pe['machine_id'] ?? 0) ?: null;
+                    }
+
+                    VoucherLine::create($lineData);
                 }
             }
 
@@ -724,10 +784,12 @@ class PurchaseBillPostingService
                     app(\App\Services\Machinery\MachineAutoRegistrationService::class)
                         ->registerFromPurchaseBill($bill);
                 }
+
+                $this->linkRegisteredMachinesToVoucherLines($bill, $voucher, $itemDebitVoucherLineIdByAccount);
             } catch (\Throwable $e) {
                 // Swallow to avoid blocking accounting posting
                 // (errors will still be visible in logs)
-                logger()->warning('Machine auto-register failed for PurchaseBill #' . $bill->id . ': ' . $e->getMessage());
+                logger()->warning('Machine auto-register/link failed for PurchaseBill #' . $bill->id . ': ' . $e->getMessage());
             }
 
             // 10) Audit logs
@@ -762,7 +824,73 @@ class PurchaseBillPostingService
     {
         return $this->itemAccountingResolver->resolvePurchaseAccountId($line->item);
     }
+
+    /**
+     * Link auto-registered machines with their source purchase bill line and voucher line.
+     *
+     * This is intentionally best-effort and idempotent.
+     */
+    protected function linkRegisteredMachinesToVoucherLines(PurchaseBill $bill, Voucher $voucher, array $itemDebitVoucherLineIdByAccount): void
+    {
+        if (! Schema::hasTable('fixed_asset_links') || ! Schema::hasTable('machines')) {
+            return;
+        }
+
+        if (
+            ! Schema::hasColumn('machines', 'purchase_bill_id')
+            || ! Schema::hasColumn('machines', 'purchase_bill_line_id')
+            || ! Schema::hasColumn('fixed_asset_links', 'machine_id')
+            || ! Schema::hasColumn('fixed_asset_links', 'voucher_id')
+            || ! Schema::hasColumn('fixed_asset_links', 'voucher_line_id')
+            || ! Schema::hasColumn('fixed_asset_links', 'source_type')
+            || ! Schema::hasColumn('fixed_asset_links', 'source_id')
+            || ! Schema::hasColumn('fixed_asset_links', 'source_line_id')
+        ) {
+            return;
+        }
+
+        $bill->loadMissing('lines.item.type');
+        if ($bill->lines->isEmpty()) {
+            return;
+        }
+
+        $machinesByLineId = Machine::query()
+            ->where('purchase_bill_id', (int) $bill->id)
+            ->whereNotNull('purchase_bill_line_id')
+            ->get(['id', 'purchase_bill_line_id'])
+            ->groupBy(fn (Machine $machine) => (int) $machine->purchase_bill_line_id);
+
+        if ($machinesByLineId->isEmpty()) {
+            return;
+        }
+
+        foreach ($bill->lines as $line) {
+            $sourceLineId = (int) $line->id;
+            $lineMachines = $machinesByLineId->get($sourceLineId);
+
+            if (! $lineMachines || $lineMachines->isEmpty()) {
+                continue;
+            }
+
+            $accountId = (int) ($this->resolvePurchaseAccountForLine($line) ?? 0);
+            $voucherLineId = $accountId > 0
+                ? ($itemDebitVoucherLineIdByAccount[$accountId] ?? null)
+                : null;
+
+            foreach ($lineMachines as $machine) {
+                FixedAssetLink::updateOrCreate(
+                    [
+                        'machine_id' => (int) $machine->id,
+                        'source_type' => 'purchase_bill',
+                        'source_line_id' => $sourceLineId,
+                    ],
+                    [
+                        'source_id' => (int) $bill->id,
+                        'voucher_id' => (int) $voucher->id,
+                        'voucher_line_id' => $voucherLineId ? (int) $voucherLineId : null,
+                    ]
+                );
+            }
+        }
+    }
 }
-
-
-

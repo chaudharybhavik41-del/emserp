@@ -15,6 +15,10 @@ class StorePurchaseBillRequest extends FormRequest
 
     public function rules(): array
     {
+        $expenseMachineRule = Schema::hasTable('machines')
+            ? ['nullable', 'integer', Rule::exists('machines', 'id')]
+            : ['nullable'];
+
         $rules = [
             'supplier_id'        => ['required', 'integer', Rule::exists('parties', 'id')],
             'supplier_branch_id' => ['nullable', 'integer'],
@@ -66,6 +70,7 @@ class StorePurchaseBillRequest extends FormRequest
             'expense_lines.*.id'             => ['nullable', 'integer'],
             'expense_lines.*.account_id'     => ['nullable', 'integer', Rule::exists('accounts', 'id')],
             'expense_lines.*.project_id'     => ['nullable', 'integer', Rule::exists('projects', 'id')],
+            'expense_lines.*.machine_id'     => $expenseMachineRule,
             'expense_lines.*.description'    => ['nullable', 'string', 'max:500'],
             'expense_lines.*.amount'         => ['nullable', 'numeric', 'min:0'],
             'expense_lines.*.tax_rate'       => ['nullable', 'numeric', 'min:0', 'max:100'],

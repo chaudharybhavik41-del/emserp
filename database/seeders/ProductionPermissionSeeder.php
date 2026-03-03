@@ -18,6 +18,7 @@ class ProductionPermissionSeeder extends Seeder
             'production.plan',
             'production.dpr',
             'production.qc',
+            'production.traceability',
             'production.billing',
             'production.dispatch',
             'production.report',

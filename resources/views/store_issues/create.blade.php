@@ -43,6 +43,9 @@
                                                                             @if($req->project)
                                                                                 [{{ $req->project->code }}]
                                                                             @endif
+                                                                            @if(($req->issue_purpose ?? 'general') === 'machine_spare')
+                                                                                [Spare: {{ $req->machine?->code ?: ('M#' . $req->machine_id) }}]
+                                                                            @endif
                                                                         </option>
                                                                     @endforeach
                                                                 </select>
@@ -63,8 +66,60 @@
 
                                                             <div class="row g-3 mt-2">
                                                                 @if(isset($selectedRequisition) && $selectedRequisition)
-                                                                    {{-- When requisition selected: project/contractor taken from requisition and fixed --}}
                                                                     <input type="hidden" name="store_requisition_id" value="{{ $selectedRequisition->id }}">
+                                                                    <input type="hidden" name="issue_purpose" value="{{ $selectedRequisition->issue_purpose ?? 'general' }}">
+                                                                    <input type="hidden" name="machine_id" value="{{ $selectedRequisition->machine_id }}">
+
+                                                                    <div class="col-md-6">
+                                                                        <label class="form-label">Issue Purpose</label>
+                                                                        <div class="form-control form-control-sm bg-light">
+                                                                            @if(($selectedRequisition->issue_purpose ?? 'general') === 'machine_spare')
+                                                                                Machine Spare
+                                                                            @else
+                                                                                General
+                                                                            @endif
+                                                                        </div>
+                                                                    </div>
+                                                                    <div class="col-md-6">
+                                                                        <label class="form-label">Machine</label>
+                                                                        <div class="form-control form-control-sm bg-light">
+                                                                            @if($selectedRequisition->machine)
+                                                                                {{ $selectedRequisition->machine->code ? ($selectedRequisition->machine->code . ' - ') : '' }}{{ $selectedRequisition->machine->name }}
+                                                                            @else
+                                                                                -
+                                                                            @endif
+                                                                        </div>
+                                                                    </div>
+                                                                @else
+                                                                    <div class="col-md-4">
+                                                                        <label class="form-label">Issue Purpose</label>
+                                                                        @php $purpose = old('issue_purpose', $selectedIssuePurpose ?? 'general'); @endphp
+                                                                        <select id="issue_purpose" name="issue_purpose"
+                                                                                class="form-select form-select-sm @error('issue_purpose') is-invalid @enderror">
+                                                                            <option value="general" {{ $purpose === 'general' ? 'selected' : '' }}>General</option>
+                                                                            <option value="machine_spare" {{ $purpose === 'machine_spare' ? 'selected' : '' }}>Machine Spare</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div class="col-md-4">
+                                                                        <label class="form-label">Machine (for Spare)</label>
+                                                                        <select id="machine_id" name="machine_id"
+                                                                            class="form-select form-select-sm select2 @error('machine_id') is-invalid @enderror">
+                                                                            <option value="">-- Select Machine --</option>
+                                                                            @foreach($machines as $machine)
+                                                                                <option value="{{ $machine->id }}"
+                                                                                    data-project-id="{{ (int) ($machine->current_project_id ?? 0) }}"
+                                                                                    {{ (int) old('machine_id', (int) ($selectedMachineId ?? 0)) === (int) $machine->id ? 'selected' : '' }}>
+                                                                                    {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                                                                </option>
+                                                                            @endforeach
+                                                                        </select>
+                                                                    </div>
+                                                                @endif
+                                                            </div>
+
+                                                            <div class="row g-3 mt-2">
+                                                                @if(isset($selectedRequisition) && $selectedRequisition)
+                                                                    {{-- When requisition selected: project/contractor taken from requisition and fixed --}}
 
                                                                     <div class="col-md-4">
                                                                         <label class="form-label">Project</label>
@@ -277,6 +332,60 @@
                         const REQUISITION_LINES = @json($reqLinesForJs ?? []);
                         const STOCK_ITEMS = @json($stockItemsForJs ?? []);
                         const hasRequisition = REQUISITION_LINES.length > 0;
+                        const requisitionSelector = document.getElementById('requisition-selector');
+                        const issuePurposeSelect = document.getElementById('issue_purpose');
+                        const machineSelect = document.getElementById('machine_id');
+                        const projectSelect = document.getElementById('project_id');
+
+                        requisitionSelector?.addEventListener('change', function () {
+                            const url = new URL(window.location.href);
+                            if (this.value) {
+                                url.searchParams.set('store_requisition_id', this.value);
+                            } else {
+                                url.searchParams.delete('store_requisition_id');
+                                if (issuePurposeSelect?.value) {
+                                    url.searchParams.set('issue_purpose', issuePurposeSelect.value);
+                                }
+                                if (machineSelect?.value) {
+                                    url.searchParams.set('machine_id', machineSelect.value);
+                                } else {
+                                    url.searchParams.delete('machine_id');
+                                }
+                            }
+                            window.location.href = url.toString();
+                        });
+
+                        function toggleMachineRequirement() {
+                            if (!issuePurposeSelect || !machineSelect) return;
+                            const isMachineSpare = issuePurposeSelect.value === 'machine_spare';
+                            machineSelect.required = isMachineSpare;
+                            if (!isMachineSpare) {
+                                machineSelect.value = '';
+                            }
+                        }
+
+                        issuePurposeSelect?.addEventListener('change', function () {
+                            toggleMachineRequirement();
+                            if (!hasRequisition) {
+                                const url = new URL(window.location.href);
+                                url.searchParams.set('issue_purpose', this.value || 'general');
+                                if (machineSelect?.value) {
+                                    url.searchParams.set('machine_id', machineSelect.value);
+                                } else {
+                                    url.searchParams.delete('machine_id');
+                                }
+                                window.location.href = url.toString();
+                            }
+                        });
+
+                        machineSelect?.addEventListener('change', function () {
+                            const opt = this.selectedOptions[0];
+                            const projectId = parseInt(opt?.dataset?.projectId || '0', 10);
+                            if (projectId > 0 && projectSelect && !projectSelect.value) {
+                                projectSelect.value = String(projectId);
+                                $(projectSelect).trigger('change');
+                            }
+                        });
 
                         /* ---------------- SELECT2 INIT ---------------- */
 
@@ -495,6 +604,7 @@
 
                         /* ---------------- INIT ---------------- */
 
+                        toggleMachineRequirement();
                         addLineRow();
 
                     });
@@ -511,8 +621,9 @@
                     allowClear: true
                 });
 
-                // Optional: auto focus first select
-                $('#project_id').select2('open');
+                if ($('#project_id').length) {
+                    $('#project_id').select2('open');
+                }
             });
             </script>
         @endpush

@@ -32,6 +32,11 @@ class StoreIssueLine extends Model
         return $this->belongsTo(Item::class, 'item_id');
     }
 
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(Machine::class, 'machine_id');
+    }
+
     public function uom(): BelongsTo
     {
         return $this->belongsTo(Uom::class, 'uom_id');

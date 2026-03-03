@@ -24,6 +24,7 @@ class MachineMaintenancePermissionSeeder extends Seeder
             'machinery.maintenance_log.view',
             'machinery.maintenance_log.create',
             'machinery.maintenance_log.update',
+            'machinery.maintenance_log.delete',
             'machinery.maintenance_log.complete',
             
             // Breakdown Register

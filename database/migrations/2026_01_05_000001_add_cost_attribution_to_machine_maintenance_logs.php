@@ -31,24 +31,29 @@ return new class extends Migration
             $table->index(['machine_id', 'contractor_party_id'], 'idx_mml_machine_contractor');
         });
 
-        // Optional but recommended: add "adhoc" into the enum if you want it in UI
-        DB::statement("
-            ALTER TABLE machine_maintenance_logs
-            MODIFY COLUMN maintenance_type
-            ENUM('preventive','breakdown','predictive','calibration','inspection','adhoc')
-            NOT NULL DEFAULT 'preventive'
-        ");
+        // Optional but recommended: add "adhoc" into the enum if you want it in UI.
+        // Enum DDL syntax below is MySQL-only; skip for SQLite/Postgres test databases.
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("
+                ALTER TABLE machine_maintenance_logs
+                MODIFY COLUMN maintenance_type
+                ENUM('preventive','breakdown','predictive','calibration','inspection','adhoc')
+                NOT NULL DEFAULT 'preventive'
+            ");
+        }
     }
 
     public function down(): void
     {
-        // Revert enum first (remove adhoc)
-        DB::statement("
-            ALTER TABLE machine_maintenance_logs
-            MODIFY COLUMN maintenance_type
-            ENUM('preventive','breakdown','predictive','calibration','inspection')
-            NOT NULL DEFAULT 'preventive'
-        ");
+        // Revert enum first (remove adhoc). MySQL-only.
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("
+                ALTER TABLE machine_maintenance_logs
+                MODIFY COLUMN maintenance_type
+                ENUM('preventive','breakdown','predictive','calibration','inspection')
+                NOT NULL DEFAULT 'preventive'
+            ");
+        }
 
         Schema::table('machine_maintenance_logs', function (Blueprint $table) {
             $table->dropIndex('idx_mml_machine_contractor');

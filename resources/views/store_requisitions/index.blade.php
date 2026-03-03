@@ -28,6 +28,7 @@
                         <th style="width: 10%">Req. No</th>
                         <th style="width: 12%">Date</th>
                         <th style="width: 24%">Project</th>
+                        <th style="width: 14%">Purpose / Machine</th>
                         <th style="width: 20%">Contractor / Person</th>
                         <th style="width: 14%">Status</th>
                         <th style="width: 10%">Requested By</th>
@@ -70,6 +71,16 @@
                                 @endif
                             </td>
                             <td>
+                                @if(($req->issue_purpose ?? 'general') === 'machine_spare')
+                                    <span class="badge bg-info text-dark">Machine Spare</span>
+                                    <div class="small text-muted mt-1">
+                                        {{ $req->machine?->code ? ($req->machine->code . ' - ') : '' }}{{ $req->machine?->name ?: '-' }}
+                                    </div>
+                                @else
+                                    <span class="badge bg-secondary">General</span>
+                                @endif
+                            </td>
+                            <td>
                                 @if($req->contractor)
                                     {{ $req->contractor->name }}
                                 @else
@@ -96,7 +107,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-3">
+                            <td colspan="8" class="text-center text-muted py-3">
                                 No store requisitions found.
                             </td>
                         </tr>

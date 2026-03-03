@@ -18,6 +18,8 @@ use App\Http\Controllers\Accounting\GstSummaryReportController;
 use App\Http\Controllers\Accounting\GstVoucherRegisterReportController;
 use App\Http\Controllers\Accounting\InventoryValuationReportController;
 use App\Http\Controllers\Accounting\LedgerReportController;
+use App\Http\Controllers\Accounting\MachineExpenseReportController;
+use App\Http\Controllers\Accounting\MachineCostRegisterReportController;
 use App\Http\Controllers\Accounting\MigrationToolsController;
 use App\Http\Controllers\Accounting\OnAccountAdjustmentController;
 use App\Http\Controllers\Accounting\ProfitLossReportController;
@@ -128,6 +130,9 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::get('reports/profit-loss', [ProfitLossReportController::class, 'index'])->name('reports.profit-loss');
     Route::get('reports/balance-sheet', [BalanceSheetReportController::class, 'index'])->name('reports.balance-sheet');
     Route::get('reports/inventory-valuation', [InventoryValuationReportController::class, 'index'])->name('reports.inventory-valuation');
+    Route::get('reports/machine-expense', [MachineExpenseReportController::class, 'index'])->name('reports.machine-expense');
+    Route::get('reports/machine-cost-register', [MachineCostRegisterReportController::class, 'index'])->name('reports.machine-cost-register');
+    Route::get('reports/machine-cost-register/export', [MachineCostRegisterReportController::class, 'export'])->name('reports.machine-cost-register.export');
 
     // GST Reports
     Route::get('reports/gst-summary', [GstSummaryReportController::class, 'index'])->name('reports.gst-summary');
@@ -229,5 +234,3 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     });
 });
 require __DIR__ . '/accounting_notes.php';
-
-

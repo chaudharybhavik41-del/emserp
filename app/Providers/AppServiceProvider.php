@@ -2,8 +2,11 @@
 
 namespace App\Providers;
 
+use App\Listeners\QueueWebPushForDatabaseNotification;
 use App\Models\Accounting\Voucher;
 use App\Observers\Accounting\VoucherTdsCertificateObserver;
+use Illuminate\Notifications\Events\NotificationSent;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use App\Models\Party;
 use App\Policies\PartyPolicy;
@@ -28,6 +31,9 @@ class AppServiceProvider extends ServiceProvider
         // Phase 1.6 / DEV18: create payable-side TDS certificate tracking rows
         // when Purchase/Subcontractor vouchers are posted.
         Voucher::observe(VoucherTdsCertificateObserver::class);
+
+        // Bridge all database notifications to web push queue.
+        Event::listen(NotificationSent::class, [QueueWebPushForDatabaseNotification::class, 'handle']);
         
     }
 

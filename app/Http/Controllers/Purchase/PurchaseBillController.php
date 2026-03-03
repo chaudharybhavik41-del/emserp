@@ -16,6 +16,7 @@ use App\Models\PurchaseBillLine;
 use App\Models\Uom;
 use App\Models\PurchaseOrder;
 use App\Models\MaterialReceipt;
+use App\Models\Machine;
 use App\Models\Company;
 use App\Models\Attachment;
 use App\Services\Accounting\PurchaseBillPostingService;
@@ -24,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use App\Services\Accounting\ItemGstResolver;
@@ -103,7 +105,8 @@ public function index(Request $request)
             'voucher',
             'purchaseOrder.project',
             'project',
-            'expenseLines.project'
+            'expenseLines.project',
+            'expenseLines.machine'
         ])
         ->orderByDesc('posting_date')
         ->orderByDesc('bill_date')
@@ -212,6 +215,7 @@ public function index(Request $request)
     $items      = Item::orderBy('code')->get();
     $uoms       = Uom::orderBy('code')->get();
     $accounts   = Account::orderBy('name')->get();
+    $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -224,7 +228,7 @@ public function index(Request $request)
 
     $emptyLines = 5;
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
 	}
 
 
@@ -323,6 +327,7 @@ public function index(Request $request)
 
 	        $bill   = PurchaseBill::create($billData);
 	        $lineNo = 1;
+            $hasExpenseMachineDimension = Schema::hasColumn('purchase_bill_expense_lines', 'machine_id');
 
 	        // 1) ITEM LINES (with ItemGstResolver)
 	        foreach (($data['lines'] ?? []) as $lineInput) {
@@ -452,7 +457,7 @@ public function index(Request $request)
 	                }
 	                $totalAmount   += $totalLine;
 
-	                $bill->expenseLines()->create([
+	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
                     'is_reverse_charge' => $isReverseCharge,
@@ -465,7 +470,15 @@ public function index(Request $request)
 	                    'igst_amount'  => $igstAmt,
 	                    'total_amount' => $totalLine,
 	                    'line_no'      => $lineNo++,
-	                ]);
+	                ];
+
+                    if ($hasExpenseMachineDimension) {
+                        $expensePayload['machine_id'] = ! empty($expInput['machine_id'])
+                            ? (int) $expInput['machine_id']
+                            : null;
+                    }
+
+	                $bill->expenseLines()->create($expensePayload);
 	            }
 	        }
 
@@ -519,7 +532,7 @@ public function index(Request $request)
 	
     public function edit(PurchaseBill $bill)
     {
-        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
+        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'expenseLines.machine', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
 
         $suppliers  = Party::query()
             ->where(function ($q) {
@@ -531,6 +544,7 @@ public function index(Request $request)
         $items      = Item::orderBy('code')->get();
         $uoms       = Uom::orderBy('code')->get();
         $accounts   = Account::orderBy('name')->get();
+        $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -546,12 +560,23 @@ public function index(Request $request)
 
         $company = Company::find($companyId) ?: Company::where('is_default', true)->first();
 
-        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
     }
 
    public function show(PurchaseBill $bill)
 	{
-	    $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'voucher', 'purchaseOrder.project', 'project', 'attachments');
+	    $bill->load(
+            'lines.item',
+            'lines.fixedAssetLinks.machine',
+            'expenseLines.account',
+            'expenseLines.project',
+            'expenseLines.machine',
+            'supplier',
+            'voucher',
+            'purchaseOrder.project',
+            'project',
+            'attachments'
+        );
 
     return view('purchase.bills.show', compact('bill'));
 	}
@@ -659,6 +684,7 @@ public function index(Request $request)
 	        $totalAmount   = 0.0;
 
 	        $lineNo = 1;
+            $hasExpenseMachineDimension = Schema::hasColumn('purchase_bill_expense_lines', 'machine_id');
 
 	        // 1) ITEM LINES
 	        foreach (($data['lines'] ?? []) as $lineInput) {
@@ -806,7 +832,7 @@ public function index(Request $request)
 	                }
 	                $totalAmount   += $totalLine;
 
-	                $bill->expenseLines()->create([
+	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
                     'is_reverse_charge' => $isReverseCharge,
@@ -819,7 +845,15 @@ public function index(Request $request)
 	                    'igst_amount'  => $igstAmt,
 	                    'total_amount' => $totalLine,
 	                    'line_no'      => $lineNo++,
-	                ]);
+	                ];
+
+                    if ($hasExpenseMachineDimension) {
+                        $expensePayload['machine_id'] = ! empty($expInput['machine_id'])
+                            ? (int) $expInput['machine_id']
+                            : null;
+                    }
+
+	                $bill->expenseLines()->create($expensePayload);
 	            }
 	        }
 
@@ -1396,6 +1430,3 @@ public function index(Request $request)
             ->with('success', 'Purchase bill posted to accounting. Voucher ID: ' . $voucher->id);
     }
 }
-
-
-
