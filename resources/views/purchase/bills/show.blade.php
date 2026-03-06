@@ -240,7 +240,7 @@
                     </tbody>
                     <tfoot>
                     <tr>
-                        <th colspan="5" class="text-end">Totals</th>
+                        <th colspan="6" class="text-end">Totals</th>
                         <th class="text-end">{{ number_format((float) $itemBasic, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemCgst, 2) }}</th>
                         <th class="text-end">{{ number_format((float) $itemSgst, 2) }}</th>
@@ -300,13 +300,7 @@
                                         <span class="text-muted">—</span>
                                     @endif
                                 </td>
-                                <td>
-                                    @if($line->machine)
-                                        {{ $line->machine->code ? ($line->machine->code . ' - ') : '' }}{{ $line->machine->name }}
-                                    @else
-                                        <span class="text-muted">—</span>
-                                    @endif
-                                </td>
+                                <td>{{ $line->machine ? ($line->machine->asset_code . ' - ' . $line->machine->name) : '—' }}</td>
                                 <td>{{ $line->description ?: '—' }}</td>
                                 <td class="text-center">
                                     @if($line->is_reverse_charge)

@@ -13,25 +13,15 @@ class FixedAssetLink extends Model
     use HasFactory;
 
     protected $fillable = [
-        'machine_id',
+        'fixed_asset_id',
         'voucher_id',
         'voucher_line_id',
-        'source_type',
-        'source_id',
-        'source_line_id',
+        'link_type',
     ];
 
-    protected $casts = [
-        'machine_id' => 'integer',
-        'voucher_id' => 'integer',
-        'voucher_line_id' => 'integer',
-        'source_id' => 'integer',
-        'source_line_id' => 'integer',
-    ];
-
-    public function machine(): BelongsTo
+    public function fixedAsset(): BelongsTo
     {
-        return $this->belongsTo(Machine::class);
+        return $this->belongsTo(FixedAsset::class);
     }
 
     public function voucher(): BelongsTo
@@ -41,6 +31,6 @@ class FixedAssetLink extends Model
 
     public function voucherLine(): BelongsTo
     {
-        return $this->belongsTo(VoucherLine::class, 'voucher_line_id');
+        return $this->belongsTo(VoucherLine::class);
     }
 }

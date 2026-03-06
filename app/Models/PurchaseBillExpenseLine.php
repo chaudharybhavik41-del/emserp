@@ -60,6 +60,7 @@ class PurchaseBillExpenseLine extends Model
 
     public function machine(): BelongsTo
     {
-        return $this->belongsTo(Machine::class, 'machine_id');
+        return $this->belongsTo(FixedAsset::class, 'machine_id');
     }
 }
+
