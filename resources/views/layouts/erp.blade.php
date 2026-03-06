@@ -71,6 +71,53 @@
     box-shadow: none;
 }
 
+/* --- Premium Header Styling --- */
+.erp-header {
+    background: rgba(255, 255, 255, 0.96) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04);
+    transition: all 0.3s ease;
+    z-index: 1030;
+}
+
+[data-bs-theme="dark"] .erp-header {
+    background: rgba(33, 37, 41, 0.92) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.25);
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header,
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid transparent;
+}
+
+.erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header:hover,
+.erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link:hover {
+    transform: translateY(-2px);
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+[data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header:hover,
+[data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.erp-nav-container {
+    background: transparent !important;
+}
+
+.erp-module-topbar {
+    background: transparent !important;
+}
+/* --- End Premium Styling --- */
+
 .erp-module-topnav {
     border-top: 1px solid var(--bs-border-color-translucent);
     background: var(--bs-tertiary-bg);
@@ -135,17 +182,17 @@
 
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link {
-    width: 4.45rem !important;
-    min-width: 4.45rem;
-    min-height: 3.18rem;
+    width: 5.5rem !important;
+    min-width: 5.5rem;
+    min-height: 4rem;
     height: auto;
-    padding: 0.25rem 0.2rem !important;
-    border-radius: 0.62rem;
+    padding: 0.35rem 0.2rem !important;
+    border-radius: 0.75rem;
     display: inline-flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.12rem;
+    gap: 0.25rem;
     text-align: center;
 }
 
@@ -161,16 +208,16 @@
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > i,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > i {
     margin: 0 !important;
-    font-size: 0.95rem;
+    font-size: 1.35rem; /* Increased icon size */
     line-height: 1;
 }
 
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > span,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > span {
     display: block !important;
-    font-size: 0.58rem !important;
+    font-size: 0.68rem !important; /* Increased text size */
     font-weight: 600;
-    line-height: 1.05;
+    line-height: 1.1;
     white-space: normal;
     text-transform: none !important;
     letter-spacing: 0;
@@ -222,31 +269,47 @@
     display: block;
 }
 
-@media (hover: hover) and (pointer: fine) {
-    .erp-module-topbar-list > .erp-sidebar-section:hover > .collapse,
-    .erp-module-topbar-list > .erp-sidebar-section:focus-within > .collapse {
-        display: block;
-    }
-}
+/* 
+ * Dropdowns in the topbar now use native Bootstrap Collapse (click to open).
+ * The hover-to-open rules have been removed.
+ */
 
 .erp-module-topbar-list > .erp-sidebar-section > .collapse > ul {
     margin: 0;
-    display: grid;
-    grid-auto-flow: column;
-    grid-template-rows: repeat(10, minmax(0, auto));
-    grid-auto-columns: minmax(11.5rem, 13.5rem);
-    align-content: start;
-    gap: 0.2rem 0.35rem;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    max-height: 380px; /* Force it to wrap columns */
+    gap: 0.2rem 1.5rem;
     width: fit-content;
     max-width: 100%;
 }
 
 .erp-module-topbar-list > .erp-sidebar-section > .collapse > ul > li {
-    min-width: 0;
+    min-width: 12rem;
+    max-width: 14rem;
 }
 
 .erp-module-topbar-list > .erp-sidebar-section > .collapse .erp-nav-link {
     white-space: normal;
+    transition: all 0.2s ease;
+    border-radius: 0.35rem;     /* Slightly rounded corners on hover items */
+}
+
+/* Premium Hover Effect inside the sub-menus */
+.erp-module-topbar-list > .erp-sidebar-section > .collapse .erp-nav-link:hover,
+.erp-module-topbar-list > .erp-sidebar-section > .collapse .list-group-item:hover,
+.erp-module-topbar-list > .erp-sidebar-section > .collapse .dropdown-item:hover {
+    background-color: rgba(var(--bs-primary-rgb), 0.08) !important;
+    color: var(--bs-primary) !important;
+}
+
+[data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > .collapse .erp-nav-link:hover,
+[data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > .collapse .list-group-item:hover,
+[data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > .collapse .dropdown-item:hover {
+    background-color: rgba(var(--bs-primary-rgb), 0.15) !important;
+    color: var(--bs-primary-bg-subtle) !important;
 }
 
 @media (max-width: 767.98px) {
@@ -300,14 +363,14 @@
 <div class="d-flex flex-column vh-100 overflow-hidden">
 
     {{-- Top bar (fixed height, never scrolls) --}}
-    <header class="border-bottom bg-body erp-header flex-shrink-0">
+    <header class="erp-header flex-shrink-0">
         <div class="container-fluid">
             <div class="d-flex align-items-center justify-content-between py-2">
 
                 {{-- Left: mobile menu + logo + breadcrumb --}}
-                <div class="d-flex align-items-center gap-2 erp-topbar-left">
+                <div class="d-flex align-items-center gap-2 erp-topbar-left flex-shrink-0">
 
-<button class="btn btn-outline-secondary btn-sm d-inline-flex me-1"
+<button class="btn btn-outline-secondary btn-sm d-md-none me-1"
         type="button"
         id="sidebarToggle"
         data-bs-toggle="offcanvas"
@@ -325,10 +388,7 @@
                        class="text-decoration-none d-flex align-items-center gap-2">
                         <img src="{{ asset('images/ems-logo.png') }}"
                              alt="{{ config('app.name') }}"
-                             style="height: 28px; width: auto;">
-                        <span class="fw-semibold text-body small d-none d-sm-inline">
-                            {{ config('app.name') }}
-                        </span>
+                             style="height: 40px; width: auto; object-fit: contain;">
                     </a>
 
                     {{-- Optional breadcrumb --}}
@@ -339,102 +399,23 @@
                     @endif
                 </div>
 
+                @auth
+                <div class="erp-nav-container flex-grow-1 d-none d-md-block px-2" style="z-index: 1300; overflow: visible;">
+                    @include('partials.sidebar', ['sidebarId' => 'topbar', 'navigationMode' => 'topbar'])
+                </div>
+                @endauth
+
                 {{-- Right: per-page content + notifications + theme + user menu --}}
-                <div class="d-flex align-items-center gap-2 erp-topbar-right">
+                <div class="d-flex align-items-center gap-2 erp-topbar-right flex-shrink-0">
                     @hasSection('topbar_right')
                         @yield('topbar_right')
                     @endif
 
                     @auth
-                        {{-- Notifications dropdown --}}
                         @php
-    $notifUser = auth()->user();
-    $notifUnread = $notifUser?->unreadNotifications()->count() ?? 0;
-    $notifLatest = $notifUser?->notifications()->latest()->limit(5)->get() ?? collect();
+                            $notifUser = auth()->user();
+                            $notifUnread = $notifUser?->unreadNotifications()->count() ?? 0;
                         @endphp
-
-                        <div class="dropdown">
-                            <button
-                                class="btn btn-outline-secondary btn-sm position-relative"
-                                type="button"
-                                id="notifDropdownBtn"
-                                data-bs-toggle="dropdown"
-                                aria-expanded="false"
-                                aria-label="Notifications"
-                            >
-                                <i class="bi bi-bell"></i>
-
-                                @if($notifUnread > 0)
-                                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
-                                        {{ $notifUnread > 99 ? '99+' : $notifUnread }}
-                                        <span class="visually-hidden">unread notifications</span>
-                                    </span>
-                                @endif
-                            </button>
-
-                            <div class="dropdown-menu dropdown-menu-end p-0 notifications-dropdown" aria-labelledby="notifDropdownBtn">
-                                <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
-                                    <div class="fw-semibold small">Notifications</div>
-                                    <a class="small text-decoration-none" href="{{ route('notifications.index') }}">
-                                        View all
-                                    </a>
-                                </div>
-
-                                <div class="list-group list-group-flush">
-                                    @forelse($notifLatest as $n)
-                                        @php
-        $data = $n->data ?? [];
-        $title = $data['title'] ?? ($data['message'] ?? class_basename($n->type));
-        $message = $data['message'] ?? '';
-        $url = $data['url'] ?? null;
-        $isUnread = $n->read_at === null;
-                                        @endphp
-
-                                        <a
-                                            href="{{ $url ?: route('notifications.index') }}"
-                                            class="list-group-item list-group-item-action d-flex gap-2 {{ $isUnread ? 'fw-semibold' : '' }}"
-                                            @if($url) target="_blank" rel="noopener" @endif
-                                        >
-                                            <div class="pt-1">
-                                                <i class="bi {{ $isUnread ? 'bi-circle-fill' : 'bi-circle' }}" style="font-size: 0.5rem;"></i>
-                                            </div>
-
-                                            <div class="flex-grow-1">
-                                                <div class="d-flex justify-content-between align-items-start gap-2">
-                                                    <div class="small">
-                                                        {{ \Illuminate\Support\Str::limit((string) $title, 70) }}
-                                                    </div>
-                                                    <div class="text-body-secondary small">
-                                                        {{ optional($n->created_at)->diffForHumans() }}
-                                                    </div>
-                                                </div>
-
-                                                @if(!empty($message) && $message !== $title)
-                                                    <div class="text-body-secondary small">
-                                                        {{ \Illuminate\Support\Str::limit((string) $message, 100) }}
-                                                    </div>
-                                                @endif
-                                            </div>
-                                        </a>
-                                    @empty
-                                        <div class="px-3 py-3 text-body-secondary small">
-                                            No notifications yet.
-                                        </div>
-                                    @endforelse
-                                </div>
-
-                                @if($notifUnread > 0)
-                                    <div class="px-3 py-2 border-top">
-                                        <form method="POST" action="{{ route('notifications.read_all') }}">
-                                            @csrf
-                                            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
-                                                Mark all as read
-                                            </button>
-                                        </form>
-                                    </div>
-                                @endif
-                            </div>
-                        </div>
 
                         <span id="pwaNetworkBadge" class="badge text-bg-warning d-none" aria-live="polite"></span>
                         <span id="pwaSyncBadge" class="badge text-bg-info d-none" aria-live="polite"></span>
@@ -455,17 +436,6 @@
                         >
                             <i class="bi bi-download me-1"></i>
                             <span class="d-none d-xl-inline">Install</span>
-                        </button>
-
-                        {{-- Dark mode toggle --}}
-                        <button
-                            class="btn btn-outline-secondary btn-sm"
-                            type="button"
-                            id="themeToggle"
-                            aria-label="Toggle dark mode"
-                            title="Toggle dark mode"
-                        >
-                            <i class="bi bi-moon-stars" id="themeToggleIcon"></i>
                         </button>
 
                         {{-- User dropdown --}}
@@ -490,6 +460,21 @@
                                 </li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li>
+                                    <a class="dropdown-item d-flex align-items-center justify-content-between" href="{{ route('notifications.index') }}">
+                                        <span><i class="bi bi-bell me-1"></i> Notifications</span>
+                                        @if($notifUnread > 0)
+                                            <span class="badge rounded-pill bg-danger">{{ $notifUnread > 99 ? '99+' : $notifUnread }}</span>
+                                        @endif
+                                    </a>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <button class="dropdown-item" type="button" id="themeToggle" aria-label="Toggle dark mode">
+                                        <i class="bi bi-moon-stars me-1" id="themeToggleIcon"></i> Dark Mode
+                                    </button>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
                                     <a class="dropdown-item" href="{{ route('profile.edit') }}">
                                         <i class="bi bi-gear me-1"></i> Profile
                                     </a>
@@ -511,14 +496,6 @@
             </div>
         </div>
     </header>
-
-    @auth
-        <nav class="erp-module-topnav flex-shrink-0">
-            <div class="container-fluid px-2">
-                @include('partials.sidebar', ['sidebarId' => 'topbar', 'navigationMode' => 'topbar'])
-            </div>
-        </nav>
-    @endauth
 
     {{-- Full-width main content --}}
     <main id="main-content" class="flex-grow-1 overflow-auto erp-main-scroll" role="main" tabindex="-1">
@@ -697,16 +674,6 @@
                         }
                     });
 
-                    section.addEventListener('mouseenter', function () {
-                        if (!isHoverCapable()) return;
-                        openSection(section);
-                    });
-
-                    section.addEventListener('mouseleave', function () {
-                        if (!isHoverCapable()) return;
-                        closeSection(section);
-                    });
-
                     panel.querySelectorAll('a').forEach(function (link) {
                         link.addEventListener('click', function () {
                             closeAllSections();
@@ -714,11 +681,6 @@
                     });
                 } else if (directLink) {
                     directLink.addEventListener('click', function () {
-                        closeAllSections();
-                    });
-
-                    section.addEventListener('mouseenter', function () {
-                        if (!isHoverCapable()) return;
                         closeAllSections();
                     });
                 }
@@ -752,6 +714,5 @@
 
 {{-- Per-page extra scripts --}}
 @stack('scripts')
-
 </body>
 </html>
