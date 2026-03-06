@@ -151,9 +151,6 @@ class PurchaseBillPostingService
         $projectExpenseLines = [];
         $machineExpenseLines = [];
 
-        // Non-project expense lines keep per-line machine tagging on voucher rows
-        $expenseDebitLines = [];
-
         // RCM GST lines (Phase-B: will be posted as self-entry split by project)
         $rcmTaxLines = [];
 
@@ -188,7 +185,6 @@ class PurchaseBillPostingService
             }
 
             $lineProjectId = (int) ($exp->project_id ?: $billProjectId ?: 0);
-            $machineId = (int) ($exp->machine_id ?: 0);
 
             if ($lineProjectId > 0 && $wipOtherAccountId) {
                 $origName = $exp->account?->name ?? ('Account#' . ($exp->account_id ?? ''));
@@ -200,7 +196,6 @@ class PurchaseBillPostingService
 
                 $projectExpenseLines[] = [
                     'project_id'  => $lineProjectId,
-                    'machine_id'  => $machineId > 0 ? $machineId : null,
                     'amount'      => $amount,
                     'description' => $desc,
                     'machine_id'  => (int) ($exp->machine_id ?? 0) ?: null,
@@ -209,12 +204,19 @@ class PurchaseBillPostingService
                 // Normal (non-project) behaviour
                 $accountId = $exp->account_id ?? null;
                 if ($accountId) {
-                    $expenseDebitLines[] = [
-                        'account_id' => (int) $accountId,
-                        'machine_id' => $machineId > 0 ? $machineId : null,
-                        'amount' => $amount,
-                        'description' => ! empty($exp->description) ? ('Purchase Expense - ' . $exp->description) : ('Purchase Expense - ' . $bill->bill_number),
-                    ];
+                    $machineId = (int) ($exp->machine_id ?? 0);
+                    if ($machineId > 0) {
+                        $machineExpenseLines[] = [
+                            'account_id' => (int) $accountId,
+                            'amount' => $amount,
+                            'description' => ! empty($exp->description)
+                                ? (string) $exp->description
+                                : ('Purchase Expense - ' . $bill->bill_number),
+                            'machine_id' => $machineId,
+                        ];
+                    } else {
+                        $debitByAccount[$accountId] = ($debitByAccount[$accountId] ?? 0) + $amount;
+                    }
                 }
             }
 
@@ -255,7 +257,7 @@ class PurchaseBillPostingService
             $roundOff,
             $voucherProjectId,
             $projectExpenseLines,
-            $expenseDebitLines,
+            $machineExpenseLines,
             $wipOtherAccountId
         ) {
             // Capture old bill attributes for audit
@@ -296,7 +298,7 @@ class PurchaseBillPostingService
             $hasMachineDimension = Schema::hasColumn('voucher_lines', 'machine_id');
             $itemDebitVoucherLineIdByAccount = [];
 
-            // 2) Debit grouped material / item / asset accounts
+            // 2) Debit grouped material / expense / asset accounts
             foreach ($debitByAccount as $accountId => $amount) {
                 $amount = (float) $amount;
                 if ($amount <= 0) {
@@ -314,31 +316,6 @@ class PurchaseBillPostingService
                     'account_id'     => $acc->id,
                     'cost_center_id' => $voucherCostCenterId,
                     'description'    => 'Purchase - ' . $bill->bill_number,
-                    'machine_id'     => null,
-                    'debit'          => round($amount, 2),
-                    'credit'         => 0,
-                ]);
-            }
-
-            // 2a) Debit expense ledgers with per-line machine tagging
-            foreach ($expenseDebitLines as $expenseDebitLine) {
-                $amount = (float) ($expenseDebitLine['amount'] ?? 0);
-                if ($amount <= 0) {
-                    continue;
-                }
-
-                $acc = Account::find((int) $expenseDebitLine['account_id']);
-                if (! $acc) {
-                    throw new RuntimeException('Debit account not found for id: ' . (int) $expenseDebitLine['account_id']);
-                }
-
-                VoucherLine::create([
-                    'voucher_id'     => $voucher->id,
-                    'line_no'        => $lineNo++,
-                    'account_id'     => $acc->id,
-                    'cost_center_id' => $voucherCostCenterId,
-                    'machine_id'     => $expenseDebitLine['machine_id'] ?? null,
-                    'description'    => substr((string) ($expenseDebitLine['description'] ?? ('Purchase Expense - ' . $bill->bill_number)), 0, 250),
                     'debit'          => round($amount, 2),
                     'credit'         => 0,
                 ];
@@ -410,7 +387,6 @@ class PurchaseBillPostingService
                         'account_id'     => $wipAcc->id,
                         'cost_center_id' => $costCenterCache[$pid],
                         'description'    => $desc,
-                        'machine_id'     => $pe['machine_id'] ?? null,
                         'debit'          => round($amount, 2),
                         'credit'         => 0,
                     ];

@@ -18,7 +18,6 @@ use App\Models\PurchaseOrder;
 use App\Models\MaterialReceipt;
 use App\Models\Machine;
 use App\Models\Company;
-use App\Models\FixedAsset;
 use App\Models\Attachment;
 use App\Services\Accounting\PurchaseBillPostingService;
 use App\Support\GstHelper;
@@ -219,10 +218,6 @@ public function index(Request $request)
     $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
-    $machines = FixedAsset::query()
-        ->where('asset_type', 'machinery')
-        ->orderBy('asset_code')
-        ->get(['id', 'asset_code', 'name']);
 
     // TDS Sections master (for dropdown)
     $tdsSections = TdsSection::query()
@@ -233,7 +228,7 @@ public function index(Request $request)
 
     $emptyLines = 5;
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects', 'machines'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
 	}
 
 
@@ -410,7 +405,6 @@ public function index(Request $request)
                 // Phase-B: allow splitting expense lines across projects
                 // If line project is empty, default to bill header project (or PO project).
                 $lineProjectId = $expInput['project_id'] ?? null;
-                $machineId = $expInput['machine_id'] ?? null;
                 if (empty($lineProjectId) && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
@@ -466,7 +460,6 @@ public function index(Request $request)
 	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
-                    'machine_id'   => $machineId,
                     'is_reverse_charge' => $isReverseCharge,
 	                    'description'  => $description,
 	                    'basic_amount' => $basic,
@@ -554,10 +547,6 @@ public function index(Request $request)
         $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
-    $machines = FixedAsset::query()
-        ->where('asset_type', 'machinery')
-        ->orderBy('asset_code')
-        ->get(['id', 'asset_code', 'name']);
 
         $companyId = (int) ($bill->company_id ?: 1);
         // TDS Sections master (for dropdown)
@@ -571,12 +560,23 @@ public function index(Request $request)
 
         $company = Company::find($companyId) ?: Company::where('is_default', true)->first();
 
-        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects', 'machines'));
+        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
     }
 
    public function show(PurchaseBill $bill)
 	{
-	    $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'expenseLines.machine', 'supplier', 'voucher', 'purchaseOrder.project', 'project', 'attachments');
+	    $bill->load(
+            'lines.item',
+            'lines.fixedAssetLinks.machine',
+            'expenseLines.account',
+            'expenseLines.project',
+            'expenseLines.machine',
+            'supplier',
+            'voucher',
+            'purchaseOrder.project',
+            'project',
+            'attachments'
+        );
 
     return view('purchase.bills.show', compact('bill'));
 	}
@@ -780,7 +780,6 @@ public function index(Request $request)
 
                 // Phase-B: allow splitting expense lines across projects
                 $lineProjectId = $expInput['project_id'] ?? null;
-                $machineId = $expInput['machine_id'] ?? null;
                 if (empty($lineProjectId) && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
@@ -836,7 +835,6 @@ public function index(Request $request)
 	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
-                    'machine_id'   => $machineId,
                     'is_reverse_charge' => $isReverseCharge,
 	                    'description'  => $description,
 	                    'basic_amount' => $basic,
