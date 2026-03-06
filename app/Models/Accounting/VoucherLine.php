@@ -2,7 +2,8 @@
 
 namespace App\Models\Accounting;
 
-use App\Models\FixedAsset;
+use App\Models\Machine;
+use App\Models\FixedAssetLink;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -49,7 +50,7 @@ class VoucherLine extends Model
 
     public function machine(): BelongsTo
     {
-        return $this->belongsTo(FixedAsset::class, 'machine_id');
+        return $this->belongsTo(Machine::class);
     }
 
     public function reference(): MorphTo

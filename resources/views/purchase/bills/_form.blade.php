@@ -865,11 +865,14 @@ $initNet = (float) ($bill->net_payable ?? 0);
                     </select>
                 </td>
                 <td>
+                    @php
+                        $selMachine = old('expense_lines.' . $i . '.machine_id', $ex['machine_id'] ?? null);
+                    @endphp
                     <select name="expense_lines[{{ $i }}][machine_id]" class="form-select form-select-sm exp-machine">
-                        <option value="">-- Not Tagged --</option>
-                        @foreach($machines as $machine)
-                            <option value="{{ $machine->id }}" @selected((string) ($ex['machine_id'] ?? '') === (string) $machine->id)>
-                                {{ $machine->asset_code }} - {{ $machine->name }}
+                        <option value="">-- None --</option>
+                        @foreach(($machines ?? collect()) as $m)
+                            <option value="{{ $m->id }}" @selected((string) $selMachine === (string) $m->id)>
+                                {{ $m->code ? ($m->code . ' - ') : '' }}{{ $m->name }}
                             </option>
                         @endforeach
                     </select>

@@ -117,7 +117,6 @@
                                 @endphp
                                 <tr>
                                     <td class="sticky-col" style="left: 0; background: #fff; z-index: 5;">
-                                        
                                         <strong>{{ $employee->full_name ?? '-' }}</strong><br>
                                         <small>{{ $employee->employee_code ?? '-' }}</small>
                                     </td>
