@@ -109,14 +109,25 @@
                 </div>
             @endunless
 
-            <ul class="nav small {{ $isTopbar ? 'erp-module-topbar-list' : 'flex-column' }}">
+            {{-- <ul class="nav small {{ $isTopbar ? 'erp-module-topbar-list' : 'flex-column' }}" > --}}
+<ul class="nav small {{ $isTopbar ? 'erp-module-topbar-list justify-content-center text-center' : 'flex-column align-items-center text-center' }} px-3">
 
+
+    <li class="nav-item erp-sidebar-section mb-1">
+    <a data-erp-menu-item href="{{ $safeRoute('dashboard') }}"
+       class="nav-link erp-nav-link d-flex align-items-center px-3 py-2
+       {{ $isRoute('dashboard') ? 'active' : 'text-body-secondary' }}">
+       
+        <i class="bi bi-speedometer2 fs-3"></i>
+        <span>Dashboard</span>
+    </a>
+</li>
                @if(\Illuminate\Support\Facades\Route::has('reports-hub.index'))
-			<li class="nav-item erp-sidebar-section mb-1">
+			<li class="nav-item erp-sidebar-section mb-1 is-open">
   			  <a data-erp-menu-item href="{{ $safeRoute('reports-hub.index') }}"
     		   class="nav-link erp-nav-link d-flex align-items-center px-3 py-2
               {{ $isRoute('reports-hub.*') ? 'active' : 'text-body-secondary' }}">
-    	    <i class="bi bi-bar-chart-line me-2"></i>
+    	    <i class="bi bi-bar-chart-line fs-3"></i>
   	      <span>Reports Hub</span>
   		  </a>
 			</li>
@@ -132,7 +143,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="core">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-gear"></i>
+                            <i class="bi bi-gear fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Core &amp; Settings</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -226,7 +237,7 @@
                             <a data-erp-menu-item href="{{ route('settings.security') }}"
                                class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
                                       {{ $isRoute('settings.security') ? 'active' : 'text-body-secondary' }}">
-                                <i class="bi bi-shield-check me-2"></i>
+                                <i class="bi bi-shield-check fs-3"></i>
                                 <span>Security Settings</span>
                             </a>
                         </li>
@@ -367,7 +378,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="support">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-life-preserver"></i> {{-- Main Section Icon --}}
+                            <i class="bi bi-life-preserver fs-3"></i> {{-- Main Section Icon --}}
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Support</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -417,7 +428,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="masters">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-box-seam"></i>
+                            <i class="bi bi-box-seam fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Material Masters</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -502,7 +513,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="crm">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-person-lines-fill"></i>
+                            <i class="bi bi-person-lines-fill fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">CRM</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -600,10 +611,10 @@
                             data-erp-section-toggle
                             data-erp-section-key="hr">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-people-fill"></i>
+                            <i class="bi bi-people-fill fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">HR</span>
                         </span>
-                        <i class="bi bi-chevron-down erp-chevron"></i>
+                        <i class="bi bi-chevron-down erp-chevron "></i>
                     </button>
                     <div id="{{ $secId('hr') }}" class="collapse {{ $openHr ? 'show' : '' }}">
                         <ul class="nav flex-column small mt-1">
@@ -1089,7 +1100,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="purchase">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-cart-check"></i>
+                            <i class="bi bi-cart-check fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Purchase</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -1179,7 +1190,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="store">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-boxes"></i>
+                            <i class="bi bi-boxes fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Store</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -1257,7 +1268,7 @@
                                 <a data-erp-menu-item href="{{ route('store-stock-register.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
                                           {{ $isRoute('store-stock-register.index') ? 'active' : 'text-body-secondary' }}">
-                                    <i class="bi bi-journal-text me-2"></i>
+                                    <i class="bi bi-journal-text fs-3"></i>
                                     <span>Stock Register</span>
                                 </a>
                             </li>
@@ -1500,7 +1511,8 @@
                 @endcanany
                 @canany(['accounting.accounts.view', 'accounting.vouchers.view', 'accounting.vouchers.create', 'accounting.reports.view'])
                 <li class="nav-item erp-sidebar-section mb-1">
-                    <button type="button" class="btn btn-sm w-100 text-start d-flex align-items-center justify-content-between border-0 rounded-3 px-3 py-2 erp-accordion-header"
+                    <button type="button" class="btn btn-sm w-100 text-start d-flex align-items-center justify-content-between border-0 rounded-3 px-3 py-2 erp-accordion-header
+                            {{ $openAccounting ? 'active' : 'text-body-secondary' }}"
                             data-bs-toggle="collapse"
                             data-bs-target="#{{ $secId('accounting') }}"
                             aria-expanded="{{ $openAccounting ? 'true' : 'false' }}"
@@ -1508,19 +1520,19 @@
                             data-erp-section-toggle
                             data-erp-section-key="accounting">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-journal-text"></i>
-                            <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Accounting</span>
+                            <i class="bi bi-journal-text fs-3"></i>
+                            <span class="text-uppercase fw-semibold" style="font-size: 0.85rem;">Accounting</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
                     </button>
                     <div id="{{ $secId('accounting') }}" class="collapse {{ $openAccounting ? 'show' : '' }}">
-                        <ul class="nav flex-column small mt-1">
+                        <ul class="nav flex-column mt-1">
                     @can('accounting.accounts.view')
                         @if(\Illuminate\Support\Facades\Route::has('accounting.accounts.index'))
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.accounts.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                          {{ $isRoute('accounting.accounts.*') ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute('accounting.accounts.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-journal me-2"></i>
                                     <span>Chart of Accounts</span>
                                 </a>
@@ -1532,8 +1544,8 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.account-groups.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute('accounting.account-groups.*') ? 'active' : 'text-body-secondary' }}">
-                                    <i class="bi bi-diagram-3 me-2"></i>
+                                          {{ $isRoute('accounting.account-groups.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
+                                    <i class="bi bi-diagram-3"></i>
                                     <span>Account Groups</span>
                                 </a>
                             </li>
@@ -1543,7 +1555,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.account-types.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute('accounting.account-types.*') ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute('accounting.account-types.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-tags me-2"></i>
                                     <span>Account Types</span>
                                 </a>
@@ -1553,7 +1565,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.tds-sections.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute('accounting.tds-sections.*') ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute('accounting.tds-sections.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-percent me-2"></i>
                                     <span>TDS Sections</span>
                                 </a>
@@ -1564,7 +1576,7 @@
                                 <li class="nav-item">
                                     <a data-erp-menu-item href="{{ route('accounting.voucher-series.index') }}"
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                              {{ $isRoute('accounting.voucher-series.*') ? 'active' : 'text-body-secondary' }}">
+                                              {{ $isRoute('accounting.voucher-series.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                         <i class="bi bi-hash me-2"></i>
                                         <span>Voucher Series</span>
                                     </a>
@@ -1581,7 +1593,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.vouchers.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                          {{ $isRoute('accounting.vouchers.*') && !request()->boolean('wip_to_cogs') ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute('accounting.vouchers.*') && !request()->boolean('wip_to_cogs') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-receipt me-2"></i>
                                     <span>Vouchers</span>
                                 </a>
@@ -1590,7 +1602,7 @@
                             <li class="nav-item">
                                 <a href="{{ route('accounting.vouchers.index', ['wip_to_cogs' => 1]) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ ($isRoute('accounting.vouchers.index') && request()->boolean('wip_to_cogs')) ? 'active' : 'text-body-secondary' }}">
+                                          {{ ($isRoute('accounting.vouchers.index') && request()->boolean('wip_to_cogs')) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-arrow-left-right me-2"></i>
                                     <span>WIP → COGS Drafts</span>
                                 </a>
@@ -1604,7 +1616,7 @@
                                 <li class="nav-item">
                                     <a data-erp-menu-item href="{{ route('accounting.subcontractor-ra.index') }}"
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                              {{ $isRoute('accounting.subcontractor-ra.*') ? 'active' : 'text-body-secondary' }}">
+                                              {{ $isRoute('accounting.subcontractor-ra.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                         <i class="bi bi-person-workspace me-2"></i>
                                         <span>Subcontractor RA Bills</span>
                                     </a>
@@ -1617,7 +1629,7 @@
                                 <li class="nav-item">
                                     <a data-erp-menu-item href="{{ route('accounting.client-ra.index') }}"
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                              {{ $isRoute('accounting.client-ra.*') ? 'active' : 'text-body-secondary' }}">
+                                              {{ $isRoute('accounting.client-ra.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                         <i class="bi bi-receipt-cutoff me-2"></i>
                                         <span>Client RA Bills</span>
                                     </a>
@@ -1631,7 +1643,7 @@
    			     <li class="nav-item">
    		         <a data-erp-menu-item href="{{ route('accounting.purchase-debit-notes.index') }}"
     	           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                      {{ $isRoute('accounting.purchase-debit-notes.*') ? 'active' : 'text-body-secondary' }}">
+                      {{ $isRoute('accounting.purchase-debit-notes.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                 <i class="bi bi-journal-minus me-2"></i>
                 <span>Purchase Debit Notes</span>
     	        </a>
@@ -1642,7 +1654,7 @@
     		    <li class="nav-item">
          		   <a data-erp-menu-item href="{{ route('accounting.sales-credit-notes.index') }}"
                class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                      {{ $isRoute('accounting.sales-credit-notes.*') ? 'active' : 'text-body-secondary' }}">
+                      {{ $isRoute('accounting.sales-credit-notes.*') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                 <i class="bi bi-journal-arrow-down me-2"></i>
                 <span>Sales Credit Notes</span>
         	    </a>
@@ -1668,7 +1680,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($paymentCreateRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.payments.*', 'payments.*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.payments.*', 'payments.*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-arrow-up-right-circle me-2"></i>
                                     <span>New Payment</span>
                                 </a>
@@ -1679,7 +1691,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($receiptCreateRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.receipts.*', 'receipts.*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.receipts.*', 'receipts.*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-arrow-down-left-circle me-2"></i>
                                     <span>New Receipt</span>
                                 </a>
@@ -1690,7 +1702,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($onAccountRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.receipts.on-account.*', 'receipts.on-account.*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.receipts.on-account.*', 'receipts.on-account.*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-link-45deg me-2"></i>
                                     <span>On-Account Adjustment</span>
                                 </a>
@@ -1744,7 +1756,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rTrialBalance) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.trial-balance', 'reports.trial-balance']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.trial-balance', 'reports.trial-balance']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-bar-chart-line me-2"></i>
                                     <span>Trial Balance</span>
                                 </a>
@@ -1755,7 +1767,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rLedger) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.ledger', 'reports.ledger']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.ledger', 'reports.ledger']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-journals me-2"></i>
                                     <span>Ledger</span>
                                 </a>
@@ -1778,7 +1790,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rDayBook) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.day-book', 'reports.day-book']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.day-book', 'reports.day-book']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-calendar3 me-2"></i>
                                     <span>Day Book</span>
                                 </a>
@@ -1789,7 +1801,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rProfitLoss) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.profit-loss', 'reports.profit-loss']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.profit-loss', 'reports.profit-loss']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-graph-up-arrow me-2"></i>
                                     <span>Profit &amp; Loss</span>
                                 </a>
@@ -1800,7 +1812,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rBalanceSheet) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.balance-sheet', 'reports.balance-sheet']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.balance-sheet', 'reports.balance-sheet']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-columns-gap me-2"></i>
                                     <span>Balance Sheet</span>
                                 </a>
@@ -1811,7 +1823,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rInventoryValuation) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.inventory-valuation', 'reports.inventory-valuation']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.inventory-valuation', 'reports.inventory-valuation']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-box-seam me-2"></i>
                                     <span>Inventory Valuation</span>
                                 </a>
@@ -1822,7 +1834,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rProjectCostSheet) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.project-cost-sheet*', 'reports.project-cost-sheet*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.project-cost-sheet*', 'reports.project-cost-sheet*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-kanban me-2"></i>
                                     <span>Project Cost Sheet</span>
                                 </a>
@@ -1833,7 +1845,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rMachineExpense) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.machine-expense', 'reports.machine-expense']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.machine-expense', 'reports.machine-expense']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-gear-wide-connected me-2"></i>
                                     <span>Machine Expense</span>
                                 </a>
@@ -1844,7 +1856,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rMachineCostRegister) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.machine-cost-register', 'reports.machine-cost-register']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.machine-cost-register', 'reports.machine-cost-register']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-collection me-2"></i>
                                     <span>Machine Cost Register</span>
                                 </a>
@@ -1855,7 +1867,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstSummary) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-summary', 'reports.gst-summary']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-summary', 'reports.gst-summary']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-receipt me-2"></i>
                                     <span>GST Summary</span>
                                 </a>
@@ -1866,7 +1878,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstPurchaseRegister) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-purchase-register', 'reports.gst-purchase-register']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-purchase-register', 'reports.gst-purchase-register']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-bag-check me-2"></i>
                                     <span>GST Purchase Register</span>
                                 </a>
@@ -1877,7 +1889,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstSalesRegister) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-sales-register', 'reports.gst-sales-register']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-sales-register', 'reports.gst-sales-register']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-cart-check me-2"></i>
                                     <span>GST Sales Register</span>
                                 </a>
@@ -1888,7 +1900,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstVoucherRegister) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-voucher-register', 'reports.gst-voucher-register']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-voucher-register', 'reports.gst-voucher-register']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-file-earmark-text me-2"></i>
                                     <span>GST Voucher Register</span>
                                 </a>
@@ -1900,7 +1912,7 @@
                             <li class="nav-item">
                                 <a href="{{ route($rTdsCertificates, ['direction' => 'receivable']) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ ($isRoute(['accounting.reports.tds-certificates*', 'reports.tds-certificates*']) && request('direction', 'receivable') !== 'payable') ? 'active' : 'text-body-secondary' }}">
+                                          {{ ($isRoute(['accounting.reports.tds-certificates*', 'reports.tds-certificates*']) && request('direction', 'receivable') !== 'payable') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-file-earmark-text me-2"></i>
                                     <span>TDS Certificates (Receivable)</span>
                                 </a>
@@ -1909,7 +1921,7 @@
                             <li class="nav-item">
                                 <a href="{{ route($rTdsCertificates, ['direction' => 'payable']) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ ($isRoute(['accounting.reports.tds-certificates*', 'reports.tds-certificates*']) && request('direction') === 'payable') ? 'active' : 'text-body-secondary' }}">
+                                          {{ ($isRoute(['accounting.reports.tds-certificates*', 'reports.tds-certificates*']) && request('direction') === 'payable') ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-file-earmark-text me-2"></i>
                                     <span>TDS Certificates (Payable)</span>
                                 </a>
@@ -1920,7 +1932,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstHsnPurchaseSummary) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-hsn-purchase-summary', 'reports.gst-hsn-purchase-summary']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-hsn-purchase-summary', 'reports.gst-hsn-purchase-summary']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-list-check me-2"></i>
                                     <span>GST HSN Summary (Purchase)</span>
                                 </a>
@@ -1931,7 +1943,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rGstHsnSalesSummary) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.gst-hsn-sales-summary', 'reports.gst-hsn-sales-summary']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.gst-hsn-sales-summary', 'reports.gst-hsn-sales-summary']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-list-check me-2"></i>
                                     <span>GST SAC/HSN Summary (Sales)</span>
                                 </a>
@@ -1942,7 +1954,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rSupplierOutstanding) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.supplier-outstanding', 'reports.supplier-outstanding']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.supplier-outstanding', 'reports.supplier-outstanding']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-person-down me-2"></i>
                                     <span>Supplier Outstanding</span>
                                 </a>
@@ -1953,7 +1965,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rClientOutstanding) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.client-outstanding', 'reports.client-outstanding']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.client-outstanding', 'reports.client-outstanding']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-person-up me-2"></i>
                                     <span>Client Outstanding</span>
                                 </a>
@@ -1964,7 +1976,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rSupplierAgeing) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.supplier-ageing*', 'reports.supplier-ageing*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.supplier-ageing*', 'reports.supplier-ageing*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-hourglass-split me-2"></i>
                                     <span>Supplier Ageing</span>
                                 </a>
@@ -1975,7 +1987,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rClientAgeing) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.client-ageing*', 'reports.client-ageing*']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.client-ageing*', 'reports.client-ageing*']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-hourglass-top me-2"></i>
                                     <span>Client Ageing</span>
                                 </a>
@@ -1986,7 +1998,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rCashFlow) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.cash-flow', 'reports.cash-flow']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.cash-flow', 'reports.cash-flow']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-cash-coin me-2"></i>
                                     <span>Cash Flow</span>
                                 </a>
@@ -1997,7 +2009,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rFundFlow) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.fund-flow', 'reports.fund-flow']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.fund-flow', 'reports.fund-flow']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-arrow-left-right me-2"></i>
                                     <span>Fund Flow</span>
                                 </a>
@@ -2008,7 +2020,7 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route($rUnbalancedVouchers) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                          {{ $isRoute(['accounting.reports.unbalanced-vouchers', 'reports.unbalanced-vouchers']) ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute(['accounting.reports.unbalanced-vouchers', 'reports.unbalanced-vouchers']) ? 'active' : 'text-body-secondary' }}" style="font-size: 0.95rem;">
                                     <i class="bi bi-exclamation-triangle me-2"></i>
                                     <span>Unbalanced Vouchers</span>
                                 </a>
@@ -2033,7 +2045,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="production">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-diagram-3"></i>
+                            <i class="bi bi-diagram-3 fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Production</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -2179,7 +2191,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="projects">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-kanban"></i>
+                            <i class="bi bi-kanban fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Projects</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -2275,7 +2287,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="tasks">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-list-task"></i>
+                            <i class="bi bi-list-task fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Task Management</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>

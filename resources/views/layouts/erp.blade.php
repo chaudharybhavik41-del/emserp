@@ -750,6 +750,200 @@
     });
 </script>
 
+{{-- Module Switcher Modal --}}
+<div class="modal fade" id="moduleSwitcherModal" tabindex="-1" aria-labelledby="moduleSwitcherLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content rounded-4 border-0 shadow-lg">
+            <div class="modal-header border-bottom-0 px-4 pt-4 pb-2">
+                <h5 class="modal-title fw-semibold" id="moduleSwitcherLabel">
+                    <i class="bi bi-grid-3x3-gap me-2"></i> Select Module
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body px-4 py-4">
+                <div class="row g-3">
+                    {{-- Material Masters --}}
+                    @if(Route::has('material-types.index'))
+                        <div class="col-4">
+                            <a href="{{ route('material-types.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-box-seam fs-1 text-warning"></i>
+                                </div>
+                                <small class="d-block text-dark">Material Masters</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- CRM --}}
+                    @if(Route::has('crm.index') || Route::has('crm.dashboard'))
+                        <div class="col-4">
+                            <a href="{{ Route::has('crm.dashboard') ? route('crm.dashboard') : route('crm.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-person-lines-fill fs-1 text-info"></i>
+                                </div>
+                                <small class="d-block text-dark">CRM</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- HR --}}
+                    @if(Route::has('hr.dashboard'))
+                        <div class="col-4">
+                            <a href="{{ route('hr.dashboard') }}" class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-people-fill fs-1 text-success"></i>
+                                </div>
+                                <small class="d-block text-dark">HR</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- Purchase --}}
+                    @if(Route::has('purchase-indents.index') || Route::has('purchase-orders.index'))
+                        <div class="col-4">
+                            <a href="{{ Route::has('purchase-indents.index') ? route('purchase-indents.index') : route('purchase-orders.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-bag-check-fill fs-1 text-danger"></i>
+                                </div>
+                                <small class="d-block text-dark">Purchase</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- Store --}}
+                    @if(Route::has('store.index') || Route::has('store-stock.index'))
+                        <div class="col-4">
+                            <a href="{{ Route::has('store.index') ? route('store.index') : route('store-stock.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-shop fs-1 text-primary"></i>
+                                </div>
+                                <small class="d-block text-dark">Store</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- Production --}}
+                    @if(Route::has('production.index') || Route::has('production.dashboard'))
+                        <div class="col-4">
+                            <a href="{{ Route::has('production.dashboard') ? route('production.dashboard') : route('production.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-gear-fill fs-1 text-secondary"></i>
+                                </div>
+                                <small class="d-block text-dark">Production</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- Accounting --}}
+                    @if(Route::has('accounting.index') || Route::has('accounting.dashboard'))
+                        <div class="col-4">
+                            <a href="{{ Route::has('accounting.dashboard') ? route('accounting.dashboard') : route('accounting.index') }}"
+                                class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-calculator-fill fs-1 text-success"></i>
+                                </div>
+                                <small class="d-block text-dark">Accounting</small>
+                            </a>
+                        </div>
+                    @endif
+
+                    {{-- Projects --}}
+                    @if(Route::has('projects.index'))
+                        <div class="col-4">
+                            <a href="{{ route('projects.index') }}" class="module-card text-center text-decoration-none">
+                                <div class="module-icon bg-light rounded-3" style="width: 90px; height: 90px;">
+                                    <i class="bi bi-diagram-3-fill fs-1 text-warning"></i>
+                                </div>
+                                <small class="d-block text-dark">Projects</small>
+                            </a>
+                        </div>
+                    @endif
+
+                </div>
+            </div>
+            <div class="modal-footer border-top-0 px-4 pb-4">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .module-card {
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        text-align: center;
+    }
+
+    .module-card:hover {
+        background-color: rgba(94, 154, 206, 0.08);
+    }
+
+    .module-card:hover .module-icon {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(94, 154, 206, 0.2);
+        background-color: rgba(94, 154, 206, 0.15) !important;
+    }
+
+    .module-icon {
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 0.5rem auto;
+    }
+
+    .module-card:hover .module-icon {
+        border-color: #5E9ACE;
+    }
+
+    .module-card:hover small {
+        color: #5E9ACE !important;
+    }
+
+    .module-card small {
+        font-size: 12px !important;
+        font-weight: 600;
+    }
+</style>
+
+<script>
+    // Open module switcher with keyboard shortcut (Ctrl+K)
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            const modal = new bootstrap.Modal(document.getElementById('moduleSwitcherModal'));
+            modal.show();
+        }
+    });
+
+    // Also make the modules button trigger the modal
+    const modulesBtn = document.getElementById('sidebarToggle');
+    if (modulesBtn) {
+        modulesBtn.addEventListener('click', function (e) {
+            // If it's a mobile device, use offcanvas as usual
+            if (window.innerWidth < 768) {
+                return; // Let Bootstrap handle offcanvas
+            }
+            // On desktop, show modal instead
+            e.preventDefault();
+            const modal = new bootstrap.Modal(document.getElementById('moduleSwitcherModal'));
+            modal.show();
+        });
+    }
+</script>
+
 {{-- Per-page extra scripts --}}
 @stack('scripts')
 

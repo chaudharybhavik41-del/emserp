@@ -185,51 +185,63 @@ class HrAttendanceController extends Controller
         return view('hr.attendance.show', compact('attendance'));
     }
 
-    public function manualEntry(Request $request): View|RedirectResponse
-    {
-        if ($request->isMethod('post')) {
-            $validated = $request->validate([
-                'hr_employee_id' => 'required|exists:hr_employees,id',
-                'attendance_date' => 'required|date',
-                'first_in' => 'nullable|date_format:H:i',
-                'last_out' => 'nullable|date_format:H:i',
-                'status' => 'required|in:present,absent,half_day,on_duty',
-                'remarks' => 'required|string|max:500',
-            ]);
+   public function manualEntry(Request $request): View|RedirectResponse
+{
+    if ($request->isMethod('post')) {
+        $validated = $request->validate([
+            'hr_employee_id' => 'required|exists:hr_employees,id',
+            'attendance_date' => 'required|date',
+            'first_in' => 'nullable|date_format:H:i',
+            'last_out' => 'nullable|date_format:H:i',
+            'status' => 'required|in:present,absent,half_day,on_duty',
+            'remarks' => 'required|string|max:500',
+        ]);
 
-            $employee = HrEmployee::findOrFail($validated['hr_employee_id']);
-            $date = Carbon::parse($validated['attendance_date']);
-            
-            $attendance = HrAttendance::updateOrCreate(
-                [
-                    'hr_employee_id' => $validated['hr_employee_id'],
-                    'attendance_date' => $date->toDateString(),
-                ],
-                [
-                    'hr_shift_id' => $employee->default_shift_id,
-                    'first_in' => $validated['first_in'] ? $date->copy()->setTimeFromTimeString($validated['first_in']) : null,
-                    'last_out' => $validated['last_out'] ? $date->copy()->setTimeFromTimeString($validated['last_out']) : null,
-                    'status' => $validated['status'],
-                    'is_manual_entry' => true,
-                    'remarks' => $validated['remarks'],
-                    'created_by' => auth()->id(),
-                ]
-            );
+        $employee = HrEmployee::findOrFail($validated['hr_employee_id']);
+        $date = Carbon::parse($validated['attendance_date']);
 
-            // Recalculate if times provided
-            if ($attendance->first_in && $attendance->last_out && $attendance->shift) {
-                $attendance->recalculate();
-                $attendance->save();
-            }
+        $attendance = HrAttendance::updateOrCreate(
+            [
+                'hr_employee_id' => $validated['hr_employee_id'],
+                'attendance_date' => $date->toDateString(),
+            ],
+            [
+                'hr_shift_id' => $employee->default_shift_id,
+                'first_in' => $validated['first_in'] ? $date->copy()->setTimeFromTimeString($validated['first_in']) : null,
+                'last_out' => $validated['last_out'] ? $date->copy()->setTimeFromTimeString($validated['last_out']) : null,
+                'status' => $validated['status'],
+                'is_manual_entry' => true,
+                'remarks' => $validated['remarks'],
+                'created_by' => auth()->id(),
+            ]
+        );
 
-            return redirect()
-                ->route('hr.attendance.index', ['date' => $date->toDateString()])
-                ->with('success', 'Attendance entry saved successfully.');
+        if ($attendance->first_in && $attendance->last_out && $attendance->shift) {
+            $attendance->recalculate();
+            $attendance->save();
         }
 
-        $employees = HrEmployee::active()->orderBy('first_name')->get();
-        return view('hr.attendance.manual-entry', compact('employees'));
+        return redirect()
+            ->route('hr.attendance.index', ['date' => $date->toDateString()])
+            ->with('success', 'Attendance entry saved successfully.');
     }
+
+    // Load all active employees
+    $employees = HrEmployee::active()->orderBy('first_name')->get();
+
+    // Get selected employee from query param or localStorage
+    $selectedEmployeeId = $request->query('employee_id') ?? null;
+
+    // Fetch existing attendance if exists
+    $attendance = null;
+   if ($selectedEmployeeId && $request->query('date')) {
+    $attendance = HrAttendance::where('hr_employee_id', $selectedEmployeeId)
+                                ->where('attendance_date', $request->query('date'))
+                              ->first();
+}
+
+    return view('hr.attendance.manual-entry', compact('employees', 'selectedEmployeeId', 'attendance'));
+}
 
     public function process(Request $request): RedirectResponse
     {
