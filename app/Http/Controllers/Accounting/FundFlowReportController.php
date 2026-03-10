@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Accounting;
 
 use App\Http\Controllers\Controller;
 use App\Models\Accounting\Account;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,21 @@ class FundFlowReportController extends Controller
     protected function defaultCompanyId(): int
     {
         return (int) (Config::get('accounting.default_company_id', 1));
+    }
+
+    protected function signedOpening(Account $account, Carbon $asOfDate): float
+    {
+        $opening = (float) ($account->opening_balance ?? 0.0);
+
+        if ($account->opening_balance_date && $account->opening_balance_date->gt($asOfDate)) {
+            return 0.0;
+        }
+
+        if ($opening != 0.0) {
+            $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
+        }
+
+        return $opening;
     }
 
     /**
@@ -40,11 +56,13 @@ class FundFlowReportController extends Controller
         $companyId = $this->defaultCompanyId();
         $toDate    = $request->date('to_date') ?: now();
         $fromDate  = $request->date('from_date') ?: $toDate->copy()->startOfYear();
+        $openingAsOfDate = $fromDate->copy()->subDay()->startOfDay();
+        $closingAsOfDate = $toDate->copy()->startOfDay();
 
-        // Load all active accounts with their groups
+        // Load all accounts with their groups. Inactive ledgers still affect
+        // historical sources/uses when they carry opening or posted movement.
         $accounts = Account::with('group')
             ->where('company_id', $companyId)
-            ->where('is_active', true)
             ->get()
             ->keyBy('id');
 
@@ -110,21 +128,18 @@ class FundFlowReportController extends Controller
             }
 
             // Opening as on (fromDate - 1)
-            $opening = (float) ($account->opening_balance ?? 0.0);
-            if ($opening != 0.0) {
-                $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
-            }
-
+            $openingBefore = $this->signedOpening($account, $openingAsOfDate);
             $aggBefore = $beforeFrom->get($accountId);
             $movementBefore = $aggBefore ? ((float) $aggBefore->total_debit - (float) $aggBefore->total_credit) : 0.0;
 
-            $openingBalance = $opening + $movementBefore;
+            $openingBalance = $openingBefore + $movementBefore;
 
             // Closing as on toDate
+            $openingTo = $this->signedOpening($account, $closingAsOfDate);
             $aggTo = $uptoTo->get($accountId);
             $movementTo = $aggTo ? ((float) $aggTo->total_debit - (float) $aggTo->total_credit) : 0.0;
 
-            $closingBalance = $opening + $movementTo;
+            $closingBalance = $openingTo + $movementTo;
 
             $groupData[$groupId]['opening'] += $openingBalance;
             $groupData[$groupId]['closing'] += $closingBalance;

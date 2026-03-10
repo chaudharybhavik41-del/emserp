@@ -204,8 +204,8 @@ class GstVoucherRegisterReportController extends Controller
                     $r->voucher_no,
                     $r->voucher_type,
                     $r->project_name,
-                    $party?->name ?? $partyAcc?->name,
-                    $party?->gstin ?? $partyAcc?->gstin,
+                    $party?->name ?? $partyAcc?->name ?? ($r->party_display_name ?? ''),
+                    ($r->party_account_count ?? 0) > 1 ? '' : ($party?->gstin ?? $partyAcc?->gstin),
                     $r->reference,
                     $r->narration,
                     $inputCgst,
@@ -299,8 +299,6 @@ class GstVoucherRegisterReportController extends Controller
         string $mode,
         array $gstAccounts
     ) {
-        $partyTypeSql = "'" . addslashes(Party::class) . "'";
-
         $inIds  = array_values(array_filter($gstAccounts['input']));
         $outIds = array_values(array_filter($gstAccounts['output']));
 
@@ -350,7 +348,7 @@ class GstVoucherRegisterReportController extends Controller
             return 'SUM(CASE WHEN voucher_lines.account_id = ' . (int) $accountId . ' THEN (voucher_lines.credit - voucher_lines.debit) ELSE 0 END)';
         };
 
-        return $query
+        $rows = $query
             ->select([
                 'voucher_lines.voucher_id as voucher_id',
                 DB::raw('MAX(vouchers.voucher_date) as voucher_date'),
@@ -373,13 +371,49 @@ class GstVoucherRegisterReportController extends Controller
                 DB::raw($expr($gstAccounts['output']['cgst'] ?? null, 'output') . ' as output_cgst'),
                 DB::raw($expr($gstAccounts['output']['sgst'] ?? null, 'output') . ' as output_sgst'),
                 DB::raw($expr($gstAccounts['output']['igst'] ?? null, 'output') . ' as output_igst'),
-
-                DB::raw("MAX(CASE WHEN accounts.type IN ('debtor','creditor') AND accounts.related_model_type = {$partyTypeSql} THEN accounts.id ELSE NULL END) as party_account_id"),
             ])
             ->groupBy('voucher_lines.voucher_id')
             ->orderByRaw('MAX(vouchers.voucher_date) asc')
             ->orderBy('voucher_lines.voucher_id')
             ->get();
+
+        if ($rows->isEmpty()) {
+            return $rows;
+        }
+
+        $voucherIds = $rows->pluck('voucher_id')->map(fn ($id) => (int) $id)->values()->all();
+
+        $partyLinesByVoucher = DB::table('voucher_lines')
+            ->join('accounts', 'accounts.id', '=', 'voucher_lines.account_id')
+            ->whereIn('voucher_lines.voucher_id', $voucherIds)
+            ->whereIn('accounts.type', ['debtor', 'creditor'])
+            ->where('accounts.related_model_type', Party::class)
+            ->orderBy('voucher_lines.voucher_id')
+            ->orderBy('voucher_lines.line_no')
+            ->get([
+                'voucher_lines.voucher_id',
+                'accounts.id as account_id',
+                'accounts.name as account_name',
+            ])
+            ->groupBy('voucher_id');
+
+        return $rows->map(function ($row) use ($partyLinesByVoucher) {
+            $partyLines = collect($partyLinesByVoucher->get((int) $row->voucher_id, collect()))
+                ->unique('account_id')
+                ->values();
+
+            $row->party_account_count = $partyLines->count();
+            $row->party_account_id = $partyLines->count() === 1
+                ? (int) ($partyLines->first()->account_id ?? 0)
+                : null;
+            $row->party_display_name = match (true) {
+                $partyLines->count() === 1 => (string) ($partyLines->first()->account_name ?? ''),
+                $partyLines->count() > 1 => 'Multiple parties',
+                default => '',
+            };
+
+            return $row;
+        })->values();
     }
 
     protected function emptyTotals(): array

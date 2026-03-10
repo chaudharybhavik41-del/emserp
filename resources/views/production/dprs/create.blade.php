@@ -3,111 +3,121 @@
 @section('title', 'New DPR')
 
 @section('content')
-@php
-    $isScoped = !empty($projectId);
-    $listUrl = $isScoped
-        ? url('/projects/'.$projectId.'/production-dprs')
-        : url('/production/production-dprs');
-    $createUrl = $isScoped
-        ? url('/projects/'.$projectId.'/production-dprs/create')
-        : url('/production/production-dprs/create');
-    $storeUrl = $isScoped
-        ? url('/projects/'.$projectId.'/production-dprs')
-        : url('/production/production-dprs');
-@endphp
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    @php
+        $hasOldPlan = session()->hasOldInput('production_plan_id');
+        $defaultPlanId = old('production_plan_id');
+        if (!$hasOldPlan && isset($plans) && count($plans) > 0) {
+            $defaultPlanId = (string) ($plans[0]->id ?? '');
+        }
+    @endphp
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
-            <h2 class="mb-0"><i class="bi bi-plus-circle"></i> New DPR</h2>
-            <div class="text-muted small">{{ $isScoped ? 'Project-specific DPR creation' : 'Global mode: select a project first' }}</div>
-        </div>
-        <a class="btn btn-outline-secondary" href="{{ $listUrl }}">
-            <i class="bi bi-arrow-left"></i> Back
-        </a>
-    </div>
-
-    @if(! $isScoped)
-        <div class="card mb-3">
-            <div class="card-body">
-                <form method="GET" action="{{ $createUrl }}" class="row g-2 align-items-end">
-                    <div class="col-md-6">
-                        <label class="form-label">Select Project</label>
-                        <select name="project_id" class="form-select" onchange="this.form.submit()">
-                            <option value="">— Select —</option>
-                            @foreach(($projects ?? collect()) as $p)
-                                <option value="{{ $p->id }}" {{ (string) request('project_id') === (string) $p->id ? 'selected' : '' }}>
-                                    {{ $p->code }} — {{ $p->name }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <a href="{{ $createUrl }}" class="btn btn-outline-secondary">Reset</a>
-                    </div>
-                </form>
+            <h2 class="mb-0"><i class="bi bi-plus-circle"></i> New DPR Entry</h2>
+            <div class="small text-muted">
+                @if(!empty($project) && (int)($project->id ?? 0) > 0)
+                    Project: <strong>{{ $project->code }}</strong> - {{ $project->name }}
+                @else
+                    Select project, activity and plan to create DPR
+                @endif
             </div>
         </div>
-    @endif
+        <div class="d-flex gap-2">
+            @if(\Illuminate\Support\Facades\Route::has('production.workbench.project'))
+                <a class="btn btn-outline-secondary"
+                   href="{{ (int)$projectId > 0 ? route('production.workbench.project', ['project' => $projectId]) : route('production.workbench') }}">
+                    <i class="bi bi-grid"></i> Workbench
+                </a>
+            @endif
+            <a class="btn btn-outline-secondary"
+               href="{{ route('production.production-dprs.index', (int)$projectId > 0 ? ['project_id' => (int)$projectId] : []) }}">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
 
     @if($errors->any())
         <div class="alert alert-danger">
+            <div class="fw-semibold mb-1">Please fix the following:</div>
             <ul class="mb-0">
                 @foreach($errors->all() as $e)<li>{{ $e }}</li>@endforeach
             </ul>
         </div>
     @endif
 
-    @if(! $isScoped)
-        <div class="alert alert-info">
-            Select a project to load approved plans and cutting plans for DPR creation.
-        </div>
-    @endif
+    <form method="POST" action="{{ route('production.production-dprs.store') }}">
+        @csrf
 
-    <div class="card">
-        <div class="card-body">
-            <form method="POST" action="{{ $storeUrl }}">
-                @csrf
-                @if(! $isScoped)
-                    <input type="hidden" name="project_id" value="{{ request('project_id') }}">
-                @endif
-
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="mb-3">1. Select Work</h6>
                 <div class="row g-3">
-                    <div class="col-md-6">
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label">Project</label>
+                        <select
+                            name="project_id"
+                            id="project_id_picker"
+                            class="form-select"
+                            data-erp-select
+                            data-placeholder="Select project"
+                            data-allow-clear="1"
+                            data-create-url="{{ route('production.production-dprs.create') }}"
+                            onchange="(function(el){var base=el.getAttribute('data-create-url')||'';if(!base){return;}var v=(el.value||'').trim();window.location.href=v?(base+'?project_id='+encodeURIComponent(v)):base;})(this)"
+                            required
+                        >
+                            <option value="">Select project</option>
+                            @foreach(($projects ?? []) as $proj)
+                                <option value="{{ $proj->id }}" @selected((string) old('project_id', $projectId) === (string) $proj->id)>
+                                    {{ $proj->code }} - {{ $proj->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
                         <label class="form-label">Production Plan (Approved)</label>
-                        <select name="production_plan_id" class="form-select" required>
-                            <option value="">— Select —</option>
+                        <select name="production_plan_id" id="production_plan_id" class="form-select" data-erp-select data-placeholder="Select plan" required>
+                            <option value="">Select plan</option>
                             @foreach($plans as $p)
                                 <option value="{{ $p->id }}"
                                     data-bom-id="{{ (int)($p->bom_id ?? 0) }}"
-                                    {{ (string)old('production_plan_id') === (string)$p->id ? 'selected' : '' }}
+                                    @selected((string)$defaultPlanId === (string)$p->id)
                                 >
                                     {{ $p->plan_number }}
                                 </option>
                             @endforeach
                         </select>
+                        <div id="planHelpText" class="form-text {{ ((int)$projectId > 0 && count($plans) === 0) ? 'text-danger' : 'text-muted' }}">
+                            @if((int)$projectId > 0 && count($plans) === 0)
+                                No approved production plan found for selected project.
+                            @else
+                                Latest approved plan is auto-selected.
+                            @endif
+                        </div>
                     </div>
 
-                    <div class="col-md-6">
+                    <div class="col-12 col-lg-6">
                         <label class="form-label">Activity</label>
-                        <select name="production_activity_id" class="form-select" required>
-                            <option value="">— Select —</option>
+                        <select name="production_activity_id" class="form-select" data-erp-select data-placeholder="Select activity" required>
+                            <option value="">Select activity</option>
                             @foreach($activities as $a)
-                                <option value="{{ $a->id }}"
-                                    data-code="{{ $a->code }}"
-                                    {{ (string)old('production_activity_id') === (string)$a->id ? 'selected' : '' }}
-                                >
-                                    {{ $a->name }} ({{ $a->code }})
-                                </option>
+                            <option value="{{ $a->id }}"
+                                data-code="{{ $a->code }}"
+                                data-requires-machine="{{ !empty($a->requires_machine) ? '1' : '0' }}"
+                                {{ (string)old('production_activity_id') === (string)$a->id ? 'selected' : '' }}
+                            >
+                                {{ $a->name }} ({{ $a->code }})
+                            </option>
                             @endforeach
                         </select>
                     </div>
 
-                    <div class="col-md-12" id="cuttingPlanWrap" style="display:none;">
+                    <div class="col-12" id="cuttingPlanWrap" style="display:none;">
                         <label class="form-label">
                             Cutting Plan <span class="text-danger">*</span>
                         </label>
                         <select name="cutting_plan_id" id="cutting_plan_id" class="form-select">
-                            <option value="">— Select —</option>
+                            <option value="">Select cutting plan</option>
                             @foreach(($cuttingPlans ?? []) as $cp)
                                 @php
                                     $cpLabel = (string)($cp->name ?? ('#'.$cp->id));
@@ -128,17 +138,17 @@
                             @endforeach
                         </select>
                         <div class="form-text">
-                            Required when <b>Cutting</b> activity is selected. Parts will be auto-selected and quantity will be set as per allocations.
+                            Required for cutting activity. Quantities are auto-loaded from cutting plan allocation.
                         </div>
                         <div id="cuttingPlanSizeInfo" class="small text-muted mt-1"></div>
                     </div>
 
-                    <div class="col-md-12" id="motherPlateWrap" style="display:none;">
+                    <div class="col-12" id="motherPlateWrap" style="display:none;">
                         <label class="form-label">
-                            Mother Plate (Store) <span class="text-danger">*</span>
+                            Mother Plate from Store <span class="text-danger">*</span>
                         </label>
                         <select name="mother_stock_item_id" id="mother_stock_item_id" class="form-select">
-                            <option value="">— Select —</option>
+                            <option value="">Select mother plate</option>
                             @foreach(($stockPlates ?? []) as $s)
                                 @php
                                     $label = '#'.$s->id;
@@ -153,15 +163,12 @@
                                     $wt  = $s->weight_kg_available ?? null;
 
                                     $label .= ' | '.$itemName;
-
                                     if (!empty($wmm) && !empty($lmm) && !empty($thk)) {
                                         $label .= ' | '.$wmm.'x'.$lmm.'x'.$thk.'mm';
                                     } elseif (!empty($thk)) {
                                         $label .= ' | '.$thk.'mm';
                                     }
-
                                     if (!empty($grade)) { $label .= ' | '.$grade; }
-
                                     $label .= ' | Plate: '.(!empty($pno) ? $pno : '-');
                                     $label .= ' | Heat: '.(!empty($hno) ? $hno : '-');
                                     if (!empty($mtc)) { $label .= ' | MTC: '.$mtc; }
@@ -182,31 +189,38 @@
                             @endforeach
                         </select>
                         <div class="form-text">
-                            Required for <b>Cutting</b> DPR to link <b>Plate No / Heat No / MTC</b> from Store.
+                            Required for cutting so plate number, heat number and MTC are linked.
                         </div>
                         <div id="motherPlateInfo" class="small text-muted mt-1"></div>
                         <div id="motherPlateWarn" class="alert alert-warning d-none mt-2 mb-0"></div>
                     </div>
+                </div>
+            </div>
+        </div>
 
-                    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="mb-3">2. Shift and Team Details</h6>
+                <div class="row g-3">
+                    <div class="col-12 col-md-4">
                         <label class="form-label">DPR Date</label>
                         <input type="date" name="dpr_date" class="form-control" value="{{ old('dpr_date', date('Y-m-d')) }}" required>
                     </div>
 
-                    <div class="col-md-4">
+                    <div class="col-12 col-md-4">
                         <label class="form-label">Shift</label>
-                        <input type="text" name="shift" class="form-control" placeholder="Day/Night/A/B..." value="{{ old('shift') }}">
+                        <input type="text" name="shift" class="form-control" placeholder="Day / Night / A / B" value="{{ old('shift') }}">
                     </div>
 
-                    <div class="col-md-4">
-                        <label class="form-label">Machine ID (optional)</label>
-                        <input type="number" name="machine_id" class="form-control" placeholder="Machine id" value="{{ old('machine_id') }}">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label" id="machine_id_label">Machine ID (optional)</label>
+                        <input type="number" id="machine_id_input" name="machine_id" class="form-control" placeholder="Machine ID" value="{{ old('machine_id') }}">
                     </div>
 
-                    <div class="col-md-6">
+                    <div class="col-12 col-md-6">
                         <label class="form-label">Contractor (optional)</label>
                         <select name="contractor_party_id" class="form-select">
-                            <option value="">— None —</option>
+                            <option value="">None</option>
                             @foreach($contractors as $c)
                                 <option value="{{ $c->id }}" {{ (string)old('contractor_party_id') === (string)$c->id ? 'selected' : '' }}>
                                     {{ $c->name }} ({{ $c->code }})
@@ -215,10 +229,10 @@
                         </select>
                     </div>
 
-                    <div class="col-md-6">
+                    <div class="col-12 col-md-6">
                         <label class="form-label">Worker (optional)</label>
                         <select name="worker_user_id" class="form-select">
-                            <option value="">— None —</option>
+                            <option value="">None</option>
                             @foreach($workers as $w)
                                 <option value="{{ $w->id }}" {{ (string)old('worker_user_id') === (string)$w->id ? 'selected' : '' }}>
                                     {{ $w->name }}
@@ -227,29 +241,34 @@
                         </select>
                     </div>
 
-                    <div class="col-md-12">
-                        <label class="form-label">Remarks</label>
-                        <textarea name="remarks" class="form-control" rows="2">{{ old('remarks') }}</textarea>
+                    <div class="col-12">
+                        <label class="form-label">Remarks (optional)</label>
+                        <textarea name="remarks" class="form-control" rows="2" placeholder="Any supervisor note">{{ old('remarks') }}</textarea>
                     </div>
                 </div>
-
-                <div class="mt-3">
-                    <button class="btn btn-primary"><i class="bi bi-check2-circle"></i> Create DPR</button>
-                </div>
-            </form>
+            </div>
         </div>
-    </div>
+
+        <div class="sticky-bottom bg-body py-2 border-top">
+            <div class="d-grid d-md-flex justify-content-md-end">
+                <button class="btn btn-primary px-4"><i class="bi bi-check2-circle"></i> Create DPR</button>
+            </div>
+        </div>
+    </form>
 </div>
 @endsection
 
 @push('scripts')
 <script>
 (function () {
-    const planSel = document.querySelector('select[name="production_plan_id"]');
+    const planSel = document.getElementById('production_plan_id');
     const actSel = document.querySelector('select[name="production_activity_id"]');
+    const projectSel = document.getElementById('project_id_picker');
     const cpWrap = document.getElementById('cuttingPlanWrap');
     const cpSel = document.getElementById('cutting_plan_id');
     const cpSizeInfo = document.getElementById('cuttingPlanSizeInfo');
+    const machineInput = document.getElementById('machine_id_input');
+    const machineLabel = document.getElementById('machine_id_label');
 
     const plateWrap = document.getElementById('motherPlateWrap');
     const plateSel  = document.getElementById('mother_stock_item_id');
@@ -257,6 +276,11 @@
     const plateWarn = document.getElementById('motherPlateWarn');
 
     if (!planSel || !actSel || !cpWrap || !cpSel || !plateWrap || !plateSel) return;
+
+    function selectedActivityRequiresMachine() {
+        const opt = actSel.options[actSel.selectedIndex];
+        return !!(opt && opt.dataset && String(opt.dataset.requiresMachine) === '1');
+    }
 
     function selectedActivityCode() {
         const opt = actSel.options[actSel.selectedIndex];
@@ -490,6 +514,16 @@
         }
     }
 
+    function updateMachineUI() {
+        if (!machineInput || !machineLabel) return;
+
+        const required = selectedActivityRequiresMachine();
+        machineInput.required = required;
+        machineLabel.innerHTML = required
+            ? 'Machine ID <span class="text-danger">*</span>'
+            : 'Machine ID (optional)';
+    }
+
     planSel.addEventListener('change', function () {
         filterCuttingPlansByBom();
         filterPlatesByCuttingPlan();
@@ -506,6 +540,7 @@
 
     actSel.addEventListener('change', function () {
         updateCuttingPlanUI();
+        updateMachineUI();
     });
 
     // Init
@@ -513,6 +548,7 @@
     updateCuttingPlanSizeInfo();
     filterPlatesByCuttingPlan();
     updateCuttingPlanUI();
+    updateMachineUI();
 })();
 </script>
 @endpush

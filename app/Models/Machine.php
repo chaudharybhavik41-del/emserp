@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Machine extends Model
@@ -26,6 +27,10 @@ class Machine extends Model
         'year_of_manufacture',
         'supplier_party_id',
         'purchase_date',
+        'opening_date',
+        'opening_cost',
+        'opening_accum_depr',
+        'opening_wdv',
         'purchase_price',
         'accounting_treatment',
         'purchase_invoice_no',
@@ -36,6 +41,7 @@ class Machine extends Model
         'rated_capacity',
         'power_rating',
         'fuel_type',
+        'allow_fuel_issue',
         'operating_hours_total',
         'current_location',
         'department_id',
@@ -68,10 +74,14 @@ class Machine extends Model
 
     protected $casts = [
         'purchase_date' => 'date',
+        'opening_date' => 'date',
         'warranty_expiry_date' => 'date',
         'assigned_date' => 'date',
         'last_maintenance_date' => 'date',
         'next_maintenance_due_date' => 'date',
+        'opening_cost' => 'decimal:2',
+        'opening_accum_depr' => 'decimal:2',
+        'opening_wdv' => 'decimal:2',
         'purchase_price' => 'decimal:2',
         'operating_hours_total' => 'decimal:2',
         'is_issued' => 'boolean',
@@ -79,7 +89,8 @@ class Machine extends Model
         'warranty_months' => 'integer',
         'maintenance_frequency_days' => 'integer',
         'maintenance_alert_days' => 'integer',
-      	'requires_calibration' => 'boolean',
+        'requires_calibration' => 'boolean',
+        'allow_fuel_issue' => 'boolean',
 		'last_calibration_date' => 'date',
 		'next_calibration_due_date' => 'date',
     ];
@@ -278,6 +289,26 @@ class Machine extends Model
     public function purchaseBillLine(): BelongsTo
     {
         return $this->belongsTo(PurchaseBillLine::class, 'purchase_bill_line_id');
+    }
+
+    public function fixedAssetLinks(): HasMany
+    {
+        return $this->hasMany(FixedAssetLink::class, 'machine_id');
+    }
+
+    public function storeRequisitions(): HasMany
+    {
+        return $this->hasMany(StoreRequisition::class, 'machine_id');
+    }
+
+    public function storeIssues(): HasMany
+    {
+        return $this->hasMany(StoreIssue::class, 'machine_id');
+    }
+
+    public function fuelIssues(): HasMany
+    {
+        return $this->hasMany(FuelIssue::class, 'machine_id');
     }
 
 }

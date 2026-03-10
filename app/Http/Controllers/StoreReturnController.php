@@ -67,6 +67,7 @@ class StoreReturnController extends Controller
 
         $selectedIssueId = $request->query('store_issue_id');
         $issue = null;
+        $gatePass = null;
 
         if ($selectedIssueId) {
             $issue = StoreIssue::with([

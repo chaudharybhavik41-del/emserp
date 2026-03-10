@@ -75,10 +75,11 @@ class GstHelper
         }
 
         if ($gstType === 'intra') {
-            // CGST + SGST
             $halfPct = $taxPercent / 2.0;
-
-            [$cgstPaise, $sgstPaise] = MoneyHelper::splitTwo($taxPaise);
+            $cgstPaise = (int) round(($taxablePaise * $halfPct) / 100, 0);
+            $sgstPaise = (int) round(($taxablePaise * $halfPct) / 100, 0);
+            $taxPaise = $cgstPaise + $sgstPaise;
+            $taxAmount = (float) MoneyHelper::fromPaise($taxPaise);
 
             $cgstPct = $halfPct;
             $sgstPct = $halfPct;

@@ -9,6 +9,8 @@ use App\Models\Project;
 use App\Models\PurchaseBillLine;
 use App\Models\StoreStockItem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -29,7 +31,7 @@ class InventoryValuationReportController extends Controller
      * Inventory Valuation + Reconciliation report.
      *
      * What it does:
-     * - Reads live available stock from store_stock_items.
+     * - Reconstructs stock availability as of the selected business date.
      * - Values stock using:
      *      1) Posted purchase bills basic_amount aggregated per GRN line (up to As-on date) / GRN received qty
      *      2) Fallback: PO rate (if GRN has no posted bill yet)
@@ -39,7 +41,7 @@ class InventoryValuationReportController extends Controller
     public function index(Request $request)
     {
         $companyId = $this->defaultCompanyId();
-        $asOfDate  = $request->date('as_of_date') ?: now();
+        $asOfDate  = ($request->date('as_of_date') ?: now())->startOfDay();
         $projectId = $request->integer('project_id') ?: null;
         $itemId    = $request->integer('item_id') ?: null;
         $details   = $request->boolean('details');
@@ -58,10 +60,9 @@ class InventoryValuationReportController extends Controller
         // Fallback inventory account (when item.inventory_account_id is not set)
         $fallbackInvCode = Config::get('accounting.store.inventory_consumables_account_code');
         $fallbackInvAccount = $fallbackInvCode
-            ? Account::query()->where('code', $fallbackInvCode)->first()
+            ? Account::query()->where('company_id', $companyId)->where('code', $fallbackInvCode)->first()
             : null;
 
-        // Pull live available stock
         $stockQuery = StoreStockItem::query()
             ->with([
                 'item:id,code,name,inventory_account_id,material_category_id',
@@ -70,11 +71,7 @@ class InventoryValuationReportController extends Controller
                 'receiptLine:id,material_receipt_id,received_weight_kg,qty_pcs,purchase_order_item_id',
                 'receiptLine.receipt:id,receipt_number,receipt_date',
                 'receiptLine.purchaseOrderItem:id,rate',
-            ])
-            ->where(function ($q) {
-                $q->where('weight_kg_available', '>', 0)
-                    ->orWhere('qty_pcs_available', '>', 0);
-            });
+            ]);
 
         if ($projectId) {
             $stockQuery->where('project_id', $projectId);
@@ -85,6 +82,7 @@ class InventoryValuationReportController extends Controller
         }
 
         $stockItems = $stockQuery->get();
+        $stockSnapshots = $this->buildStockSnapshots($stockItems, $asOfDate);
 
         // Collect GRN line IDs (material_receipt_line_id)
         $mrLineIds = $stockItems
@@ -114,8 +112,13 @@ class InventoryValuationReportController extends Controller
         $detailRows = [];
 
         foreach ($stockItems as $stock) {
-            $availableWeight = (float) ($stock->weight_kg_available ?? 0);
-            $availablePcs    = (int) ($stock->qty_pcs_available ?? 0);
+            $snapshot = $stockSnapshots[$stock->id] ?? null;
+            if (! $snapshot || ! $snapshot['include']) {
+                continue;
+            }
+
+            $availableWeight = (float) ($snapshot['weight_kg_available'] ?? 0);
+            $availablePcs    = (float) ($snapshot['qty_pcs_available'] ?? 0);
 
             if ($availableWeight > 0) {
                 $qty    = $availableWeight;
@@ -463,5 +466,153 @@ class InventoryValuationReportController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    protected function buildStockSnapshots(Collection $stockItems, Carbon $asOfDate): array
+    {
+        if ($stockItems->isEmpty()) {
+            return [];
+        }
+
+        $stockIds = $stockItems->pluck('id')->values()->all();
+        $stockItemsById = $stockItems->keyBy('id');
+
+        $openingDates = DB::table('store_stock_adjustment_lines as l')
+            ->join('store_stock_adjustments as h', 'h.id', '=', 'l.store_stock_adjustment_id')
+            ->whereIn('l.store_stock_item_id', $stockIds)
+            ->where('h.adjustment_type', 'opening')
+            ->selectRaw('l.store_stock_item_id as stock_id, MIN(h.adjustment_date) as effective_date')
+            ->groupBy('l.store_stock_item_id')
+            ->pluck('effective_date', 'stock_id')
+            ->toArray();
+
+        $remnantDates = [];
+        if (DB::getSchemaBuilder()->hasTable('production_remnants')
+            && DB::getSchemaBuilder()->hasTable('production_dpr_lines')
+            && DB::getSchemaBuilder()->hasTable('production_dprs')) {
+            $remnantDates = DB::table('production_remnants as r')
+                ->join('production_dpr_lines as dl', 'dl.id', '=', 'r.production_dpr_line_id')
+                ->join('production_dprs as d', 'd.id', '=', 'dl.production_dpr_id')
+                ->whereIn('r.remnant_stock_item_id', $stockIds)
+                ->whereNotNull('r.remnant_stock_item_id')
+                ->selectRaw('r.remnant_stock_item_id as stock_id, MIN(d.dpr_date) as effective_date')
+                ->groupBy('r.remnant_stock_item_id')
+                ->pluck('effective_date', 'stock_id')
+                ->toArray();
+        }
+
+        $futureIssue = $this->loadMovementQuantities(
+            DB::table('store_issue_lines as l')
+                ->join('store_issues as h', 'h.id', '=', 'l.store_issue_id')
+                ->whereIn('l.store_stock_item_id', $stockIds)
+                ->where('h.status', 'posted')
+                ->whereDate('h.issue_date', '>', $asOfDate->toDateString())
+                ->selectRaw('l.store_stock_item_id as stock_id, COALESCE(SUM(l.issued_qty_pcs),0) as qty_pcs, COALESCE(SUM(l.issued_weight_kg),0) as weight_kg')
+                ->groupBy('l.store_stock_item_id')
+        );
+
+        $futureReturns = $this->loadMovementQuantities(
+            DB::table('store_return_lines as l')
+                ->join('store_returns as h', 'h.id', '=', 'l.store_return_id')
+                ->whereIn('l.store_stock_item_id', $stockIds)
+                ->where('h.status', 'posted')
+                ->whereDate('h.return_date', '>', $asOfDate->toDateString())
+                ->selectRaw('l.store_stock_item_id as stock_id, COALESCE(SUM(l.returned_qty_pcs),0) as qty_pcs, COALESCE(SUM(l.returned_weight_kg),0) as weight_kg')
+                ->groupBy('l.store_stock_item_id')
+        );
+
+        $futureVendorReturns = $this->loadMovementQuantities(
+            DB::table('material_vendor_return_lines as l')
+                ->join('material_vendor_returns as h', 'h.id', '=', 'l.material_vendor_return_id')
+                ->whereIn('l.store_stock_item_id', $stockIds)
+                ->whereDate('h.return_date', '>', $asOfDate->toDateString())
+                ->selectRaw('l.store_stock_item_id as stock_id, COALESCE(SUM(l.returned_qty_pcs),0) as qty_pcs, COALESCE(SUM(l.returned_weight_kg),0) as weight_kg')
+                ->groupBy('l.store_stock_item_id')
+        );
+
+        $futureAdjustments = $this->loadMovementQuantities(
+            DB::table('store_stock_adjustment_lines as l')
+                ->join('store_stock_adjustments as h', 'h.id', '=', 'l.store_stock_adjustment_id')
+                ->whereIn('l.store_stock_item_id', $stockIds)
+                ->where('h.status', 'posted')
+                ->whereDate('h.adjustment_date', '>', $asOfDate->toDateString())
+                ->selectRaw('l.store_stock_item_id as stock_id, COALESCE(SUM(l.quantity_pcs),0) as qty_pcs, COALESCE(SUM(l.quantity),0) as weight_kg')
+                ->groupBy('l.store_stock_item_id')
+        );
+
+        $futureProductionConsumption = [];
+        if (DB::getSchemaBuilder()->hasTable('production_pieces')
+            && DB::getSchemaBuilder()->hasTable('production_dpr_lines')
+            && DB::getSchemaBuilder()->hasTable('production_dprs')) {
+            $futureProductionConsumption = DB::table('production_pieces as pp')
+                ->join('production_dpr_lines as dl', 'dl.id', '=', 'pp.production_dpr_line_id')
+                ->join('production_dprs as d', 'd.id', '=', 'dl.production_dpr_id')
+                ->whereIn('pp.mother_stock_item_id', $stockIds)
+                ->whereDate('d.dpr_date', '>', $asOfDate->toDateString())
+                ->pluck('pp.mother_stock_item_id')
+                ->map(fn ($id) => (int) $id)
+                ->flip()
+                ->all();
+        }
+
+        $snapshots = [];
+
+        foreach ($stockItemsById as $stockId => $stock) {
+            $effectiveDate = $stock->receiptLine?->receipt?->receipt_date?->toDateString()
+                ?? ($openingDates[$stockId] ?? null)
+                ?? ($remnantDates[$stockId] ?? null)
+                ?? optional($stock->created_at)->toDateString();
+
+            if ($effectiveDate && Carbon::parse($effectiveDate)->gt($asOfDate)) {
+                $snapshots[$stockId] = [
+                    'include' => false,
+                    'qty_pcs_available' => 0.0,
+                    'weight_kg_available' => 0.0,
+                ];
+                continue;
+            }
+
+            $qtyPcs = (float) ($stock->qty_pcs_available ?? 0);
+            $weightKg = (float) ($stock->weight_kg_available ?? 0);
+
+            if (isset($futureProductionConsumption[$stockId])) {
+                $qtyPcs += (float) ($stock->qty_pcs_total ?? 0);
+                $weightKg += (float) ($stock->weight_kg_total ?? 0);
+            }
+
+            $issue = $futureIssue[$stockId] ?? ['qty_pcs' => 0.0, 'weight_kg' => 0.0];
+            $return = $futureReturns[$stockId] ?? ['qty_pcs' => 0.0, 'weight_kg' => 0.0];
+            $vendorReturn = $futureVendorReturns[$stockId] ?? ['qty_pcs' => 0.0, 'weight_kg' => 0.0];
+            $adjustment = $futureAdjustments[$stockId] ?? ['qty_pcs' => 0.0, 'weight_kg' => 0.0];
+
+            $qtyPcs += (float) $issue['qty_pcs'] + (float) $vendorReturn['qty_pcs'] - (float) $return['qty_pcs'] - (float) $adjustment['qty_pcs'];
+            $weightKg += (float) $issue['weight_kg'] + (float) $vendorReturn['weight_kg'] - (float) $return['weight_kg'] - (float) $adjustment['weight_kg'];
+
+            $qtyPcs = max(0.0, $qtyPcs);
+            $weightKg = max(0.0, $weightKg);
+
+            $snapshots[$stockId] = [
+                'include' => $qtyPcs > 0.0001 || $weightKg > 0.0001,
+                'qty_pcs_available' => $qtyPcs,
+                'weight_kg_available' => $weightKg,
+            ];
+        }
+
+        return $snapshots;
+    }
+
+    protected function loadMovementQuantities($query): array
+    {
+        return $query
+            ->get()
+            ->mapWithKeys(function ($row) {
+                return [
+                    (int) $row->stock_id => [
+                        'qty_pcs' => (float) ($row->qty_pcs ?? 0),
+                        'weight_kg' => (float) ($row->weight_kg ?? 0),
+                    ],
+                ];
+            })
+            ->all();
     }
 }

@@ -99,7 +99,10 @@
                                     <div class="small text-muted">Voucher: {{ $bill->voucher->voucher_no ?? ('#' . $bill->voucher->id) }}</div>
                                 @endif
                             </td>
-                            <td>{{ $bill->bill_date?->format('d-m-Y') }}</td>
+                            <td>
+                                <div>{{ $bill->bill_date?->format('d-m-Y') }}</div>
+                                <div class="small text-muted">Post: {{ ($bill->posting_date ?: $bill->bill_date)?->format('d-m-Y') }}</div>
+                            </td>
                             <td>{{ $bill->subcontractor?->name }}</td>
                             <td>{{ $bill->project?->name }}</td>
                             <td class="text-end">{{ number_format((float) $bill->net_amount, 2) }}</td>
@@ -120,7 +123,7 @@
                             </td>
                             <td class="text-end">
                                 <a href="{{ route('accounting.subcontractor-ra.show', $bill) }}" class="btn btn-sm btn-outline-secondary">View</a>
-                                @if($bill->status !== 'posted')
+                                @if(in_array($bill->status, ['draft', 'rejected'], true))
                                     <a href="{{ route('accounting.subcontractor-ra.edit', $bill) }}" class="btn btn-sm btn-outline-primary ms-1">Edit</a>
                                 @endif
                             </td>

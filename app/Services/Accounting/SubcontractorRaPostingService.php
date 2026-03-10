@@ -78,7 +78,7 @@ class SubcontractorRaPostingService
         }
 
         $companyId   = (int) ($raBill->company_id ?: Config::get('accounting.default_company_id', 1));
-        $voucherDate = $raBill->bill_date;
+        $voucherDate = $raBill->posting_date ?: $raBill->bill_date;
 
         // Get or create subcontractor ledger account
         $subcontractorAccount = $this->partyAccountService->syncAccountForParty($subcontractor, $companyId);
@@ -112,6 +112,19 @@ class SubcontractorRaPostingService
             }
         }
 
+        $securityDepositAccount = null;
+        $securityDepositAmount = (float) ($raBill->security_deposit_amount ?? 0);
+        if ($securityDepositAmount > 0) {
+            $securityDepositCode = (string) Config::get(
+                'accounting.subcontractor.security_deposit_payable_account_code',
+                Config::get('accounting.subcontractor.retention_payable_account_code', 'RETENTION-PAYABLE')
+            );
+            $securityDepositAccount = Account::where('code', $securityDepositCode)->first();
+            if (! $securityDepositAccount) {
+                throw new RuntimeException('Security Deposit Payable account not found for code: ' . $securityDepositCode . '. Please create the ledger or run migrations.');
+            }
+        }
+
         // Resolve Other Deductions / Recoveries account (separate line for reporting)
         $otherDeductionsAccount = null;
         $otherDeductionsAmount = (float) ($raBill->other_deductions ?? 0);
@@ -135,6 +148,17 @@ class SubcontractorRaPostingService
             }
         }
 
+        $roundOff = round((float) ($raBill->round_off ?? 0), 2);
+        $roundOffAccount = null;
+        if (abs($roundOff) > 0.0001) {
+            $roundOffCode = (string) Config::get('accounting.round_off.round_off_account_code', 'ROUND-OFF');
+            $roundOffAccount = Account::where('code', $roundOffCode)->first();
+
+            if (! $roundOffAccount) {
+                throw new RuntimeException('Round Off account not found for code: ' . $roundOffCode);
+            }
+        }
+
         // Amounts
         $currentAmount = (float) $raBill->current_amount;
         $netAmount     = (float) $raBill->net_amount;
@@ -147,6 +171,10 @@ class SubcontractorRaPostingService
         $totalAmount     = (float) $raBill->total_amount;
 
         $totalGst = $cgstAmount + $sgstAmount + $igstAmount;
+
+        if ($netAmount < -0.0001 || $totalAmount < -0.0001) {
+            throw new RuntimeException('Subcontractor RA Bill deductions cannot exceed the current amount.');
+        }
 
         // Guardrails: If GST exists but GST Input ledgers are missing, fail early with a clear message
         if ($cgstAmount > 0 && ! $cgstAccount) {
@@ -179,13 +207,16 @@ class SubcontractorRaPostingService
         $debitPaise = MoneyHelper::toPaise($currentAmount)
             + MoneyHelper::toPaise($cgstAmount)
             + MoneyHelper::toPaise($sgstAmount)
-            + MoneyHelper::toPaise($igstAmount);
+            + MoneyHelper::toPaise($igstAmount)
+            + MoneyHelper::toPaise(max(0, $roundOff));
 
         $creditPaise = MoneyHelper::toPaise($totalAmount)
             + MoneyHelper::toPaise($advanceRecovery)
             + MoneyHelper::toPaise($retentionAmount)
+            + MoneyHelper::toPaise($securityDepositAmount)
             + MoneyHelper::toPaise($otherDeductionsAmount)
-            + MoneyHelper::toPaise($tdsAmount);
+            + MoneyHelper::toPaise($tdsAmount)
+            + MoneyHelper::toPaise(max(0, -$roundOff));
 
         if ($debitPaise !== $creditPaise) {
             $diff = MoneyHelper::fromPaise($debitPaise - $creditPaise);
@@ -204,6 +235,7 @@ class SubcontractorRaPostingService
             $sgstAccount,
             $igstAccount,
             $retentionAccount,
+            $securityDepositAccount,
             $otherDeductionsAccount,
             $tdsAccount,
             $currentAmount,
@@ -212,8 +244,11 @@ class SubcontractorRaPostingService
             $sgstAmount,
             $igstAmount,
             $retentionAmount,
+            $securityDepositAmount,
             $otherDeductionsAmount,
             $tdsAmount,
+            $roundOff,
+            $roundOffAccount,
             $advanceRecovery,
             $totalAmount,
             $project
@@ -229,11 +264,13 @@ class SubcontractorRaPostingService
             $voucher->voucher_type = 'subcontractor_ra';
             $voucher->voucher_date = $voucherDate;
             $voucher->reference = $raBill->ra_number;
+            $voucher->subcontractor_work_order_id = $raBill->work_order_id;
 
             // Narration
             $narrParts = array_filter([
                 'Subcontractor RA Bill ' . $raBill->ra_number,
                 ($raBill->subcontractor->name ?? ''),
+                ($raBill->work_order_number ? ('WO# ' . $raBill->work_order_number) : ''),
                 ($raBill->bill_number ? ('Bill# ' . $raBill->bill_number) : ''),
                 (trim((string) ($raBill->remarks ?? ''))),
             ]);
@@ -249,7 +286,7 @@ class SubcontractorRaPostingService
             $voucher->created_by = $raBill->created_by;
 
             // Total voucher amount (sum of debits = sum of credits)
-            $totalDebit = $currentAmount + $cgstAmount + $sgstAmount + $igstAmount;
+            $totalDebit = $currentAmount + $cgstAmount + $sgstAmount + $igstAmount + max(0, $roundOff);
             $voucher->amount_base = round($totalDebit, 2);
             $voucher->save();
 
@@ -331,7 +368,27 @@ class SubcontractorRaPostingService
                 ]);
             }
 
-            // 4) Cr Other Deductions / Recoveries (separate line)
+            // 4) Cr Security Deposit Payable (separate line)
+            if ($securityDepositAmount > 0 && $securityDepositAccount) {
+                $secPct = (float) ($raBill->security_deposit_percent ?? 0);
+                $secLabel = $secPct > 0
+                    ? ('Security Deposit @ ' . rtrim(rtrim(number_format($secPct, 2, '.', ''), '0'), '.') . '%')
+                    : 'Security Deposit';
+
+                VoucherLine::create([
+                    'voucher_id'     => $voucher->id,
+                    'line_no'        => $lineNo++,
+                    'account_id'     => $securityDepositAccount->id,
+                    'cost_center_id' => $costCenterId,
+                    'description'    => $secLabel . ' - ' . $raBill->ra_number,
+                    'debit'          => 0,
+                    'credit'         => round($securityDepositAmount, 2),
+                    'reference_type' => SubcontractorRaBill::class,
+                    'reference_id'   => $raBill->id,
+                ]);
+            }
+
+            // 5) Cr Other Deductions / Recoveries (separate line)
             if ($otherDeductionsAmount > 0 && $otherDeductionsAccount) {
                 $remark = trim((string) ($raBill->deduction_remarks ?? ''));
                 $desc = 'Other Deductions - ' . $raBill->ra_number;
@@ -352,7 +409,7 @@ class SubcontractorRaPostingService
                 ]);
             }
 
-            // 5) Cr TDS Payable (separate line)
+            // 6) Cr TDS Payable (separate line)
             if ($tdsAmount > 0 && $tdsAccount) {
                 VoucherLine::create([
                     'voucher_id'     => $voucher->id,
@@ -367,7 +424,22 @@ class SubcontractorRaPostingService
                 ]);
             }
 
-            // 6) Cr Subcontractor Payable (net payable)
+            // 7) Round Off
+            if (abs($roundOff) > 0.0001 && $roundOffAccount) {
+                VoucherLine::create([
+                    'voucher_id'     => $voucher->id,
+                    'line_no'        => $lineNo++,
+                    'account_id'     => $roundOffAccount->id,
+                    'cost_center_id' => $costCenterId,
+                    'description'    => 'Round Off - ' . $raBill->ra_number,
+                    'debit'          => $roundOff > 0 ? round($roundOff, 2) : 0,
+                    'credit'         => $roundOff < 0 ? round(abs($roundOff), 2) : 0,
+                    'reference_type' => SubcontractorRaBill::class,
+                    'reference_id'   => $raBill->id,
+                ]);
+            }
+
+            // 8) Cr Subcontractor Payable (net payable)
             VoucherLine::create([
                 'voucher_id'     => $voucher->id,
                 'line_no'        => $lineNo++,
@@ -380,7 +452,7 @@ class SubcontractorRaPostingService
                 'reference_id'   => $raBill->id,
             ]);
 
-            // 7) Cr Subcontractor Advance Recovery (additional credit on the party ledger)
+            // 9) Cr Subcontractor Advance Recovery (additional credit on the party ledger)
             if ($advanceRecovery > 0) {
                 VoucherLine::create([
                     'voucher_id'     => $voucher->id,
@@ -418,10 +490,12 @@ class SubcontractorRaPostingService
                     'current_amount'   => $currentAmount,
                     'net_amount'       => $netAmount,
                     'retention_amount' => $retentionAmount,
+                    'security_deposit_amount' => $securityDepositAmount,
                     'advance_recovery' => $advanceRecovery,
                     'other_deductions' => $otherDeductionsAmount,
                     'total_gst'        => $cgstAmount + $sgstAmount + $igstAmount,
                     'tds_amount'       => $tdsAmount,
+                    'round_off'        => $roundOff,
                     'total_amount'     => $totalAmount,
                 ]
             );

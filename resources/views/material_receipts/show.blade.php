@@ -3,6 +3,15 @@
 @section('title', 'Material Receipt Details (GRN)')
 
 @section('content')
+        @php
+            $rawMaterialCategories = ['steel_plate', 'steel_section'];
+            $hasRawMaterialLines = $receipt->lines->contains(function ($line) use ($rawMaterialCategories) {
+                return in_array((string) $line->material_category, $rawMaterialCategories, true);
+            });
+            $canVendorReturn = ! $hasRawMaterialLines || $receipt->status === 'qc_passed';
+            $canDelete = ! $hasRawMaterialLines || $receipt->status !== 'qc_passed';
+            $statusLabel = $hasRawMaterialLines ? strtoupper($receipt->status) : 'QC N/A';
+        @endphp
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h1 class="h4 mb-0">
                 Material Receipt (GRN)
@@ -15,11 +24,13 @@
                     Back to GRNs
                 </a>
 
-                @if($receipt->status === 'qc_passed')
+                @if($canVendorReturn)
                     <a href="{{ route('material-receipts.return.create', $receipt) }}" class="btn btn-sm btn-outline-danger">
                         Vendor Return
                     </a>
-                @else
+                @endif
+
+                @if($canDelete)
                     <form method="POST" action="{{ route('material-receipts.destroy', $receipt) }}" onsubmit="return confirm('Delete this GRN? This is allowed only before QC PASSED.');">
                         @csrf
                         @method('DELETE')
@@ -46,7 +57,7 @@
                     </div>
                     <div class="col-md-3">
                         <strong>Status:</strong><br>
-                        <span class="badge bg-secondary">{{ strtoupper($receipt->status) }}</span>
+                        <span class="badge bg-secondary">{{ $statusLabel }}</span>
                     </div>
                 </div>
 
@@ -116,34 +127,42 @@
 
                 @can('store.material_receipt.update')
                     <div class="row g-3 mt-3">
-                        <div class="col-md-6">
-                            <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-flex gap-2 flex-wrap">
-                                @csrf
-                                <input type="hidden" name="status" value="qc_pending">
-                                <button type="submit" class="btn btn-sm btn-outline-warning"
-                                        @if($receipt->status === 'qc_pending') disabled @endif>
-                                    Mark QC Pending
-                                </button>
-                            </form>
-                        </div>
-                        <div class="col-md-6 text-md-end">
-                            <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-inline">
-                                @csrf
-                                <input type="hidden" name="status" value="qc_passed">
-                                <button type="submit" class="btn btn-sm btn-success me-1"
-                                        @if($receipt->status === 'qc_passed') disabled @endif>
-                                    QC Passed
-                                </button>
-                            </form>
-                            <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-inline">
-                                @csrf
-                                <input type="hidden" name="status" value="qc_rejected">
-                                <button type="submit" class="btn btn-sm btn-danger"
-                                        @if($receipt->status === 'qc_rejected') disabled @endif>
-                                    QC Rejected
-                                </button>
-                            </form>
-                        </div>
+                        @if($hasRawMaterialLines)
+                            <div class="col-md-6">
+                                <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-flex gap-2 flex-wrap">
+                                    @csrf
+                                    <input type="hidden" name="status" value="qc_pending">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning"
+                                            @if($receipt->status === 'qc_pending') disabled @endif>
+                                        Mark QC Pending
+                                    </button>
+                                </form>
+                            </div>
+                            <div class="col-md-6 text-md-end">
+                                <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-inline">
+                                    @csrf
+                                    <input type="hidden" name="status" value="qc_passed">
+                                    <button type="submit" class="btn btn-sm btn-success me-1"
+                                            @if($receipt->status === 'qc_passed') disabled @endif>
+                                        QC Passed
+                                    </button>
+                                </form>
+                                <form method="POST" action="{{ route('material-receipts.update-status', $receipt) }}" class="d-inline">
+                                    @csrf
+                                    <input type="hidden" name="status" value="qc_rejected">
+                                    <button type="submit" class="btn btn-sm btn-danger"
+                                            @if($receipt->status === 'qc_rejected') disabled @endif>
+                                        QC Rejected
+                                    </button>
+                                </form>
+                            </div>
+                        @else
+                            <div class="col-12">
+                                <div class="alert alert-info py-2 mb-0">
+                                    QC gate is not applicable because this GRN contains only non-raw material lines.
+                                </div>
+                            </div>
+                        @endif
                     </div>
                 @endcan
             </div>
@@ -350,7 +369,7 @@
                         <th>Length (mm)</th>
                         <th>Section Profile</th>
                         <th>Quantity (pcs)</th>
-                        <th>Received Weight (kg)</th>
+                        <th>Received Qty</th>
                         <th>UOM</th>
                         <th style="min-width:240px;">Line Documents</th>
 

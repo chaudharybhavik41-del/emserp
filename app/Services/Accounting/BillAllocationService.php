@@ -7,6 +7,9 @@ use App\Models\Accounting\AccountBillAllocation;
 use App\Models\Accounting\VoucherLine;
 use App\Models\Party;
 use App\Models\PurchaseBill;
+use App\Models\PurchaseOrder;
+use App\Models\SubcontractorRaBill;
+use App\Models\SubcontractorWorkOrder;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -25,6 +28,7 @@ class BillAllocationService
     public const ON_ACCOUNT_BILL_TYPE = '__on_account__';
 
     public const MODE_AGAINST    = 'against';
+    public const MODE_ADVANCE    = 'advance';
     public const MODE_ON_ACCOUNT = 'on_account';
 
     // ---------------------------------------------------------------------
@@ -97,29 +101,92 @@ class BillAllocationService
     // AP side (Supplier / Purchase Bills)
     // ---------------------------------------------------------------------
 
+    protected function resolveSupplierParty(Account $account): ?Party
+    {
+        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
+            return null;
+        }
+
+        /** @var Party|null $party */
+        $party = $account->relationLoaded('relatedModel')
+            ? $account->relatedModel
+            : null;
+
+        if (! $party && ! empty($account->related_model_id)) {
+            $party = Party::query()->find((int) $account->related_model_id);
+        }
+
+        if (! $party || ! $party->is_supplier) {
+            return null;
+        }
+
+        return $party;
+    }
+
+    protected function resolveClientParty(Account $account): ?Party
+    {
+        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
+            return null;
+        }
+
+        /** @var Party|null $party */
+        $party = $account->relationLoaded('relatedModel')
+            ? $account->relatedModel
+            : null;
+
+        if (! $party && ! empty($account->related_model_id)) {
+            $party = Party::query()->find((int) $account->related_model_id);
+        }
+
+        if (! $party || ! $party->is_client) {
+            return null;
+        }
+
+        return $party;
+    }
+
+    protected function resolveSubcontractorParty(Account $account): ?Party
+    {
+        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
+            return null;
+        }
+
+        /** @var Party|null $party */
+        $party = $account->relationLoaded('relatedModel')
+            ? $account->relatedModel
+            : null;
+
+        if (! $party && ! empty($account->related_model_id)) {
+            $party = Party::query()->find((int) $account->related_model_id);
+        }
+
+        if (! $party || ! $party->is_contractor) {
+            return null;
+        }
+
+        return $party;
+    }
+
     /**
      * Get open purchase bills (with outstanding amount) for a given supplier ledger account.
      *
      * @return Collection<int, array{bill: PurchaseBill, bill_amount: float, allocated: float, outstanding: float}>
      */
-    public function getOpenPurchaseBillsForAccount(Account $account): Collection
+    public function getOpenPurchaseBillsForAccount(Account $account, Carbon|string|null $asOfDate = null): Collection
     {
-        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
-            return collect();
-        }
-
-        /** @var Party|null $party */
-        $party = $account->relatedModel;
-        if (! $party || ! $party->is_supplier) {
+        $party = $this->resolveSupplierParty($account);
+        if (! $party) {
             return collect();
         }
 
         $supplierId = (int) $account->related_model_id;
         $companyId  = (int) $account->company_id;
+        $asOf       = $this->asOf($asOfDate);
 
         $bills = PurchaseBill::where('company_id', $companyId)
             ->where('supplier_id', $supplierId)
             ->where('status', 'posted')
+            ->whereDate('bill_date', '<=', $asOf->toDateString())
             ->orderBy('bill_date')
             ->orderBy('id')
             ->get();
@@ -135,7 +202,7 @@ class BillAllocationService
             $companyId,
             PurchaseBill::class,
             $billIds,
-            null,
+            $asOf,
             [self::MODE_AGAINST]
         );
 
@@ -156,38 +223,116 @@ class BillAllocationService
     }
 
     /**
-     * Validate allocations entered on a payment voucher against purchase bills.
+     * Get open subcontractor RA bills (with outstanding amount) for a contractor ledger account.
      *
-     * @param  array<int, array{bill_id?: int|string|null, amount?: float|string|null}>  $rows
+     * @return Collection<int, array{bill: SubcontractorRaBill, bill_amount: float, allocated: float, outstanding: float}>
+     */
+    public function getOpenSubcontractorRaBillsForAccount(Account $account, Carbon|string|null $asOfDate = null): Collection
+    {
+        $party = $this->resolveSubcontractorParty($account);
+        if (! $party) {
+            return collect();
+        }
+
+        $subcontractorId = (int) $account->related_model_id;
+        $companyId = (int) $account->company_id;
+        $asOf = $this->asOf($asOfDate);
+
+        $bills = SubcontractorRaBill::query()
+            ->where('company_id', $companyId)
+            ->where('subcontractor_id', $subcontractorId)
+            ->where('status', 'posted')
+            ->whereDate('bill_date', '<=', $asOf->toDateString())
+            ->orderBy('bill_date')
+            ->orderBy('id')
+            ->get();
+
+        if ($bills->isEmpty()) {
+            return collect();
+        }
+
+        $billIds = $bills->pluck('id')->all();
+        $allocations = $this->sumAllocationsForBillIds(
+            $companyId,
+            SubcontractorRaBill::class,
+            $billIds,
+            $asOf,
+            [self::MODE_AGAINST]
+        );
+
+        return $bills->map(function (SubcontractorRaBill $bill) use ($allocations) {
+            $billAmount = (float) ($bill->total_amount ?? 0);
+            $allocated = (float) ($allocations[$bill->id] ?? 0.0);
+            $outstanding = max(0.0, $billAmount - $allocated);
+
+            return [
+                'bill' => $bill,
+                'bill_amount' => $billAmount,
+                'allocated' => $allocated,
+                'outstanding' => $outstanding,
+            ];
+        })->filter(fn (array $row) => $row['outstanding'] > 0.0)->values();
+    }
+
+    /**
+     * Get all open AP bills that can be settled from a payment voucher.
+     *
+     * Includes supplier purchase bills and subcontractor RA bills for party ledgers
+     * that are linked to those roles.
+     *
+     * @return Collection<int, array{bill: Model, bill_type: string, bill_amount: float, allocated: float, outstanding: float}>
+     */
+    public function getOpenPayableBillsForAccount(Account $account, Carbon|string|null $asOfDate = null): Collection
+    {
+        $purchaseBills = $this->getOpenPurchaseBillsForAccount($account, $asOfDate)
+            ->map(fn (array $row) => $row + ['bill_type' => PurchaseBill::class]);
+
+        $subcontractorBills = $this->getOpenSubcontractorRaBillsForAccount($account, $asOfDate)
+            ->map(fn (array $row) => $row + ['bill_type' => SubcontractorRaBill::class]);
+
+        return $purchaseBills
+            ->concat($subcontractorBills)
+            ->sortBy(function (array $row) {
+                $bill = $row['bill'];
+                $billDate = $bill->bill_date;
+                $dateKey = $billDate instanceof Carbon
+                    ? $billDate->toDateString()
+                    : (string) $billDate;
+
+                return $dateKey . '|' . str_pad((string) ((int) ($bill->id ?? 0)), 12, '0', STR_PAD_LEFT);
+            })
+            ->values();
+    }
+
+    /**
+     * Validate allocations entered on a payment voucher against payable bills.
+     *
+     * Supports supplier purchase bills and subcontractor RA bills for the
+     * selected party ledger.
+     *
+     * @param  array<int, array{bill_type?: string|null, bill_id?: int|string|null, amount?: float|string|null}>  $rows
      * @return array<int, array{bill_type: string, bill_id: int, amount: float}>
      *
      * @throws ValidationException
      */
-    public function validatePurchasePaymentAllocations(Account $supplierAccount, float $voucherAmount, array $rows): array
+    public function validatePurchasePaymentAllocations(
+        Account $supplierAccount,
+        float $voucherAmount,
+        array $rows,
+        Carbon|string|null $asOfDate = null
+    ): array
     {
         $normalized = [];
         $totalAlloc = 0.0;
 
-        if ($supplierAccount->related_model_type !== Party::class || empty($supplierAccount->related_model_id)) {
+        $supplierParty = $this->resolveSupplierParty($supplierAccount);
+        $subcontractorParty = $this->resolveSubcontractorParty($supplierAccount);
+        if (! $supplierParty && ! $subcontractorParty) {
             // No allocations allowed unless this is a Party ledger.
             foreach ($rows as $row) {
                 if (! empty($row['bill_id']) && (float) ($row['amount'] ?? 0) > 0) {
                     throw ValidationException::withMessages([
-                        'party_account_id' => 'Bill allocations are only supported for Party ledgers linked to a supplier.',
-                    ]);
-                }
-            }
-
-            return [];
-        }
-
-        /** @var Party|null $party */
-        $party = $supplierAccount->relatedModel;
-        if (! $party || ! $party->is_supplier) {
-            foreach ($rows as $row) {
-                if (! empty($row['bill_id']) && (float) ($row['amount'] ?? 0) > 0) {
-                    throw ValidationException::withMessages([
-                        'party_account_id' => 'Bill allocations are only supported for supplier Parties.',
+                        'party_account_id' => 'Bill allocations are only supported for Party ledgers linked to a supplier or subcontractor.',
                     ]);
                 }
             }
@@ -196,9 +341,19 @@ class BillAllocationService
         }
 
         $companyId  = (int) $supplierAccount->company_id;
-        $supplierId = (int) $supplierAccount->related_model_id;
+        $asOf       = $this->asOf($asOfDate);
+        $openBills  = $this->getOpenPayableBillsForAccount($supplierAccount, $asOf);
+        $outstandingMap = [];
+        foreach ($openBills as $row) {
+            /** @var Model $bill */
+            $bill = $row['bill'];
+            $outstandingMap[(string) ($row['bill_type'] . ':' . (int) $bill->id)] = (float) ($row['outstanding'] ?? 0.0);
+        }
+
+        $amountsByBillKey = [];
 
         foreach ($rows as $index => $row) {
+            $billType = (string) ($row['bill_type'] ?? PurchaseBill::class);
             $billId = (int) ($row['bill_id'] ?? 0);
             $amount = (float) ($row['amount'] ?? 0);
 
@@ -206,34 +361,51 @@ class BillAllocationService
                 continue;
             }
 
-            $bill = PurchaseBill::where('company_id', $companyId)
-                ->where('supplier_id', $supplierId)
-                ->where('status', 'posted')
-                ->where('id', $billId)
-                ->where('status','posted')
-                ->first();
+            $bill = null;
+            if ($billType === PurchaseBill::class && $supplierParty) {
+                $bill = PurchaseBill::query()
+                    ->where('company_id', $companyId)
+                    ->where('supplier_id', (int) $supplierParty->id)
+                    ->where('status', 'posted')
+                    ->whereDate('bill_date', '<=', $asOf->toDateString())
+                    ->where('id', $billId)
+                    ->first();
+            } elseif ($billType === SubcontractorRaBill::class && $subcontractorParty) {
+                $bill = SubcontractorRaBill::query()
+                    ->where('company_id', $companyId)
+                    ->where('subcontractor_id', (int) $subcontractorParty->id)
+                    ->where('status', 'posted')
+                    ->whereDate('bill_date', '<=', $asOf->toDateString())
+                    ->where('id', $billId)
+                    ->first();
+            }
 
             if (! $bill) {
                 throw ValidationException::withMessages([
-                    "purchase_allocations.$index.bill_id" => 'Invalid purchase bill selected.',
+                    "purchase_allocations.$index.bill_id" => 'Invalid payable bill selected.',
                 ]);
             }
 
-            $open = $this->getOutstandingForPurchaseBill($bill);
+            $billKey = $billType . ':' . $billId;
+            $amountsByBillKey[$billKey] = ($amountsByBillKey[$billKey] ?? 0.0) + $amount;
+            $open = (float) ($outstandingMap[$billKey] ?? 0.0);
 
-            if ($amount - $open > 0.01) {
+            if ($amountsByBillKey[$billKey] - $open > 0.01) {
                 throw ValidationException::withMessages([
-                    "purchase_allocations.$index.amount" => 'Allocation amount exceeds outstanding for bill ' . $bill->bill_number . '.',
+                    "purchase_allocations.$index.amount" => 'Allocation amount exceeds outstanding for bill ' . ($bill->bill_number ?? $bill->ra_number ?? ('#' . $bill->id)) . '.',
                 ]);
             }
+        }
 
+        foreach ($amountsByBillKey as $billKey => $amount) {
+            [$billType, $billId] = explode(':', $billKey, 2);
             $normalized[] = [
-                'bill_type' => PurchaseBill::class,
-                'bill_id'   => $bill->id,
-                'amount'    => round($amount, 2),
+                'bill_type' => $billType,
+                'bill_id'   => (int) $billId,
+                'amount'    => round((float) $amount, 2),
             ];
 
-            $totalAlloc += $amount;
+            $totalAlloc += (float) $amount;
         }
 
         if ($totalAlloc - $voucherAmount > 0.01) {
@@ -245,8 +417,98 @@ class BillAllocationService
         return $normalized;
     }
 
+    public function storeOnAccountForPayment(VoucherLine $supplierLine, float $amount): void
+    {
+        $amount = round((float) $amount, 2);
+        if ($amount <= 0) {
+            return;
+        }
+
+        $voucher = $supplierLine->voucher;
+        $companyId = (int) ($voucher->company_id ?? $supplierLine->account->company_id ?? 1);
+        $allocDate = $voucher && $voucher->voucher_date
+            ? Carbon::parse($voucher->voucher_date)->toDateString()
+            : now()->toDateString();
+
+        AccountBillAllocation::updateOrCreate(
+            [
+                'voucher_line_id' => $supplierLine->id,
+                'bill_type'       => self::ON_ACCOUNT_BILL_TYPE,
+                'bill_id'         => 0,
+                'mode'            => self::MODE_ON_ACCOUNT,
+                'allocation_date' => $allocDate,
+            ],
+            [
+                'company_id'      => $companyId,
+                'voucher_id'      => $voucher->id,
+                'account_id'      => $supplierLine->account_id,
+                'amount'          => $amount,
+            ]
+        );
+    }
+
+    public function storeAdvanceForPayment(VoucherLine $supplierLine, PurchaseOrder $purchaseOrder, float $amount): void
+    {
+        $amount = round((float) $amount, 2);
+        if ($amount <= 0) {
+            return;
+        }
+
+        $voucher = $supplierLine->voucher;
+        $companyId = (int) ($voucher->company_id ?? $supplierLine->account->company_id ?? 1);
+        $allocDate = $voucher && $voucher->voucher_date
+            ? Carbon::parse($voucher->voucher_date)->toDateString()
+            : now()->toDateString();
+
+        AccountBillAllocation::updateOrCreate(
+            [
+                'voucher_line_id' => $supplierLine->id,
+                'bill_type'       => PurchaseOrder::class,
+                'bill_id'         => (int) $purchaseOrder->id,
+                'mode'            => self::MODE_ADVANCE,
+                'allocation_date' => $allocDate,
+            ],
+            [
+                'company_id'      => $companyId,
+                'voucher_id'      => $voucher->id,
+                'account_id'      => $supplierLine->account_id,
+                'amount'          => $amount,
+            ]
+        );
+    }
+
+    public function storeAdvanceForSubcontractorPayment(VoucherLine $partyLine, SubcontractorWorkOrder $workOrder, float $amount): void
+    {
+        $amount = round((float) $amount, 2);
+        if ($amount <= 0) {
+            return;
+        }
+
+        $voucher = $partyLine->voucher;
+        $companyId = (int) ($voucher->company_id ?? $partyLine->account->company_id ?? 1);
+        $allocDate = $voucher && $voucher->voucher_date
+            ? Carbon::parse($voucher->voucher_date)->toDateString()
+            : now()->toDateString();
+
+        AccountBillAllocation::updateOrCreate(
+            [
+                'voucher_line_id' => $partyLine->id,
+                'bill_type'       => SubcontractorWorkOrder::class,
+                'bill_id'         => (int) $workOrder->id,
+                'mode'            => self::MODE_ADVANCE,
+                'allocation_date' => $allocDate,
+            ],
+            [
+                'company_id'      => $companyId,
+                'voucher_id'      => $voucher->id,
+                'account_id'      => $partyLine->account_id,
+                'amount'          => $amount,
+            ]
+        );
+    }
+
     /**
-     * Persist purchase bill allocations for a payment voucher line (supplier ledger line).
+     * Persist payable-bill allocations for a payment voucher line.
      *
      * @param  array<int, array{bill_type: string, bill_id: int, amount: float}>  $rows
      */
@@ -258,7 +520,80 @@ class BillAllocationService
 
         $voucher   = $partyLine->voucher;
         $companyId = (int) ($voucher->company_id ?? $partyLine->account->company_id ?? 1);
-        $allocDate = $voucher && $voucher->voucher_date ? Carbon::parse($voucher->voucher_date)->toDateString() : now()->toDateString();
+        $allocAsOf = $voucher && $voucher->voucher_date
+            ? Carbon::parse($voucher->voucher_date)->startOfDay()
+            : now()->startOfDay();
+        $allocDate = $allocAsOf->toDateString();
+        $partyAccount = $partyLine->account;
+        $supplierParty = $this->resolveSupplierParty($partyAccount);
+        $subcontractorParty = $this->resolveSubcontractorParty($partyAccount);
+
+        foreach (collect($rows)->groupBy('bill_type') as $billType => $groupRows) {
+            $billIds = collect($groupRows)
+                ->pluck('bill_id')
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn (int $id) => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($billIds)) {
+                continue;
+            }
+
+            $bills = match ($billType) {
+                PurchaseBill::class => PurchaseBill::query()
+                    ->where('company_id', $companyId)
+                    ->where('supplier_id', (int) ($supplierParty?->id ?? 0))
+                    ->whereIn('id', $billIds)
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id'),
+                SubcontractorRaBill::class => SubcontractorRaBill::query()
+                    ->where('company_id', $companyId)
+                    ->where('subcontractor_id', (int) ($subcontractorParty?->id ?? 0))
+                    ->whereIn('id', $billIds)
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id'),
+                default => collect(),
+            };
+
+            $allocatedMap = $this->sumAllocationsForBillIds(
+                $companyId,
+                (string) $billType,
+                $billIds,
+                $allocAsOf,
+                [self::MODE_AGAINST]
+            );
+            $pendingByBillId = [];
+
+            foreach ($groupRows as $row) {
+                $billId = (int) ($row['bill_id'] ?? 0);
+                $amount = round((float) ($row['amount'] ?? 0), 2);
+
+                if ($billId <= 0 || $amount <= 0) {
+                    continue;
+                }
+
+                $bill = $bills->get($billId);
+                if (! $bill) {
+                    throw ValidationException::withMessages([
+                        'purchase_allocations' => 'Selected payable bill is invalid for this company.',
+                    ]);
+                }
+
+                $billAmount = $this->payableBillAmount($bill);
+                $pendingByBillId[$billId] = ($pendingByBillId[$billId] ?? 0.0) + $amount;
+                $open = max(0.0, $billAmount - (float) ($allocatedMap[$billId] ?? 0.0));
+
+                if ($pendingByBillId[$billId] - $open > 0.01) {
+                    throw ValidationException::withMessages([
+                        'purchase_allocations' => 'Payable bill outstanding changed before save. Refresh and try again.',
+                    ]);
+                }
+            }
+        }
 
         foreach ($rows as $row) {
             AccountBillAllocation::create([
@@ -273,6 +608,21 @@ class BillAllocationService
                 'allocation_date'  => $allocDate,
             ]);
         }
+    }
+
+    protected function payableBillAmount(Model $bill): float
+    {
+        if ($bill instanceof PurchaseBill) {
+            return (float) ($bill->total_amount ?? 0)
+                + (float) ($bill->tcs_amount ?? 0)
+                - (float) ($bill->tds_amount ?? 0);
+        }
+
+        if ($bill instanceof SubcontractorRaBill) {
+            return (float) ($bill->total_amount ?? 0);
+        }
+
+        return 0.0;
     }
 
     /**
@@ -367,13 +717,8 @@ class BillAllocationService
      */
     public function getOpenClientBillsForAccount(Account $account, Carbon|string|null $asOfDate = null, string $billStatus = 'posted'): Collection
     {
-        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
-            return collect();
-        }
-
-        /** @var Party|null $party */
-        $party = $account->relatedModel;
-        if (! $party || ! $party->is_client) {
+        $party = $this->resolveClientParty($account);
+        if (! $party) {
             return collect();
         }
 
@@ -447,25 +792,12 @@ class BillAllocationService
         $totalAlloc = 0.0;
         $companyId  = (int) $clientAccount->company_id;
 
-        if ($clientAccount->related_model_type !== Party::class || empty($clientAccount->related_model_id)) {
+        $party = $this->resolveClientParty($clientAccount);
+        if (! $party) {
             foreach ($rows as $row) {
                 if (! empty($row['bill_id']) && (float) ($row['amount'] ?? 0) > 0) {
                     throw ValidationException::withMessages([
                         'party_account_id' => 'Bill allocations are only supported for Party ledgers linked to a client.',
-                    ]);
-                }
-            }
-
-            return [];
-        }
-
-        /** @var Party|null $party */
-        $party = $clientAccount->relatedModel;
-        if (! $party || ! $party->is_client) {
-            foreach ($rows as $row) {
-                if (! empty($row['bill_id']) && (float) ($row['amount'] ?? 0) > 0) {
-                    throw ValidationException::withMessages([
-                        'party_account_id' => 'Bill allocations are only supported for client Parties.',
                     ]);
                 }
             }
@@ -490,6 +822,8 @@ class BillAllocationService
             $outstandingMap[(int) $bill->id] = (float) ($row['outstanding'] ?? 0.0);
         }
 
+        $amountsByBillId = [];
+
         foreach ($rows as $index => $row) {
             $billId = (int) ($row['bill_id'] ?? 0);
             $amount = (float) ($row['amount'] ?? 0);
@@ -504,21 +838,24 @@ class BillAllocationService
                 ]);
             }
 
+            $amountsByBillId[$billId] = ($amountsByBillId[$billId] ?? 0.0) + $amount;
             $open = (float) $outstandingMap[$billId];
 
-            if ($amount - $open > 0.01) {
+            if ($amountsByBillId[$billId] - $open > 0.01) {
                 throw ValidationException::withMessages([
                     "receipt_allocations.$index.amount" => 'Allocation amount exceeds outstanding for bill #' . $billId . '.',
                 ]);
             }
+        }
 
+        foreach ($amountsByBillId as $billId => $amount) {
             $normalized[] = [
                 'bill_type' => $modelClass,
-                'bill_id'   => $billId,
-                'amount'    => round($amount, 2),
+                'bill_id'   => (int) $billId,
+                'amount'    => round((float) $amount, 2),
             ];
 
-            $totalAlloc += $amount;
+            $totalAlloc += (float) $amount;
         }
 
         if ($totalAlloc - $voucherAmount > 0.01) {
@@ -543,7 +880,73 @@ class BillAllocationService
 
         $voucher   = $clientLine->voucher;
         $companyId = (int) ($voucher->company_id ?? $clientLine->account->company_id ?? 1);
-        $allocDate = $voucher && $voucher->voucher_date ? Carbon::parse($voucher->voucher_date)->toDateString() : now()->toDateString();
+        $allocAsOf = $voucher && $voucher->voucher_date
+            ? Carbon::parse($voucher->voucher_date)->startOfDay()
+            : now()->startOfDay();
+        $allocDate = $allocAsOf->toDateString();
+        $billTypes = collect($rows)
+            ->pluck('bill_type')
+            ->filter(fn ($type) => is_string($type) && $type !== '')
+            ->unique()
+            ->values();
+
+        if ($billTypes->count() !== 1) {
+            throw ValidationException::withMessages([
+                'receipt_allocations' => 'Receipt allocations must target a single bill model.',
+            ]);
+        }
+
+        /** @var class-string<Model> $modelClass */
+        $modelClass = $billTypes->first();
+        $billIds = collect($rows)
+            ->pluck('bill_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        /** @var Collection<int,Model> $bills */
+        $bills = $modelClass::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $billIds)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        $allocatedMap = $this->sumAllocationsForBillIds(
+            $companyId,
+            $modelClass,
+            $billIds,
+            $allocAsOf,
+            [self::MODE_AGAINST]
+        );
+        $pendingByBillId = [];
+
+        foreach ($rows as $row) {
+            $billId = (int) ($row['bill_id'] ?? 0);
+            $amount = round((float) ($row['amount'] ?? 0), 2);
+
+            if ($billId <= 0 || $amount <= 0) {
+                continue;
+            }
+
+            $bill = $bills->get($billId);
+            if (! $bill) {
+                throw ValidationException::withMessages([
+                    'receipt_allocations' => 'Selected client bill is invalid for this company.',
+                ]);
+            }
+
+            $pendingByBillId[$billId] = ($pendingByBillId[$billId] ?? 0.0) + $amount;
+            $open = max(0.0, $this->getClientBillAmount($bill) - (float) ($allocatedMap[$billId] ?? 0.0));
+
+            if ($pendingByBillId[$billId] - $open > 0.01) {
+                throw ValidationException::withMessages([
+                    'receipt_allocations' => 'Client bill outstanding changed before save. Refresh and try again.',
+                ]);
+            }
+        }
 
         foreach ($rows as $row) {
             AccountBillAllocation::create([
@@ -793,6 +1196,7 @@ class BillAllocationService
 
         $normalized = [];
         $totalApply = 0.0;
+        $amountsByBillId = [];
 
         foreach ($rows as $i => $row) {
             $billId = (int) ($row['bill_id'] ?? 0);
@@ -808,19 +1212,22 @@ class BillAllocationService
                 ]);
             }
 
+            $amountsByBillId[$billId] = ($amountsByBillId[$billId] ?? 0.0) + $amt;
             $open = (float) $openMap[$billId];
-            if ($amt - $open > 0.01) {
+            if ($amountsByBillId[$billId] - $open > 0.01) {
                 throw ValidationException::withMessages([
                     "apply.$i.amount" => 'Amount exceeds outstanding for bill #' . $billId . '.',
                 ]);
             }
+        }
 
+        foreach ($amountsByBillId as $billId => $amount) {
             $normalized[] = [
                 'bill_type' => $modelClass,
-                'bill_id'   => $billId,
-                'amount'    => round($amt, 2),
+                'bill_id'   => (int) $billId,
+                'amount'    => round((float) $amount, 2),
             ];
-            $totalApply += $amt;
+            $totalApply += (float) $amount;
         }
 
         if ($totalApply <= 0) {
@@ -829,7 +1236,7 @@ class BillAllocationService
             ]);
         }
 
-        DB::transaction(function () use ($clientLine, $allocDate, $normalized, $totalApply, $asOf) {
+        DB::transaction(function () use ($clientLine, $allocDate, $normalized, $totalApply, $asOf, $modelClass) {
             // Lock all allocations for this voucher line (concurrency safety)
             $locked = AccountBillAllocation::where('voucher_line_id', (int) $clientLine->id)
                 ->lockForUpdate()
@@ -854,6 +1261,55 @@ class BillAllocationService
 
             $voucher   = $clientLine->voucher;
             $companyId = (int) ($voucher->company_id ?? $clientLine->account->company_id ?? 1);
+            $billIds   = collect($normalized)
+                ->pluck('bill_id')
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn (int $id) => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
+
+            /** @var Collection<int,Model> $bills */
+            $bills = $modelClass::query()
+                ->where('company_id', $companyId)
+                ->whereIn('id', $billIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $allocatedMap = $this->sumAllocationsForBillIds(
+                $companyId,
+                $modelClass,
+                $billIds,
+                $asOf,
+                [self::MODE_AGAINST]
+            );
+            $pendingByBillId = [];
+
+            foreach ($normalized as $row) {
+                $billId = (int) ($row['bill_id'] ?? 0);
+                $amount = round((float) ($row['amount'] ?? 0), 2);
+
+                if ($billId <= 0 || $amount <= 0) {
+                    continue;
+                }
+
+                $bill = $bills->get($billId);
+                if (! $bill) {
+                    throw ValidationException::withMessages([
+                        'apply' => 'Selected client bill no longer exists for this company.',
+                    ]);
+                }
+
+                $pendingByBillId[$billId] = ($pendingByBillId[$billId] ?? 0.0) + $amount;
+                $open = max(0.0, $this->getClientBillAmount($bill) - (float) ($allocatedMap[$billId] ?? 0.0));
+
+                if ($pendingByBillId[$billId] - $open > 0.01) {
+                    throw ValidationException::withMessages([
+                        'apply' => 'Client bill outstanding changed before apply. Refresh and try again.',
+                    ]);
+                }
+            }
 
             // Create "against" allocations
             foreach ($normalized as $row) {

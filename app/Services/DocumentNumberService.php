@@ -6,6 +6,7 @@ use App\Models\MaterialReceipt;
 use App\Models\MaterialVendorReturn;
 use App\Models\StoreRequisition;
 use App\Models\StoreIssue;
+use App\Models\FuelIssue;
 use App\Models\StoreReturn;
 use App\Models\StoreStockAdjustment;
 
@@ -37,6 +38,11 @@ class DocumentNumberService
         return $this->format('ISS', (int) $issue->id);
     }
 
+    public function fuelIssue(FuelIssue $issue): string
+    {
+        return $this->format('FUEL', (int) $issue->id);
+    }
+
     public function storeReturn(StoreReturn $return): string
     {
         return $this->format('RTN', (int) $return->id);
@@ -52,4 +58,3 @@ class DocumentNumberService
         return $this->format('STAD', (int) $adjustment->id);
     }
 }
-

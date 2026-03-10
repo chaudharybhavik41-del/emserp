@@ -12,11 +12,15 @@ use Illuminate\Support\Facades\Schema;
 use App\Models\Accounting\SalesCreditNote;
 use App\Models\Accounting\PurchaseDebitNote;
 use App\Models\Project;
+use App\Models\Machine;
 use App\Services\Accounting\VoucherNumberService;
 use App\Services\Accounting\VoucherReversalService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class VoucherController extends Controller
@@ -79,6 +83,112 @@ class VoucherController extends Controller
         return $out;
     }
 
+    /**
+     * Guard manual vouchers against malformed lines that can still arithmetically balance.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     *
+     * @throws ValidationException
+     */
+    protected function validateManualVoucherLines(array $lines): void
+    {
+        $errors = [];
+
+        foreach ($lines as $index => $line) {
+            $debit  = (float) ($line['debit'] ?? 0);
+            $credit = (float) ($line['credit'] ?? 0);
+
+            if ($debit < 0) {
+                $errors["lines.$index.debit"] = 'Debit cannot be negative.';
+            }
+
+            if ($credit < 0) {
+                $errors["lines.$index.credit"] = 'Credit cannot be negative.';
+            }
+
+            if ($debit > 0 && $credit > 0) {
+                $errors["lines.$index.debit"] = 'Enter either debit or credit on a line, not both.';
+            }
+        }
+
+        if (! empty($errors)) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    /**
+     * Cash/bank ledgers allowed in contra vouchers.
+     */
+    protected function resolveContraAccountIdsFromCollection(Collection $accounts): array
+    {
+        $cashAccountTypes = Config::get('accounting.cashflow_cash_account_types', ['bank', 'cash']);
+        $cashGroupCodes = Config::get('accounting.cashflow_cash_group_codes', []);
+
+        $contraAccounts = $accounts;
+
+        if (! empty($cashAccountTypes)) {
+            $contraAccounts = $contraAccounts->whereIn('type', $cashAccountTypes);
+        }
+
+        if ($contraAccounts->isEmpty() && ! empty($cashGroupCodes)) {
+            $contraAccounts = $accounts->filter(function (Account $account) use ($cashGroupCodes) {
+                return in_array($account->group?->code, $cashGroupCodes, true);
+            });
+        }
+
+        return $contraAccounts
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    protected function resolveContraAccountIdsForCompany(int $companyId): array
+    {
+        $accounts = Account::with('group')
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
+        return $this->resolveContraAccountIdsFromCollection($accounts);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $lines
+     *
+     * @throws ValidationException
+     */
+    protected function validateContraVoucherAccounts(int $companyId, array $lines): void
+    {
+        $allowedAccountIds = $this->resolveContraAccountIdsForCompany($companyId);
+
+        if (empty($allowedAccountIds)) {
+            throw ValidationException::withMessages([
+                'voucher_type' => 'No cash or bank ledgers are configured for contra vouchers.',
+            ]);
+        }
+
+        $errors = [];
+
+        foreach ($lines as $index => $line) {
+            $debit = (float) ($line['debit'] ?? 0);
+            $credit = (float) ($line['credit'] ?? 0);
+
+            if ($debit == 0.0 && $credit == 0.0) {
+                continue;
+            }
+
+            $accountId = (int) ($line['account_id'] ?? 0);
+
+            if ($accountId <= 0 || ! in_array($accountId, $allowedAccountIds, true)) {
+                $errors["lines.$index.account_id"] = 'Contra voucher allows only cash or bank ledgers.';
+            }
+        }
+
+        if (! empty($errors)) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
 
     public function index(Request $request)
     {
@@ -104,10 +214,17 @@ class VoucherController extends Controller
     public function create()
     {
 
-        $accounts    = Account::orderBy('name')->get();
+        $accounts    = Account::with('group')->orderBy('name')->get();
+        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
 
         $costCenters = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
+        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
+            && Schema::hasColumn('voucher_lines', 'machine_id')
+            && Schema::hasTable('machines');
+        $machines = $hasMachineLineDimension
+            ? Machine::orderBy('name')->get(['id', 'code', 'name'])
+            : collect();
         $projectCostCenterMap = $costCenters
             ->filter(fn (CostCenter $costCenter) => ! empty($costCenter->project_id))
             ->mapWithKeys(fn (CostCenter $costCenter) => [(int) $costCenter->project_id => (int) $costCenter->id]);
@@ -118,12 +235,27 @@ class VoucherController extends Controller
             'contra'  => 'Contra',
         ];
 
-        return view('accounting.vouchers.create', compact('accounts', 'costCenters', 'projects', 'voucherTypes', 'projectCostCenterMap'));
+        return view('accounting.vouchers.create', compact(
+            'accounts',
+            'contraAccountIds',
+            'costCenters',
+            'projects',
+            'voucherTypes',
+            'projectCostCenterMap',
+            'machines',
+            'hasMachineLineDimension'
+        ));
     }
 
     public function store(Request $request)
     {
         $companyId = (int) $request->input('company_id');
+        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
+            && Schema::hasColumn('voucher_lines', 'machine_id')
+            && Schema::hasTable('machines');
+        $lineMachineRule = $hasMachineLineDimension
+            ? ['nullable', 'integer', 'exists:machines,id']
+            : ['nullable'];
 
         $data = $request->validate([
             'company_id'    => ['required', 'integer'],
@@ -140,6 +272,7 @@ class VoucherController extends Controller
             'lines'                 => ['required', 'array', 'min:1'],
             'lines.*.account_id'    => ['required', 'integer', 'exists:accounts,id'],
             'lines.*.cost_center_id'=> ['nullable', 'integer', 'exists:cost_centers,id'],
+            'lines.*.machine_id'    => $lineMachineRule,
             'lines.*.description'   => ['nullable', 'string', 'max:255'],
             'lines.*.debit'         => ['nullable', 'numeric'],
             'lines.*.credit'        => ['nullable', 'numeric'],
@@ -147,6 +280,12 @@ class VoucherController extends Controller
             // Optional UI action
             'post_now'              => ['nullable'],
         ]);
+
+        $this->validateManualVoucherLines($data['lines']);
+
+        if (($data['voucher_type'] ?? null) === 'contra') {
+            $this->validateContraVoucherAccounts($companyId, $data['lines']);
+        }
 
         $voucherNoInput = trim((string) ($data['voucher_no'] ?? ''));
         $voucherType    = (string) $data['voucher_type'];
@@ -169,7 +308,7 @@ class VoucherController extends Controller
         $data['created_by']    = $request->user()?->id;
         $data['status']        = 'draft';
 
-        $voucher = DB::transaction(function () use ($request, $companyId, $voucherNoInput, $voucherType, $voucherDate, $data, $lines) {
+        $voucher = DB::transaction(function () use ($request, $companyId, $voucherNoInput, $voucherType, $voucherDate, $data, $lines, $hasMachineLineDimension) {
             $voucherNo = $voucherNoInput !== ''
                 ? $voucherNoInput
                 : $this->voucherNumberService->next($voucherType, $companyId, $voucherDate);
@@ -196,7 +335,7 @@ class VoucherController extends Controller
                 $totalDebit  += $debit;
                 $totalCredit += $credit;
 
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $line['account_id'],
@@ -206,7 +345,13 @@ class VoucherController extends Controller
                     'credit'         => $credit,
                     'reference_type' => null,
                     'reference_id'   => null,
-                ]);
+                ];
+
+                if ($hasMachineLineDimension) {
+                    $lineData['machine_id'] = ! empty($line['machine_id']) ? (int) $line['machine_id'] : null;
+                }
+
+                VoucherLine::create($lineData);
             }
 
             if ($lineNo === 1) {
@@ -259,6 +404,8 @@ class VoucherController extends Controller
             'reversedBy',
             'lines.account',
             'lines.costCenter',
+            'lines.machine',
+            'lines.fixedAssetLinks.machine',
         ]);
 
         $reversalVoucher = null;
@@ -309,17 +456,33 @@ class VoucherController extends Controller
                 ->with('error', 'Reversed vouchers cannot be edited.');
         }
 
-        $voucher->load(['lines.account', 'lines.costCenter']);
+        $voucher->load(['lines.account', 'lines.costCenter', 'lines.machine']);
 
-        $accounts     = Account::orderBy('name')->get();
+        $accounts     = Account::with('group')->orderBy('name')->get();
+        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
         $costCenters  = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
+        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
+            && Schema::hasColumn('voucher_lines', 'machine_id')
+            && Schema::hasTable('machines');
+        $machines = $hasMachineLineDimension
+            ? Machine::orderBy('name')->get(['id', 'code', 'name'])
+            : collect();
         $voucherTypes = [
             'journal' => 'Journal',
             'contra'  => 'Contra',
         ];
 
-        return view('accounting.vouchers.edit', compact('voucher', 'accounts', 'costCenters', 'projects', 'voucherTypes'));
+        return view('accounting.vouchers.edit', compact(
+            'voucher',
+            'accounts',
+            'contraAccountIds',
+            'costCenters',
+            'projects',
+            'voucherTypes',
+            'machines',
+            'hasMachineLineDimension'
+        ));
     }
 
     public function update(Request $request, Voucher $voucher)
@@ -337,6 +500,12 @@ class VoucherController extends Controller
         }
 
         $companyId = (int) $voucher->company_id;
+        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
+            && Schema::hasColumn('voucher_lines', 'machine_id')
+            && Schema::hasTable('machines');
+        $lineMachineRule = $hasMachineLineDimension
+            ? ['nullable', 'integer', 'exists:machines,id']
+            : ['nullable'];
 
         $data = $request->validate([
             'voucher_no'    => ['required', 'string', 'max:50'],
@@ -352,12 +521,19 @@ class VoucherController extends Controller
             'lines'                  => ['required', 'array', 'min:1'],
             'lines.*.account_id'     => ['required', 'integer', 'exists:accounts,id'],
             'lines.*.cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
+            'lines.*.machine_id'     => $lineMachineRule,
             'lines.*.description'    => ['nullable', 'string', 'max:255'],
             'lines.*.debit'          => ['nullable', 'numeric'],
             'lines.*.credit'         => ['nullable', 'numeric'],
 
             'post_now'               => ['nullable'],
         ]);
+
+        $this->validateManualVoucherLines($data['lines']);
+
+        if (($data['voucher_type'] ?? null) === 'contra') {
+            $this->validateContraVoucherAccounts($companyId, $data['lines']);
+        }
 
         // Enforce company-wide uniqueness of voucher_no
         $request->validate([
@@ -373,7 +549,7 @@ class VoucherController extends Controller
 
         $data['exchange_rate'] = $data['exchange_rate'] ?? 1;
 
-        DB::transaction(function () use ($request, $voucher, $data, $lines) {
+        DB::transaction(function () use ($request, $voucher, $data, $lines, $hasMachineLineDimension) {
             $old = $voucher->getOriginal();
 
             $voucher->fill($data);
@@ -397,7 +573,7 @@ class VoucherController extends Controller
                 $totalDebit  += $debit;
                 $totalCredit += $credit;
 
-                VoucherLine::create([
+                $lineData = [
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $line['account_id'],
@@ -407,7 +583,13 @@ class VoucherController extends Controller
                     'credit'         => $credit,
                     'reference_type' => null,
                     'reference_id'   => null,
-                ]);
+                ];
+
+                if ($hasMachineLineDimension) {
+                    $lineData['machine_id'] = ! empty($line['machine_id']) ? (int) $line['machine_id'] : null;
+                }
+
+                VoucherLine::create($lineData);
             }
 
             if ($lineNo === 1) {

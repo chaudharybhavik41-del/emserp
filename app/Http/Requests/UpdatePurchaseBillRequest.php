@@ -16,15 +16,20 @@ class UpdatePurchaseBillRequest extends FormRequest
     public function rules(): array
     {
         $billId = $this->route('bill')?->id ?? $this->route('purchase_bill')?->id ?? $this->route('id');
+        $expenseMachineRule = Schema::hasTable('machines')
+            ? ['nullable', 'integer', Rule::exists('machines', 'id')]
+            : ['nullable'];
 
         $rules = [
             'supplier_id'        => ['required', 'integer', Rule::exists('parties', 'id')],
             'supplier_branch_id' => ['nullable', 'integer'],
 
             'purchase_order_id'  => ['nullable', 'integer', Rule::exists('purchase_orders', 'id')],
+            'purchase_order_ids' => ['nullable', 'array'],
+            'purchase_order_ids.*' => ['integer', 'distinct', Rule::exists('purchase_orders', 'id')],
             'project_id'         => ['nullable', 'integer', Rule::exists('projects', 'id')],
 
-            'bill_number'        => ['required', 'string', 'max:50', Rule::unique('purchase_bills', 'bill_number')->ignore($billId)],
+            'bill_number'        => ['nullable', 'string', 'max:50'],
             'bill_date'          => ['required', 'date'],
             'posting_date'       => ['required', 'date'],
             'due_date'           => ['nullable', 'date'],
@@ -57,12 +62,14 @@ class UpdatePurchaseBillRequest extends FormRequest
             'lines.*.discount_percent'    => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.tax_rate'            => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.material_receipt_id' => ['nullable', 'integer', Rule::exists('material_receipts', 'id')],
+            'lines.*.material_receipt_line_id' => ['nullable', 'integer', Rule::exists('material_receipt_lines', 'id')],
             'lines.*.grn_line_id'         => ['nullable', 'integer'],
 
             'expense_lines'                  => ['nullable', 'array'],
             'expense_lines.*.id'             => ['nullable', 'integer'],
             'expense_lines.*.account_id'     => ['nullable', 'integer', Rule::exists('accounts', 'id')],
             'expense_lines.*.project_id'     => ['nullable', 'integer', Rule::exists('projects', 'id')],
+            'expense_lines.*.machine_id'     => $expenseMachineRule,
             'expense_lines.*.description'    => ['nullable', 'string', 'max:500'],
             'expense_lines.*.amount'         => ['nullable', 'numeric', 'min:0'],
             'expense_lines.*.tax_rate'       => ['nullable', 'numeric', 'min:0', 'max:100'],

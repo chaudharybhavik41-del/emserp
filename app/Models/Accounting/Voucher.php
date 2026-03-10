@@ -3,7 +3,9 @@
 namespace App\Models\Accounting;
 
 use App\Models\Company;
+use App\Models\PurchaseOrder;
 use App\Models\Project;
+use App\Models\SubcontractorWorkOrder;
 use App\Models\User;
 use App\Support\MoneyHelper;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -64,6 +66,9 @@ class Voucher extends Model
         'company_id',
         'voucher_no',
         'voucher_type',
+        'payment_type',
+        'purchase_order_id',
+        'subcontractor_work_order_id',
         'voucher_date',
         'reference',
         'narration',
@@ -105,9 +110,19 @@ class Voucher extends Model
         return $this->belongsTo(Project::class);
     }
 
+    public function purchaseOrder(): BelongsTo
+    {
+        return $this->belongsTo(PurchaseOrder::class, 'purchase_order_id');
+    }
+
     public function costCenter(): BelongsTo
     {
         return $this->belongsTo(CostCenter::class);
+    }
+
+    public function subcontractorWorkOrder(): BelongsTo
+    {
+        return $this->belongsTo(SubcontractorWorkOrder::class, 'subcontractor_work_order_id');
     }
 
     public function currency(): BelongsTo

@@ -6,10 +6,32 @@ use App\ReportsHub\BaseTabularReport;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProductionBillRegisterReport extends BaseTabularReport
 {
+    protected function hasPaymentStatusColumn(): bool
+    {
+        return Schema::hasColumn('production_bills', 'payment_status');
+    }
+
+    protected function hasBillForMonthColumn(): bool
+    {
+        return Schema::hasColumn('production_bills', 'bill_for_month');
+    }
+
+    protected function hasSubtotalAmountColumn(): bool
+    {
+        return Schema::hasColumn('production_bills', 'subtotal_amount');
+    }
+
+    protected function hasNetPayableColumn(): bool
+    {
+        return Schema::hasColumn('production_bills', 'net_payable');
+    }
+
     public function key(): string
     {
         return 'production-bill-register';
@@ -51,9 +73,19 @@ class ProductionBillRegisterReport extends BaseTabularReport
 
         $gstTypes = DB::table('production_bills')->select('gst_type')->distinct()->orderBy('gst_type')->pluck('gst_type')->filter()->values()->all();
         $statusOptions = DB::table('production_bills')->select('status')->distinct()->orderBy('status')->pluck('status')->filter()->values()->all();
-        $paymentStatusOptions = DB::table('production_bills')->select('payment_status')->distinct()->orderBy('payment_status')->pluck('payment_status')->filter()->values()->all();
+        $paymentStatusOptions = [];
+        if ($this->hasPaymentStatusColumn()) {
+            $paymentStatusOptions = DB::table('production_bills')
+                ->select('payment_status')
+                ->distinct()
+                ->orderBy('payment_status')
+                ->pluck('payment_status')
+                ->filter()
+                ->values()
+                ->all();
+        }
 
-        return [
+        $filters = [
             ['name' => 'from_date', 'label' => 'From Date', 'type' => 'date', 'col' => 2],
             ['name' => 'to_date', 'label' => 'To Date', 'type' => 'date', 'col' => 2],
             [
@@ -75,12 +107,17 @@ class ProductionBillRegisterReport extends BaseTabularReport
                 'name' => 'status', 'label' => 'Status', 'type' => 'select', 'col' => 2,
                 'options' => collect($statusOptions)->map(fn ($s) => ['value' => $s, 'label' => strtoupper($s)])->all(),
             ],
-            [
-                'name' => 'payment_status', 'label' => 'Payment', 'type' => 'select', 'col' => 2,
-                'options' => collect($paymentStatusOptions)->map(fn ($s) => ['value' => $s, 'label' => strtoupper($s)])->all(),
-            ],
             ['name' => 'q', 'label' => 'Search', 'type' => 'text', 'col' => 4, 'placeholder' => 'Bill No'],
         ];
+
+        if ($this->hasPaymentStatusColumn()) {
+            $filters[] = [
+                'name' => 'payment_status', 'label' => 'Payment', 'type' => 'select', 'col' => 2,
+                'options' => collect($paymentStatusOptions)->map(fn ($s) => ['value' => $s, 'label' => strtoupper($s)])->all(),
+            ];
+        }
+
+        return $filters;
     }
 
     public function columns(): array
@@ -88,7 +125,27 @@ class ProductionBillRegisterReport extends BaseTabularReport
         return [
             ['label' => 'Bill No', 'value' => 'bill_number', 'w' => '12%'],
             ['label' => 'Bill Date', 'value' => 'bill_date', 'w' => '9%'],
-            ['label' => 'Month', 'value' => 'bill_for_month', 'w' => '8%'],
+            [
+                'label' => 'Month',
+                'value' => function ($r) {
+                    $month = (string) ($r->bill_for_month ?? '');
+                    if ($month !== '') {
+                        return $month;
+                    }
+
+                    $billDate = (string) ($r->bill_date ?? '');
+                    if ($billDate === '') {
+                        return '-';
+                    }
+
+                    try {
+                        return Carbon::parse($billDate)->format('M Y');
+                    } catch (\Throwable $e) {
+                        return $billDate;
+                    }
+                },
+                'w' => '8%',
+            ],
             ['label' => 'Project', 'value' => fn ($r) => trim(($r->project_code ? $r->project_code . ' - ' : '') . ($r->project_name ?? '')), 'w' => '20%'],
             ['label' => 'Contractor', 'value' => 'contractor_name', 'w' => '16%'],
             ['label' => 'GST', 'value' => fn ($r) => strtoupper((string) $r->gst_type), 'w' => '6%'],
@@ -108,26 +165,34 @@ class ProductionBillRegisterReport extends BaseTabularReport
 
     public function query(array $filters): QueryBuilder
     {
+        $hasPaymentStatus = $this->hasPaymentStatusColumn();
+        $hasBillForMonth = $this->hasBillForMonthColumn();
+        $hasSubtotalAmount = $this->hasSubtotalAmountColumn();
+        $hasNetPayable = $this->hasNetPayableColumn();
+
+        $selects = [
+            'b.id',
+            'b.bill_number',
+            'b.bill_date',
+            'b.gst_type',
+            'b.gst_rate',
+            'b.tax_total',
+            'b.grand_total',
+            'b.status',
+            'p.code as project_code',
+            'p.name as project_name',
+            'c.name as contractor_name',
+        ];
+
+        $selects[] = $hasBillForMonth ? 'b.bill_for_month' : DB::raw('NULL as bill_for_month');
+        $selects[] = $hasSubtotalAmount ? 'b.subtotal_amount' : DB::raw('b.subtotal as subtotal_amount');
+        $selects[] = $hasNetPayable ? 'b.net_payable' : DB::raw('b.grand_total as net_payable');
+        $selects[] = $hasPaymentStatus ? 'b.payment_status' : DB::raw('NULL as payment_status');
+
         $q = DB::table('production_bills as b')
             ->leftJoin('projects as p', 'p.id', '=', 'b.project_id')
             ->leftJoin('parties as c', 'c.id', '=', 'b.contractor_party_id')
-            ->select([
-                'b.id',
-                'b.bill_number',
-                'b.bill_date',
-                'b.bill_for_month',
-                'b.gst_type',
-                'b.gst_rate',
-                'b.subtotal_amount',
-                'b.tax_total',
-                'b.grand_total',
-                'b.net_payable',
-                'b.status',
-                'b.payment_status',
-                'p.code as project_code',
-                'p.name as project_name',
-                'c.name as contractor_name',
-            ]);
+            ->select($selects);
 
         if (!empty($filters['from_date'])) {
             $q->whereDate('b.bill_date', '>=', $filters['from_date']);
@@ -147,7 +212,7 @@ class ProductionBillRegisterReport extends BaseTabularReport
         if (!empty($filters['status'])) {
             $q->where('b.status', $filters['status']);
         }
-        if (!empty($filters['payment_status'])) {
+        if (!empty($filters['payment_status']) && $hasPaymentStatus) {
             $q->where('b.payment_status', $filters['payment_status']);
         }
         if (!empty($filters['q'])) {

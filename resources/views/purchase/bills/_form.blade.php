@@ -36,10 +36,22 @@ if ($itemLines === null) {
     }
 }
 
+$hasGrnLinkedItemLines = collect($itemLines)->contains(function ($line) {
+    return !empty($line['material_receipt_line_id']);
+});
+
+$showItemTable = collect($itemLines)->contains(function ($line) {
+    return !empty($line['item_id']);
+});
+
+if (! $isEdit && ! $hasGrnLinkedItemLines) {
+    $itemLines = [];
+}
+
 $emptyLines = isset($emptyLines) ? (int) $emptyLines : 3;
 $minRows = max($emptyLines, count($itemLines));
 // always keep a few extra empty rows for data entry
-$targetRows = max($minRows, 5);
+$targetRows = $isEdit ? max($minRows, 5) : count($itemLines);
 for ($i = count($itemLines); $i < $targetRows; $i++) {
     $itemLines[] = [
         'id' => null,
@@ -71,6 +83,7 @@ if ($expenseLines === null) {
                 'account_id' => $l->account_id,
                 // Phase-B: preserve per-expense-line project split when editing
                 'project_id' => $l->project_id,
+                'machine_id' => $l->machine_id,
                 'description' => $l->description,
                 'amount' => $l->basic_amount,
                 'tax_rate' => $l->tax_rate,
@@ -92,6 +105,7 @@ for ($i = count($expenseLines); $i < $targetExpenseRows; $i++) {
     $expenseLines[] = [
         'account_id' => null,
         'project_id' => null,
+        'machine_id' => null,
         'description' => null,
         'amount' => null,
         'tax_rate' => 0,
@@ -120,6 +134,12 @@ $initInvoiceTotal = (float) ($bill->total_amount ?? $initCalculatedTotal);
 $initTcs = (float) ($bill->tcs_amount ?? 0);
 $initTds = (float) ($bill->tds_amount ?? 0);
 $initNet = (float) ($bill->net_payable ?? 0);
+$itemLabels = collect($items ?? [])->mapWithKeys(function ($item) {
+    return [$item->id => $item->name];
+})->all();
+$uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
+    return [$uom->id => $uom->code];
+})->all();
 @endphp
 
 
@@ -129,8 +149,15 @@ $initNet = (float) ($bill->net_payable ?? 0);
 /* Only expense table scroll */
 #expense-table-wrapper {
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     max-height: 420px;   /* optional vertical scroll */
+}
+
+/* Item table needs its own vertical scroll once many GRN rows are applied. */
+#bill-table-wrapper {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 420px;
 }
 
 /* Prevent column shrink */
@@ -156,6 +183,12 @@ $initNet = (float) ($bill->net_payable ?? 0);
 /* Description column bigger */
 #expense-lines-table th:nth-child(3),
 #expense-lines-table td:nth-child(3) {
+    min-width: 180px;
+}
+
+/* Description column bigger */
+#expense-lines-table th:nth-child(4),
+#expense-lines-table td:nth-child(4) {
     min-width: 250px;
 }
 
@@ -165,12 +198,6 @@ $initNet = (float) ($bill->net_payable ?? 0);
     top: 0;
     background: #f8f9fa;
     z-index: 2;
-}
-
-    /* Enable smooth horizontal scroll */
-.table-responsive {
-    overflow-x: auto;
-    overflow-y: hidden;
 }
 
 /* Prevent column shrink */
@@ -192,15 +219,47 @@ $initNet = (float) ($bill->net_payable ?? 0);
 #bill-lines-table td:last-child {
     min-width: 130px;
 }
-.table-responsive {
-    max-height: 420px;
-}
 
 #bill-lines-table thead th {
     position: sticky;
     top: 0;
     background: #f8f9fa;
     z-index: 2;
+}
+
+#bill-lines-table input[type="number"]::-webkit-outer-spin-button,
+#bill-lines-table input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#bill-lines-table input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+#bill-lines-table .qty-input {
+    text-align: center;
+}
+
+#bill-lines-table .item-display,
+#bill-lines-table .uom-display,
+#bill-lines-table .item-display {
+    text-align: left;
+}
+
+#bill-lines-table .uom-display,
+#bill-lines-table .rate-input,
+#bill-lines-table .discpct-input,
+#bill-lines-table .discamt-input,
+#bill-lines-table .basicamt-input,
+#bill-lines-table .taxrate-input,
+#bill-lines-table .taxamt-input,
+#bill-lines-table .cgst-input,
+#bill-lines-table .sgst-input,
+#bill-lines-table .igst-input,
+#bill-lines-table .totalamt-input {
+    text-align: right;
 }
 
     .select2-container--default .select2-selection--single {
@@ -258,6 +317,27 @@ $initNet = (float) ($bill->net_payable ?? 0);
         border-top: 1px dashed #dee2e6;
         margin: 25px 0;
     }
+
+    .po-checkbox-list {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 8px;
+        max-height: 240px;
+        overflow-y: auto;
+        background: #fff;
+    }
+
+    .po-checkbox-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 6px 4px;
+        border-bottom: 1px solid #f1f3f5;
+    }
+
+    .po-checkbox-item:last-child {
+        border-bottom: 0;
+    }
 </style>
 
 <form method="POST"
@@ -267,9 +347,67 @@ $initNet = (float) ($bill->net_payable ?? 0);
     @csrf
     @if($isEdit)
         @method('PUT')
+    @else
+        <input type="hidden" name="submission_token" value="{{ $submissionToken ?? '' }}">
     @endif
 
-    <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ old('purchase_order_id', $bill->purchase_order_id) }}">
+    @php
+        $initialSelectedPurchaseOrderIds = collect(old('purchase_order_ids', $bill->purchase_order_id ? [$bill->purchase_order_id] : []))
+            ->filter(fn ($id) => filled($id))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+        $initialSelectedPurchaseOrders = \App\Models\PurchaseOrder::query()
+            ->with('project')
+            ->whereIn('id', $initialSelectedPurchaseOrderIds)
+            ->get()
+            ->keyBy('id');
+        $initialPurchaseOrderMeta = collect($initialSelectedPurchaseOrderIds)
+            ->map(function ($purchaseOrderId) use ($initialSelectedPurchaseOrders) {
+                $po = $initialSelectedPurchaseOrders->get($purchaseOrderId);
+                if (! $po) {
+                    return null;
+                }
+
+                $display = $po->code ?: ('PO#' . $po->id);
+                if ($po->po_date) {
+                    $display .= ' | ' . $po->po_date->format('Y-m-d');
+                }
+                if ($po->project?->code) {
+                    $display .= ' | ' . $po->project->code;
+                }
+                if ($po->project?->name) {
+                    $display .= ' - ' . $po->project->name;
+                }
+
+                return [
+                    'id' => (int) $po->id,
+                    'code' => $po->code ?: ('PO#' . $po->id),
+                    'display' => $display,
+                    'project_id' => $po->project_id,
+                    'vendor_branch_id' => $po->vendor_branch_id,
+                    'payment_terms_days' => $po->payment_terms_days,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+        $linkedPurchaseOrderDisplay = '';
+        if (count($initialSelectedPurchaseOrderIds) > 1) {
+            $linkedPurchaseOrderDisplay = count($initialSelectedPurchaseOrderIds) . ' POs selected';
+        } elseif ($bill->purchaseOrder) {
+            $linkedPurchaseOrderDisplay = $bill->purchaseOrder->code . ' - ' . optional($bill->purchaseOrder->project)->name;
+        }
+    @endphp
+
+    <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ count($initialSelectedPurchaseOrderIds) === 1 ? $initialSelectedPurchaseOrderIds[0] : '' }}">
+    <div id="purchase_order_ids_container">
+        @foreach($initialSelectedPurchaseOrderIds as $purchaseOrderId)
+            <input type="hidden" name="purchase_order_ids[]" value="{{ $purchaseOrderId }}">
+        @endforeach
+    </div>
 <div class="section-card">
 
     <!-- ================= Supplier Section ================= -->
@@ -286,10 +424,17 @@ $initNet = (float) ($bill->net_payable ?? 0);
             <!-- Supplier Select -->
             <div class="flex-grow-1">
                 <select name="supplier_id" id="supplier_id"
-                    class="form-select form-select-sm select2-basic @error('supplier_id') is-invalid @enderror">
+                    class="form-select form-select-sm select2-basic @error('supplier_id') is-invalid @enderror"
+                    data-company-gst-state="{{ $companyGstStateCode }}">
                     <option value="">-- Select Supplier --</option>
                     @foreach($suppliers as $s)
-                        <option value="{{ $s->id }}" {{ (string) old('supplier_id', $bill->supplier_id) === (string) $s->id ? 'selected' : '' }}>
+                        @php
+                            $gstState = $s->gst_state_code ?: (preg_match('/^\d{2}/', (string) $s->gstin) ? substr((string) $s->gstin, 0, 2) : '');
+                        @endphp
+                        <option value="{{ $s->id }}"
+                            data-gst-state="{{ $gstState }}"
+                            data-state="{{ $s->state }}"
+                            {{ (string) old('supplier_id', $bill->supplier_id) === (string) $s->id ? 'selected' : '' }}>
                             {{ $s->name }}
                         </option>
                     @endforeach
@@ -313,7 +458,10 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
         <div class="col-lg-5">
             <label class="form-label">Supplier GSTIN / Branch</label>
-            <select name="supplier_branch_id" id="supplier_branch_id" class="form-select form-select-sm">
+            <select name="supplier_branch_id"
+                    id="supplier_branch_id"
+                    class="form-select form-select-sm @error('supplier_branch_id') is-invalid @enderror"
+                    data-selected="{{ old('supplier_branch_id', $bill->supplier_branch_id ?? '') }}">
                 <option value="">-- Use Primary GSTIN --</option>
             </select>
 
@@ -334,40 +482,66 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
         <div class="col-md-3">
             <label class="form-label">Bill Date <span class="text-danger">*</span></label>
-            <input type="date" name="bill_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="bill_date"
+                   id="bill_date"
+                   class="form-control form-control-sm @error('bill_date') is-invalid @enderror"
+                   value="{{ old('bill_date', optional($bill->bill_date)->format('Y-m-d') ?? now()->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Posting Date <span class="text-danger">*</span></label>
-            <input type="date" name="posting_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="posting_date"
+                   id="posting_date"
+                   class="form-control form-control-sm @error('posting_date') is-invalid @enderror"
+                   value="{{ old('posting_date', optional($bill->posting_date)->format('Y-m-d') ?? optional($bill->bill_date)->format('Y-m-d') ?? now()->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Due Date</label>
-            <input type="date" name="due_date" class="form-control form-control-sm">
+            <input type="date"
+                   name="due_date"
+                   id="due_date"
+                   class="form-control form-control-sm @error('due_date') is-invalid @enderror"
+                   value="{{ old('due_date', optional($bill->due_date)->format('Y-m-d')) }}">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Bill No <span class="text-danger">*</span></label>
-            <input type="text" name="bill_number" class="form-control form-control-sm">
+            <input type="text"
+                   name="bill_number"
+                   class="form-control form-control-sm @error('bill_number') is-invalid @enderror"
+                   value="{{ old('bill_number', $bill->bill_number) }}"
+                   readonly>
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Invoice No (Supplier)</label>
-            <input type="text" name="reference_no" class="form-control form-control-sm">
+            <input type="text"
+                   name="reference_no"
+                   id="invoice_number"
+                   class="form-control form-control-sm @error('reference_no') is-invalid @enderror"
+                   value="{{ old('reference_no', $bill->reference_no) }}">
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Challan No</label>
-            <input type="text" name="challan_number" class="form-control form-control-sm">
+            <input type="text"
+                   name="challan_number"
+                   id="challan_number"
+                   class="form-control form-control-sm @error('challan_number') is-invalid @enderror"
+                   value="{{ old('challan_number', $bill->challan_number) }}">
         </div>
 
         <div class="col-md-4">
             <label class="form-label">Project</label>
-            <select name="project_id" class="form-select form-select-sm select2-basic">
+            <select name="project_id"
+                    id="project_id"
+                    class="form-select form-select-sm select2-basic @error('project_id') is-invalid @enderror">
                 <option value="">-- Select Project --</option>
                 @foreach($projects as $p)
-                    <option value="{{ $p->id }}">
+                    <option value="{{ $p->id }}" {{ (string) old('project_id', $bill->project_id ?? optional($bill->purchaseOrder)->project_id) === (string) $p->id ? 'selected' : '' }}>
                         {{ $p->code }} - {{ $p->name }}
                     </option>
                 @endforeach
@@ -386,32 +560,48 @@ $initNet = (float) ($bill->net_payable ?? 0);
     <div class="row g-3">
 
         <div class="col-md-4">
-            <label class="form-label">Linked Purchase Order</label>
-            <input type="text" class="form-control form-control-sm" placeholder="(Fetch GRN/PO to link)" readonly>
+            <label class="form-label">Linked Purchase Order(s)</label>
+            <input type="text"
+                   id="purchase_order_display"
+                   class="form-control form-control-sm"
+                   value="{{ $linkedPurchaseOrderDisplay }}"
+                   placeholder="(Fetch GRN/PO to link)"
+                   readonly>
+            <div class="form-text">One PO keeps the header linked. Multiple PO selection stays line-linked through GRNs.</div>
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Currency</label>
-            <input type="text" name="currency" class="form-control form-control-sm" value="INR">
+            <input type="text"
+                   name="currency"
+                   class="form-control form-control-sm"
+                   value="{{ old('currency', $bill->currency ?? 'INR') }}">
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Exchange Rate</label>
-            <input type="number" step="0.0001" name="exchange_rate" class="form-control form-control-sm" value="1">
+            <input type="number"
+                   step="0.0001"
+                   name="exchange_rate"
+                   class="form-control form-control-sm"
+                   value="{{ old('exchange_rate', $bill->exchange_rate ?? 1) }}">
         </div>
 
         <div class="col-md-2">
             <label class="form-label">Status</label>
-            <select name="status" class="form-select form-select-sm">
-                <option value="draft">Draft</option>
-                <option value="posted">Posted</option>
-                <option value="cancelled">Cancelled</option>
-            </select>
+            @php $st = old('status', $bill->status ?? 'draft'); @endphp
+            <input type="text"
+                   class="form-control form-control-sm"
+                   value="{{ ucfirst($st) }}"
+                   readonly>
+            <div class="form-text">Status changes only through posting and reversal actions.</div>
         </div>
 
         <div class="col-md-12">
             <label class="form-label">Remarks</label>
-            <textarea name="remarks" rows="2" class="form-control form-control-sm"></textarea>
+            <textarea name="remarks"
+                      rows="2"
+                      class="form-control form-control-sm">{{ old('remarks', $bill->remarks) }}</textarea>
         </div>
 
     </div>
@@ -617,26 +807,30 @@ $initNet = (float) ($bill->net_payable ?? 0);
     {{-- ITEM LINES --}}
     <div class="d-flex justify-content-between align-items-center mb-2">
         <h5 class="h6 mb-0">Items</h5>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAddItemRow">+ Add Row</button>
     </div>
+    @unless($isEdit)
+        <div class="alert alert-info py-2 small" id="bill-items-lock-note">
+            Item lines are created only from fetched GRN rows. Use `Fetch GRN/PO` first; expense lines can be entered directly.
+        </div>
+    @endunless
 
-    <div class="table-responsive">
+    <div class="table-responsive {{ $showItemTable ? '' : 'd-none' }}" id="bill-table-wrapper">
         <table class="table table-sm table-bordered align-middle text-nowrap" id="bill-lines-table">
             <thead class="table-light">
             <tr>
                 <th style="width:14%">Item</th>
-                <th style="width:7%">UOM</th>
-                <th style="width:7%">Qty</th>
-                <th style="width:7%">Rate</th>
-                <th style="width:6%">Disc %</th>
-                <th style="width:8%">Disc Amt</th>
-                <th style="width:8%">Basic</th>
-                <th style="width:6%">GST %</th>
-                <th style="width:8%">Tax</th>
-                <th style="width:8%">CGST</th>
-                <th style="width:8%">SGST</th>
-                <th style="width:8%">IGST</th>
-                <th style="width:10%">Total</th>
+                <th class="text-end" style="width:7%">UOM</th>
+                <th class="text-center" style="width:7%">Qty</th>
+                <th class="text-end" style="width:7%">Rate</th>
+                <th class="text-end" style="width:6%">Disc %</th>
+                <th class="text-end" style="width:8%">Disc Amt</th>
+                <th class="text-end" style="width:8%">Basic</th>
+                <th class="text-end" style="width:6%">GST %</th>
+                <th class="text-end" style="width:8%">Tax</th>
+                <th class="text-end" style="width:8%">CGST</th>
+                <th class="text-end" style="width:8%">SGST</th>
+                <th class="text-end" style="width:8%">IGST</th>
+                <th class="text-end" style="width:10%">Total</th>
             </tr>
             </thead>
             <tbody id="bill-lines-tbody">
@@ -644,113 +838,117 @@ $initNet = (float) ($bill->net_payable ?? 0);
                 @php
     $mrLineId = $line['material_receipt_line_id'] ?? null;
     $isLinked = !empty($mrLineId);
+    $itemLabel = $itemLabels[$line['item_id'] ?? null] ?? '';
+    $uomLabel = $uomLabels[$line['uom_id'] ?? null] ?? '';
                 @endphp
                 <tr data-line-index="{{ $i }}" class="{{ $isLinked ? 'table-warning' : '' }}">
                     <td>
                         <input type="hidden" name="lines[{{ $i }}][id]" value="{{ $line['id'] }}">
                         <input type="hidden" name="lines[{{ $i }}][material_receipt_id]" value="{{ $line['material_receipt_id'] }}">
                         <input type="hidden" name="lines[{{ $i }}][material_receipt_line_id]" value="{{ $mrLineId }}" class="mr-line-id">
-
-                        <select name="lines[{{ $i }}][item_id]"
-                                class="form-select form-select-sm item-select">
-                            <option value="">--</option>
-                            @foreach($items as $it)
-                                <option value="{{ $it->id }}" {{ (string) ($line['item_id'] ?? '') === (string) $it->id ? 'selected' : '' }}>
-                                    {{ $it->code }} - {{ $it->name }}
-                                </option>
-                            @endforeach
-                        </select>
+                        <input type="hidden"
+                               name="lines[{{ $i }}][item_id]"
+                               class="item-select"
+                               value="{{ $line['item_id'] ?? '' }}">
+                        <input type="text"
+                               class="form-control form-control-sm item-display"
+                               value="{{ $itemLabel }}"
+                               readonly>
                         @if($isLinked)
                             <div class="form-text text-warning">Linked to GRN</div>
                         @endif
                     </td>
 
                     <td>
-                        <select name="lines[{{ $i }}][uom_id]" class="form-select form-select-sm uom-select">
-                            <option value="">--</option>
-                            @foreach($uoms as $u)
-                                <option value="{{ $u->id }}" {{ (string) ($line['uom_id'] ?? '') === (string) $u->id ? 'selected' : '' }}>
-                                    {{ $u->code }}
-                                </option>
-                            @endforeach
-                        </select>
+                        <input type="hidden"
+                               name="lines[{{ $i }}][uom_id]"
+                               class="uom-select"
+                               value="{{ $line['uom_id'] ?? '' }}">
+                        <input type="text"
+                               class="form-control form-control-sm uom-display"
+                               value="{{ $uomLabel }}"
+                               readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.0001"
                                name="lines[{{ $i }}][qty]"
                                class="form-control form-control-sm qty-input"
-                               value="{{ $line['qty'] }}">
+                               value="{{ $line['qty'] }}"
+                               readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][rate]"
                                class="form-control form-control-sm rate-input"
-                               value="{{ $line['rate'] }}">
+                               value="{{ number_format((float) ($line['rate'] ?? 0), 2, '.', '') }}"
+                               readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][discount_percent]"
                                class="form-control form-control-sm discpct-input"
-                               value="{{ $line['discount_percent'] ?? 0 }}">
+                               value="{{ number_format((float) ($line['discount_percent'] ?? 0), 2, '.', '') }}"
+                               readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][discount_amount]"
                                class="form-control form-control-sm discamt-input"
-                               value="{{ $line['discount_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['discount_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][basic_amount]"
                                class="form-control form-control-sm basicamt-input"
-                               value="{{ $line['basic_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['basic_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][tax_rate]"
                                class="form-control form-control-sm taxrate-input"
-                               value="{{ $line['tax_rate'] ?? 0 }}">
+                               value="{{ number_format((float) ($line['tax_rate'] ?? 0), 2, '.', '') }}"
+                               readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][tax_amount]"
                                class="form-control form-control-sm taxamt-input"
-                               value="{{ $line['tax_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['tax_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][cgst_amount]"
                                class="form-control form-control-sm cgst-input"
-                               value="{{ $line['cgst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['cgst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][sgst_amount]"
                                class="form-control form-control-sm sgst-input"
-                               value="{{ $line['sgst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['sgst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][igst_amount]"
                                class="form-control form-control-sm igst-input"
-                               value="{{ $line['igst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['igst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
 
                     <td>
                         <input type="number" step="0.01"
                                name="lines[{{ $i }}][total_amount]"
                                class="form-control form-control-sm totalamt-input"
-                               value="{{ $line['total_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($line['total_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                 </tr>
             @endforeach
@@ -759,7 +957,10 @@ $initNet = (float) ($bill->net_payable ?? 0);
     </div>
 
     {{-- EXPENSE LINES --}}
-    <h5 class="h6 mt-4 mb-2">Expenses (for service / freight / transport bills)</h5>
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <h5 class="h6 mb-0">Expenses (for service / freight / transport bills)</h5>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAddExpenseRow">+ Add Expense</button>
+    </div>
     {{-- <div class="table-responsive">
         <table class="table table-sm table-bordered align-middle" id="expense-lines-table"> --}}
             <div class="table-responsive" id="expense-table-wrapper">
@@ -769,6 +970,7 @@ $initNet = (float) ($bill->net_payable ?? 0);
             <tr>
                 <th style="width:18%">Ledger</th>
                 <th style="width:18%">Project</th>
+                <th style="width:18%">Machine</th>
                 <th>Description</th>
                 <th style="width:10%">Amount</th>
                 <th style="width:7%">GST %</th>
@@ -806,6 +1008,19 @@ $initNet = (float) ($bill->net_payable ?? 0);
                         @endforeach
                     </select>
                 </td>
+                <td>
+                    @php
+                        $selMachine = old('expense_lines.' . $i . '.machine_id', $ex['machine_id'] ?? null);
+                    @endphp
+                    <select name="expense_lines[{{ $i }}][machine_id]" class="form-select form-select-sm exp-machine">
+                        <option value="">-- None --</option>
+                        @foreach(($machines ?? collect()) as $m)
+                            <option value="{{ $m->id }}" @selected((string) $selMachine === (string) $m->id)>
+                                {{ $m->code ? ($m->code . ' - ') : '' }}{{ $m->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </td>
                     <td>
                         <input type="text"
                                name="expense_lines[{{ $i }}][description]"
@@ -816,43 +1031,43 @@ $initNet = (float) ($bill->net_payable ?? 0);
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][amount]"
                                class="form-control form-control-sm exp-amount"
-                               value="{{ $ex['amount'] }}">
+                               value="{{ number_format((float) ($ex['amount'] ?? 0), 2, '.', '') }}">
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][tax_rate]"
                                class="form-control form-control-sm exp-taxrate"
-                               value="{{ $ex['tax_rate'] ?? 0 }}">
+                               value="{{ number_format((float) ($ex['tax_rate'] ?? 0), 2, '.', '') }}">
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][tax_amount]"
                                class="form-control form-control-sm exp-taxamt"
-                               value="{{ $ex['tax_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($ex['tax_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][cgst_amount]"
                                class="form-control form-control-sm exp-cgst"
-                               value="{{ $ex['cgst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($ex['cgst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][sgst_amount]"
                                class="form-control form-control-sm exp-sgst"
-                               value="{{ $ex['sgst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($ex['sgst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][igst_amount]"
                                class="form-control form-control-sm exp-igst"
-                               value="{{ $ex['igst_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($ex['igst_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                     <td>
                         <input type="number" step="0.01"
                                name="expense_lines[{{ $i }}][total_amount]"
                                class="form-control form-control-sm exp-total"
-                               value="{{ $ex['total_amount'] ?? 0 }}" readonly>
+                               value="{{ number_format((float) ($ex['total_amount'] ?? 0), 2, '.', '') }}" readonly>
                     </td>
                     <td class="text-center">
                         @if(!empty($ex['is_reverse_charge']))
@@ -1144,7 +1359,7 @@ $initNet = (float) ($bill->net_payable ?? 0);
 
     <div class="d-flex justify-content-between">
         <a href="{{ route('purchase.bills.index') }}" class="btn btn-outline-secondary btn-sm">Back to list</a>
-        <button type="submit" class="btn btn-primary btn-sm">
+        <button type="submit" class="btn btn-primary btn-sm" id="purchase-bill-submit-btn">
             {{ $isEdit ? 'Save Changes' : 'Save Draft' }}
         </button>
     </div>
@@ -1164,14 +1379,18 @@ $initNet = (float) ($bill->net_payable ?? 0);
             <div class="modal-body">
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">Purchase Order</label>
-                        <select id="po-select" class="form-select form-select-sm">
-                            <option value="">-- Select PO --</option>
-                        </select>
-                        <div class="form-text">Only approved POs for selected supplier are shown.</div>
+                        <label class="form-label">Purchase Orders</label>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-text mb-0">Only supplier POs with GRN entries are shown.</div>
+                            <div class="form-check mb-0">
+                                <input type="checkbox" class="form-check-input" id="po-select-all">
+                                <label class="form-check-label small" for="po-select-all">Select all</label>
+                            </div>
+                        </div>
+                        <div id="po-select" class="po-checkbox-list"></div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Selected PO</label>
+                        <label class="form-label">Selected PO(s)</label>
                         <input type="text" id="po-selected-display" class="form-control form-control-sm" readonly>
                     </div>
                 </div>
@@ -1207,44 +1426,127 @@ $initNet = (float) ($bill->net_payable ?? 0);
     </div>
 </div>
 
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var form = document.getElementById('purchaseBillForm');
+    if (!form) return;
+
+    form.addEventListener('submit', function (event) {
+        if (form.dataset.submitting === '1') {
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
+        }
+
+        form.dataset.submitting = '1';
+
+        var submitButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+        submitButtons.forEach(function (button) {
+            if (button.tagName === 'BUTTON') {
+                button.dataset.originalText = button.textContent;
+                button.textContent = 'Saving...';
+            } else {
+                button.dataset.originalValue = button.value;
+                button.value = 'Saving...';
+            }
+
+            button.disabled = true;
+        });
+    });
+});
+</script>
+@endpush
+
 <template id="item-line-template">
     <tr data-line-index="__INDEX__">
         <td>
             <input type="hidden" name="lines[__INDEX__][id]" value="">
             <input type="hidden" name="lines[__INDEX__][material_receipt_id]" value="">
             <input type="hidden" name="lines[__INDEX__][material_receipt_line_id]" value="" class="mr-line-id">
-            <select name="lines[__INDEX__][item_id]" class="form-select form-select-sm item-select">
+            <input type="hidden" name="lines[__INDEX__][item_id]" class="item-select" value="">
+            <input type="text" class="form-control form-control-sm item-display" value="" readonly>
+        </td>
+        <td>
+            <input type="hidden" name="lines[__INDEX__][uom_id]" class="uom-select" value="">
+            <input type="text" class="form-control form-control-sm uom-display" value="" readonly>
+        </td>
+        <td><input type="number" step="0.0001" name="lines[__INDEX__][qty]" class="form-control form-control-sm qty-input" value="" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][rate]" class="form-control form-control-sm rate-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][discount_percent]" class="form-control form-control-sm discpct-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][discount_amount]" class="form-control form-control-sm discamt-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][basic_amount]" class="form-control form-control-sm basicamt-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][tax_rate]" class="form-control form-control-sm taxrate-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][tax_amount]" class="form-control form-control-sm taxamt-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][cgst_amount]" class="form-control form-control-sm cgst-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][sgst_amount]" class="form-control form-control-sm sgst-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][igst_amount]" class="form-control form-control-sm igst-input" value="0.00" readonly></td>
+        <td><input type="number" step="0.01" name="lines[__INDEX__][total_amount]" class="form-control form-control-sm totalamt-input" value="0.00" readonly></td>
+    </tr>
+</template>
+
+<template id="expense-line-template">
+    <tr data-exp-index="__INDEX__">
+        <td>
+            <select name="expense_lines[__INDEX__][account_id]" class="form-select form-select-sm exp-account">
                 <option value="">--</option>
-                @foreach($items as $it)
-                    <option value="{{ $it->id }}">{{ $it->code }} - {{ $it->name }}</option>
+                @foreach($accounts as $acc)
+                    <option value="{{ $acc->id }}">{{ $acc->name }}</option>
                 @endforeach
             </select>
         </td>
         <td>
-            <select name="lines[__INDEX__][uom_id]" class="form-select form-select-sm uom-select">
-                <option value="">--</option>
-                @foreach($uoms as $u)
-                    <option value="{{ $u->id }}">{{ $u->code }}</option>
+            <select name="expense_lines[__INDEX__][project_id]" class="form-select form-select-sm exp-project">
+                <option value="">-- Bill Project (Default) --</option>
+                @foreach($projects as $p)
+                    <option value="{{ $p->id }}">{{ $p->code }} - {{ $p->name }}</option>
                 @endforeach
             </select>
         </td>
-        <td><input type="number" step="0.0001" name="lines[__INDEX__][qty]" class="form-control form-control-sm qty-input" value=""></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][rate]" class="form-control form-control-sm rate-input" value=""></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][discount_percent]" class="form-control form-control-sm discpct-input" value="0"></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][discount_amount]" class="form-control form-control-sm discamt-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][basic_amount]" class="form-control form-control-sm basicamt-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][tax_rate]" class="form-control form-control-sm taxrate-input" value="0"></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][tax_amount]" class="form-control form-control-sm taxamt-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][cgst_amount]" class="form-control form-control-sm cgst-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][sgst_amount]" class="form-control form-control-sm sgst-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][igst_amount]" class="form-control form-control-sm igst-input" value="0" readonly></td>
-        <td><input type="number" step="0.01" name="lines[__INDEX__][total_amount]" class="form-control form-control-sm totalamt-input" value="0" readonly></td>
+        <td>
+            <select name="expense_lines[__INDEX__][machine_id]" class="form-select form-select-sm exp-machine">
+                <option value="">-- None --</option>
+                @foreach(($machines ?? collect()) as $m)
+                    <option value="{{ $m->id }}">{{ $m->code ? ($m->code . ' - ') : '' }}{{ $m->name }}</option>
+                @endforeach
+            </select>
+        </td>
+        <td>
+            <input type="text" name="expense_lines[__INDEX__][description]" class="form-control form-control-sm exp-desc" value="">
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][amount]" class="form-control form-control-sm exp-amount" value="0.00">
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][tax_rate]" class="form-control form-control-sm exp-taxrate" value="0.00">
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][tax_amount]" class="form-control form-control-sm exp-taxamt" value="0.00" readonly>
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][cgst_amount]" class="form-control form-control-sm exp-cgst" value="0.00" readonly>
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][sgst_amount]" class="form-control form-control-sm exp-sgst" value="0.00" readonly>
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][igst_amount]" class="form-control form-control-sm exp-igst" value="0.00" readonly>
+        </td>
+        <td>
+            <input type="number" step="0.01" name="expense_lines[__INDEX__][total_amount]" class="form-control form-control-sm exp-total" value="0.00" readonly>
+        </td>
+        <td class="text-center">
+            <span class="text-muted">-</span>
+        </td>
     </tr>
 </template>
 
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    var itemLabels = @json($itemLabels);
+    var uomLabels = @json($uomLabels);
+
     // ------- Select2 for Supplier (search by typing) -------
     if (window.$ && $.fn.select2) {
         $('#supplier_id').select2({
@@ -1260,6 +1562,17 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     function round2(n) {
         return Math.round((n + Number.EPSILON) * 100) / 100;
+    }
+    function format2(n) {
+        return round2(toNum(n)).toFixed(2);
+    }
+    function roundStatutoryAmount(n) {
+        return Math.round(Math.max(0, toNum(n)));
+    }
+    function setDisplayValue(input, value) {
+        if (input) {
+            input.value = value || '';
+        }
     }
 
     // ------- Auto Round (Tally style) -------
@@ -1296,18 +1609,19 @@ document.addEventListener('DOMContentLoaded', function () {
     function calcSplit(taxable, taxRate) {
         taxable = toNum(taxable);
         taxRate = toNum(taxRate);
-        var tax = round2(taxable * taxRate / 100);
         var mode = getGstMode();
         var cgst = 0, sgst = 0, igst = 0;
-        if (tax <= 0) {
+        if (taxable <= 0 || taxRate <= 0) {
             return {tax: 0, cgst: 0, sgst: 0, igst: 0};
         }
         if (mode === 'inter') {
-            igst = tax;
+            igst = round2(taxable * taxRate / 100);
         } else {
-            cgst = round2(tax / 2);
-            sgst = round2(tax - cgst);
+            var halfRate = round2(taxRate / 2);
+            cgst = round2(taxable * halfRate / 100);
+            sgst = round2(taxable * halfRate / 100);
         }
+        var tax = round2(cgst + sgst + igst);
         return {tax: tax, cgst: cgst, sgst: sgst, igst: igst};
     }
 
@@ -1395,13 +1709,13 @@ document.addEventListener('DOMContentLoaded', function () {
         var igst = tr.querySelector('.igst-input');
         var tot = tr.querySelector('.totalamt-input');
 
-        if (discAmt) discAmt.value = disc;
-        if (basicAmt) basicAmt.value = taxable;
-        if (taxAmt) taxAmt.value = split.tax;
-        if (cgst) cgst.value = split.cgst;
-        if (sgst) sgst.value = split.sgst;
-        if (igst) igst.value = split.igst;
-        if (tot) tot.value = total;
+        if (discAmt) discAmt.value = format2(disc);
+        if (basicAmt) basicAmt.value = format2(taxable);
+        if (taxAmt) taxAmt.value = format2(split.tax);
+        if (cgst) cgst.value = format2(split.cgst);
+        if (sgst) sgst.value = format2(split.sgst);
+        if (igst) igst.value = format2(split.igst);
+        if (tot) tot.value = format2(total);
     }
 
     function recalcExpenseRow(tr) {
@@ -1417,11 +1731,11 @@ document.addEventListener('DOMContentLoaded', function () {
         var igst = tr.querySelector('.exp-igst');
         var tot = tr.querySelector('.exp-total');
 
-        if (taxAmt) taxAmt.value = split.tax;
-        if (cgst) cgst.value = split.cgst;
-        if (sgst) sgst.value = split.sgst;
-        if (igst) igst.value = split.igst;
-        if (tot) tot.value = total;
+        if (taxAmt) taxAmt.value = format2(split.tax);
+        if (cgst) cgst.value = format2(split.cgst);
+        if (sgst) sgst.value = format2(split.sgst);
+        if (igst) igst.value = format2(split.igst);
+        if (tot) tot.value = format2(total);
     }
 
     function recalcSummary() {
@@ -1468,10 +1782,16 @@ document.addEventListener('DOMContentLoaded', function () {
         var tdsAutoEl = document.getElementById('tds_auto_calculate');
         var tdsRate = toNum(tdsRateEl ? tdsRateEl.value : 0);
         if (tdsAutoEl && tdsAutoEl.checked && tdsAmtEl) {
-            tdsAmtEl.value = round2(totalBasic * tdsRate / 100);
+            tdsAmtEl.value = roundStatutoryAmount(totalBasic * tdsRate / 100).toFixed(2);
         }
 
         var tcsAmtEl = document.getElementById('tcs_amount');
+        if (tdsAmtEl && tdsAmtEl.value !== '') {
+            tdsAmtEl.value = roundStatutoryAmount(tdsAmtEl.value).toFixed(2);
+        }
+        if (tcsAmtEl && tcsAmtEl.value !== '') {
+            tcsAmtEl.value = roundStatutoryAmount(tcsAmtEl.value).toFixed(2);
+        }
         var tcsAmt = toNum(tcsAmtEl ? tcsAmtEl.value : 0);
         var tdsAmt = toNum(tdsAmtEl ? tdsAmtEl.value : 0);
 
@@ -1537,14 +1857,43 @@ document.addEventListener('DOMContentLoaded', function () {
             recalcSummary();
         }
     });
+    document.getElementById('expense-lines-tbody')?.addEventListener('blur', function (e) {
+        if (!e.target.classList.contains('exp-amount') && !e.target.classList.contains('exp-taxrate')) {
+            return;
+        }
+        e.target.value = format2(e.target.value);
+    }, true);
 
     document.getElementById('supplier_id')?.addEventListener('change', async function () {
         // Supplier change affects GST split + branch list; reload branches then recalc
+        selectedPurchaseOrderIds = [];
+        modalSelectedPurchaseOrderIds = [];
+        syncPurchaseOrderInputs();
+        syncBillProjectSelection([], true);
+        clearGrnModal();
+        if (billLinesTbody) {
+            billLinesTbody.innerHTML = '';
+        }
+        syncBillItemsTableVisibility();
+        syncBillItemsLockNote();
         if (supplierBranchSel) {
             supplierBranchSel.dataset.selected = '';
         }
         await loadSupplierBranches(this.value, '');
+        syncDueDateFromPurchaseOrders();
         recalcAll();
+    });
+
+    billDateInput?.addEventListener('change', function () {
+        syncDueDateFromPurchaseOrders();
+    });
+
+    postingDateInput?.addEventListener('change', function () {
+        syncDueDateFromPurchaseOrders();
+    });
+
+    dueDateInput?.addEventListener('change', function () {
+        syncDueDateFromPurchaseOrders();
     });
 
     document.getElementById('supplier_branch_id')?.addEventListener('change', function () {
@@ -1555,6 +1904,14 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('tds_amount')?.addEventListener('input', recalcSummary);
     document.getElementById('tds_auto_calculate')?.addEventListener('change', recalcSummary);
     document.getElementById('tcs_amount')?.addEventListener('input', recalcSummary);
+    document.getElementById('tds_amount')?.addEventListener('blur', function () {
+        this.value = roundStatutoryAmount(this.value).toFixed(2);
+        recalcSummary();
+    });
+    document.getElementById('tcs_amount')?.addEventListener('blur', function () {
+        this.value = roundStatutoryAmount(this.value).toFixed(2);
+        recalcSummary();
+    });
     document.getElementById('invoice_total')?.addEventListener('input', function () {
         var raw = String(this.value ?? '').trim();
         // If user types a value => manual mode; if they clear field => return to auto round
@@ -1578,15 +1935,24 @@ document.addEventListener('DOMContentLoaded', function () {
     // TDS default rate from master when selecting section
     document.getElementById('tds_section')?.addEventListener('change', function () {
         var opt = this.options[this.selectedIndex];
-        if (opt && opt.dataset && opt.dataset.defaultRate && document.getElementById('tds_rate')) {
-            document.getElementById('tds_rate').value = opt.dataset.defaultRate;
+        var tdsRateEl = document.getElementById('tds_rate');
+        var tdsAmountEl = document.getElementById('tds_amount');
+        var selectedValue = String(this.value || '').trim();
+
+        if (!selectedValue) {
+            if (tdsRateEl) tdsRateEl.value = '0.0000';
+            if (tdsAmountEl) tdsAmountEl.value = '0.00';
+        } else if (opt && opt.dataset && opt.dataset.defaultRate && tdsRateEl) {
+            tdsRateEl.value = opt.dataset.defaultRate;
         }
         recalcSummary();
     });
 
     // ------- Item rows dynamic add -------
     var itemTemplate = document.getElementById('item-line-template');
+    var expenseTemplate = document.getElementById('expense-line-template');
     var billLinesTbody = document.getElementById('bill-lines-tbody');
+    var expenseLinesTbody = document.getElementById('expense-lines-tbody');
     function addItemRow() {
         if (!itemTemplate || !billLinesTbody) return null;
         var nextIndex = billLinesTbody.querySelectorAll('tr').length;
@@ -1597,8 +1963,19 @@ document.addEventListener('DOMContentLoaded', function () {
         billLinesTbody.appendChild(tr);
         return tr;
     }
-    document.getElementById('btnAddItemRow')?.addEventListener('click', function () {
-        addItemRow();
+    function addExpenseRow() {
+        if (!expenseTemplate || !expenseLinesTbody) return null;
+        var nextIndex = expenseLinesTbody.querySelectorAll('tr').length;
+        var html = expenseTemplate.innerHTML.replaceAll('__INDEX__', String(nextIndex));
+        var tmp = document.createElement('tbody');
+        tmp.innerHTML = html.trim();
+        var tr = tmp.firstElementChild;
+        expenseLinesTbody.appendChild(tr);
+        syncExpenseProjectDefaults();
+        return tr;
+    }
+    document.getElementById('btnAddExpenseRow')?.addEventListener('click', function () {
+        addExpenseRow();
     });
 
     // ------- GRN/PO Modal Logic -------
@@ -1612,36 +1989,241 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var btnFetchGrn = document.getElementById('btnFetchGrn');
     var poSelect = document.getElementById('po-select');
+    var poSelectAll = document.getElementById('po-select-all');
+    var purchaseOrderIdInput = document.getElementById('purchase_order_id');
+    var purchaseOrderIdsContainer = document.getElementById('purchase_order_ids_container');
+    var purchaseOrderDisplayInput = document.getElementById('purchase_order_display');
+    var poSelectedDisplayInput = document.getElementById('po-selected-display');
+    var billDateInput = document.getElementById('bill_date');
+    var postingDateInput = document.getElementById('posting_date');
+    var dueDateInput = document.getElementById('due_date');
+    var selectedPurchaseOrderIds = @json($initialSelectedPurchaseOrderIds);
+    var modalSelectedPurchaseOrderIds = selectedPurchaseOrderIds.slice();
+    var purchaseOrderMeta = new Map(@json($initialPurchaseOrderMeta).map(function (poRow) {
+        return [parseInt(poRow.id, 10), poRow];
+    }));
+    var billProjectSelect = document.getElementById('project_id');
+    var billItemsLockNote = document.getElementById('bill-items-lock-note');
 
-    function setProjectFromPoOption(optionEl) {
-        var projSelect = document.getElementById('project_id');
-        if (!projSelect) return;
+    function normalizePurchaseOrderIds(ids) {
+        return Array.from(new Set((ids || []).map(function (id) {
+            return parseInt(id, 10);
+        }).filter(function (id) {
+            return !isNaN(id) && id > 0;
+        })));
+    }
 
-        var projId = optionEl && optionEl.dataset ? (optionEl.dataset.projectId || '') : '';
-        // Set value
-        projSelect.value = projId;
+    function getPurchaseOrderMetaForIds(ids) {
+        return normalizePurchaseOrderIds(ids).map(function (poId) {
+            return purchaseOrderMeta.get(poId);
+        }).filter(Boolean);
+    }
 
-        // If Select2 is enabled, trigger change so UI updates
+    function buildPurchaseOrderSummary(poRows) {
+        poRows = poRows || [];
+        if (poRows.length === 0) {
+            return '';
+        }
+
+        var labels = poRows.map(function (poRow) {
+            return poRow.display || poRow.code || ('PO#' + poRow.id);
+        });
+
+        if (labels.length <= 2) {
+            return labels.join(', ');
+        }
+
+        return labels.length + ' POs selected';
+    }
+
+    function parseDateInputValue(value) {
+        if (!value || typeof value !== 'string') {
+            return null;
+        }
+
+        var parts = value.split('-');
+        if (parts.length !== 3) {
+            return null;
+        }
+
+        var year = parseInt(parts[0], 10);
+        var month = parseInt(parts[1], 10) - 1;
+        var day = parseInt(parts[2], 10);
+        var date = new Date(year, month, day);
+
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatDateInputValue(date) {
+        if (!(date instanceof Date) || isNaN(date.getTime())) {
+            return '';
+        }
+
+        var year = date.getFullYear();
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var day = String(date.getDate()).padStart(2, '0');
+
+        return year + '-' + month + '-' + day;
+    }
+
+    function addDaysToDate(date, days) {
+        var next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        next.setDate(next.getDate() + days);
+        return next;
+    }
+
+    function getSelectedPaymentTermsDays(ids) {
+        var termDays = getPurchaseOrderMetaForIds(ids).map(function (poRow) {
+            return parseInt(poRow.payment_terms_days, 10);
+        }).filter(function (days) {
+            return !isNaN(days) && days >= 0;
+        });
+
+        if (termDays.length === 0) {
+            return null;
+        }
+
+        return Math.max.apply(null, termDays);
+    }
+
+    function syncDueDateFromPurchaseOrders() {
+        if (!dueDateInput) return;
+
+        var billDate = parseDateInputValue(billDateInput ? billDateInput.value : '');
+        var postingDate = parseDateInputValue(postingDateInput ? postingDateInput.value : '') || billDate;
+        var paymentTermsDays = getSelectedPaymentTermsDays(selectedPurchaseOrderIds);
+        var dueDate = paymentTermsDays !== null && billDate
+            ? addDaysToDate(billDate, paymentTermsDays)
+            : parseDateInputValue(dueDateInput.value || '');
+
+        if (dueDate && postingDate && dueDate.getTime() < postingDate.getTime()) {
+            dueDate = new Date(postingDate.getFullYear(), postingDate.getMonth(), postingDate.getDate());
+        }
+
+        dueDateInput.value = dueDate ? formatDateInputValue(dueDate) : '';
+    }
+
+    function syncBillProjectSelection(poRows, clearWhenUnlocked) {
+        if (!billProjectSelect) return;
+
+        poRows = poRows || [];
+        var projectIds = Array.from(new Set(poRows.map(function (poRow) {
+            return poRow ? String(poRow.project_id || '') : '';
+        }).filter(function (projectId) {
+            return !!projectId;
+        })));
+
+        if (poRows.length > 0) {
+            billProjectSelect.value = projectIds.length === 1 ? projectIds[0] : '';
+        } else if (clearWhenUnlocked) {
+            billProjectSelect.value = '';
+        }
+
+        billProjectSelect.disabled = selectedPurchaseOrderIds.length > 0;
+
         try {
-            if (typeof window.$ !== 'undefined' && window.$(projSelect).data('select2')) {
-                window.$(projSelect).val(projId).trigger('change');
+            if (typeof window.$ !== 'undefined' && window.$(billProjectSelect).data('select2')) {
+                window.$(billProjectSelect).val(billProjectSelect.value).trigger('change');
             }
         } catch (e) {
             // ignore
         }
 
-        // Also trigger native change (so expense-line defaults sync even if Select2 is not used)
         try {
-            projSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            billProjectSelect.dispatchEvent(new Event('change', { bubbles: true }));
         } catch (e) {
             // ignore
         }
     }
 
-    async function setBranchFromPoOption(optionEl) {
-        var branchId = optionEl && optionEl.dataset ? (optionEl.dataset.vendorBranchId || '') : '';
+    function syncBillItemsLockNote() {
+        if (!billItemsLockNote) return;
+
+        var hasRows = Array.from(document.querySelectorAll('#bill-lines-tbody tr')).some(function (tr) {
+            return !!tr.querySelector('.mr-line-id')?.value;
+        });
+
+        billItemsLockNote.classList.toggle('d-none', hasRows);
+    }
+
+    function syncBillItemsTableVisibility() {
+        var tableWrapper = document.getElementById('bill-table-wrapper');
+        if (!tableWrapper) return;
+
+        var hasRows = Array.from(document.querySelectorAll('#bill-lines-tbody tr')).some(function (tr) {
+            var itemSelect = tr.querySelector('.item-select');
+            return !!(itemSelect && itemSelect.value);
+        });
+
+        tableWrapper.classList.toggle('d-none', !hasRows);
+    }
+
+    function syncPurchaseOrderInputs() {
+        selectedPurchaseOrderIds = normalizePurchaseOrderIds(selectedPurchaseOrderIds);
+
+        if (purchaseOrderIdsContainer) {
+            purchaseOrderIdsContainer.innerHTML = '';
+
+            selectedPurchaseOrderIds.forEach(function (poId) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'purchase_order_ids[]';
+                input.value = String(poId);
+                purchaseOrderIdsContainer.appendChild(input);
+            });
+        }
+
+        if (purchaseOrderIdInput) {
+            purchaseOrderIdInput.value = selectedPurchaseOrderIds.length === 1 ? String(selectedPurchaseOrderIds[0]) : '';
+        }
+
+        var summary = buildPurchaseOrderSummary(getPurchaseOrderMetaForIds(selectedPurchaseOrderIds));
+
+        if (purchaseOrderDisplayInput && summary) {
+            purchaseOrderDisplayInput.value = summary;
+        } else if (purchaseOrderDisplayInput && selectedPurchaseOrderIds.length === 0) {
+            purchaseOrderDisplayInput.value = '';
+        }
+
+        if (poSelectedDisplayInput) {
+            poSelectedDisplayInput.value = summary;
+        }
+
+        syncDueDateFromPurchaseOrders();
+    }
+
+    function syncPoSelectSelection(ids) {
+        if (!poSelect) return;
+
+        var selectedIdSet = new Set(normalizePurchaseOrderIds(ids || []));
+        poSelect.querySelectorAll('.po-select-checkbox').forEach(function (checkboxEl) {
+            checkboxEl.checked = selectedIdSet.has(parseInt(checkboxEl.value, 10));
+        });
+
+        if (poSelectAll) {
+            var allCheckboxes = Array.from(poSelect.querySelectorAll('.po-select-checkbox'));
+            poSelectAll.checked = allCheckboxes.length > 0 && allCheckboxes.every(function (checkboxEl) {
+                return checkboxEl.checked;
+            });
+        }
+    }
+
+    function getSelectedPoOptions() {
+        return getPurchaseOrderMetaForIds(modalSelectedPurchaseOrderIds);
+    }
+
+    async function setBranchFromPoOptions(optionEls) {
         var supplierId = document.getElementById('supplier_id')?.value || '';
         if (!supplierId) return;
+
+        optionEls = optionEls || [];
+        var branchIds = Array.from(new Set(optionEls.map(function (optionEl) {
+            return optionEl ? (String(optionEl.vendor_branch_id || '')) : '';
+        }).filter(function (branchId) {
+            return !!branchId;
+        })));
+        var branchId = branchIds.length === 1 ? branchIds[0] : '';
+
         // Persist preferred branch selection for this session
         if (supplierBranchSel) {
             supplierBranchSel.dataset.selected = branchId;
@@ -1675,17 +2257,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Initial sync (handles edit + PO fetch default project)
     syncExpenseProjectDefaults();
+    syncBillProjectSelection([], false);
+    syncBillItemsTableVisibility();
+    syncBillItemsLockNote();
 
     var grnTbody = document.querySelector('#grn-lines-table tbody');
 
     function clearGrnModal() {
         if (poSelect) {
-            poSelect.innerHTML = '<option value="">-- Select PO --</option>';
+            poSelect.innerHTML = '';
+        }
+        if (poSelectAll) {
+            poSelectAll.checked = false;
         }
         if (grnTbody) {
             grnTbody.innerHTML = '';
         }
-        document.getElementById('po-selected-display').value = '';
+        if (poSelectedDisplayInput) {
+            poSelectedDisplayInput.value = '';
+        }
+        purchaseOrderMeta = new Map();
     }
 
     async function loadPurchaseOrdersForSupplier(supplierId) {
@@ -1717,10 +2308,12 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        (json.orders || []).forEach(function (po) {
-            var opt = document.createElement('option');
-            opt.value = po.id;
+        if (!json.orders || json.orders.length === 0) {
+            poSelect.innerHTML = '<div class="text-muted small px-2 py-1">No supplier POs with GRN entries found.</div>';
+            return;
+        }
 
+        (json.orders || []).forEach(function (po) {
             var label = (po.code || ('PO#' + po.id));
             if (po.po_date) {
                 label += ' | ' + po.po_date;
@@ -1732,28 +2325,40 @@ document.addEventListener('DOMContentLoaded', function () {
                 label += ' - ' + po.project_name;
             }
 
-            opt.textContent = label;
-            opt.dataset.display = label;
-            opt.dataset.projectId = (po.project_id || "");
-            opt.dataset.vendorBranchId = (po.vendor_branch_id || "");
-            poSelect.appendChild(opt);
+            var poMeta = {
+                id: parseInt(po.id, 10),
+                code: po.code || ('PO#' + po.id),
+                display: label,
+                project_id: po.project_id || '',
+                vendor_branch_id: po.vendor_branch_id || '',
+                payment_terms_days: po.payment_terms_days,
+            };
+            purchaseOrderMeta.set(poMeta.id, poMeta);
+
+            var wrapper = document.createElement('label');
+            wrapper.className = 'po-checkbox-item';
+            wrapper.innerHTML = `
+                <input type="checkbox" class="form-check-input mt-1 po-select-checkbox" value="${poMeta.id}">
+                <span class="small">${label}</span>
+            `;
+            poSelect.appendChild(wrapper);
         });
 
-        // Auto select existing PO if present
-        var existingPoId = document.getElementById('purchase_order_id')?.value;
-        if (existingPoId) {
-            poSelect.value = existingPoId;
-            if (poSelect.value) {
-                document.getElementById('po-selected-display').value = poSelect.options[poSelect.selectedIndex].dataset.display || '';
-                setProjectFromPoOption(poSelect.options[poSelect.selectedIndex]);
-                await setBranchFromPoOption(poSelect.options[poSelect.selectedIndex]);
-                await loadGrnLinesForPo(supplierId, existingPoId);
+        modalSelectedPurchaseOrderIds = selectedPurchaseOrderIds.slice();
+
+        if (modalSelectedPurchaseOrderIds.length > 0) {
+            syncPoSelectSelection(modalSelectedPurchaseOrderIds);
+            var selectedOptions = getSelectedPoOptions();
+            if (poSelectedDisplayInput) {
+                poSelectedDisplayInput.value = buildPurchaseOrderSummary(selectedOptions);
             }
+            await loadGrnLinesForSelectedPurchaseOrders(supplierId, modalSelectedPurchaseOrderIds);
         }
     }
 
-    async function loadGrnLinesForPo(supplierId, poId) {
-        if (!supplierId || !poId) {
+    async function loadGrnLinesForSelectedPurchaseOrders(supplierId, poIds) {
+        poIds = normalizePurchaseOrderIds(poIds);
+        if (!supplierId || poIds.length === 0) {
             if (grnTbody) grnTbody.innerHTML = '';
             return;
         }
@@ -1764,10 +2369,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var billId = "{{ $isEdit ? $bill->id : '' }}";
 
-        var url = "{{ route('purchase.bills.ajax.grn-lines') }}"
-            + '?supplier_id=' + encodeURIComponent(supplierId)
-            + '&purchase_order_id=' + encodeURIComponent(poId)
-            + (billId ? ('&bill_id=' + encodeURIComponent(billId)) : '');
+        var params = new URLSearchParams();
+        params.set('supplier_id', supplierId);
+        poIds.forEach(function (poId) {
+            params.append('purchase_order_ids[]', String(poId));
+        });
+        if (billId) {
+            params.set('bill_id', billId);
+        }
+
+        var url = "{{ route('purchase.bills.ajax.grn-lines') }}" + '?' + params.toString();
 
         var resp;
         try {
@@ -1802,10 +2413,12 @@ document.addEventListener('DOMContentLoaded', function () {
             var tr = document.createElement('tr');
             tr.dataset.materialReceiptId = line.material_receipt_id;
             tr.dataset.materialReceiptLineId = line.material_receipt_line_id;
+            tr.dataset.purchaseOrderId = line.purchase_order_id;
             tr.dataset.itemId = line.item_id;
             tr.dataset.uomId = line.uom_id;
             tr.dataset.remainingQty = line.remaining_qty;
             tr.dataset.rate = line.rate;
+            tr.dataset.discountPercent = line.discount_percent;
             tr.dataset.taxRate = line.tax_rate;
             tr.dataset.invoiceNumber = line.invoice_number || '';
             tr.dataset.challanNumber = line.challan_number || '';
@@ -1814,7 +2427,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
             tr.innerHTML = `
                 <td class="text-center"><input type="checkbox" class="grn-line-check"></td>
-                <td><div style="white-space:pre-line">${grnText}</div></td>
+                <td>
+                    <div style="white-space:pre-line">${grnText}</div>
+                    ${line.purchase_order_code ? '<div class="small text-muted">PO: ' + line.purchase_order_code + '</div>' : ''}
+                </td>
                 <td>
                     <div class="fw-semibold">${(line.item_code ? (line.item_code + ' - ') : '')}${(line.item_name || ('Item#' + line.item_id))}</div>
                     ${line.uom_code ? '<div class="small text-muted">UOM: ' + line.uom_code + '</div>' : ''}
@@ -1841,14 +2457,41 @@ document.addEventListener('DOMContentLoaded', function () {
         grnModal?.show();
     });
 
-    poSelect?.addEventListener('change', async function () {
+    poSelect?.addEventListener('change', async function (event) {
+        if (!event.target.classList.contains('po-select-checkbox')) {
+            return;
+        }
         var supplierId = document.getElementById('supplier_id')?.value;
-        var poId = this.value;
-        var disp = this.options[this.selectedIndex]?.dataset?.display || '';
-        document.getElementById('po-selected-display').value = disp;
-        setProjectFromPoOption(this.options[this.selectedIndex]);
-        await setBranchFromPoOption(this.options[this.selectedIndex]);
-        await loadGrnLinesForPo(supplierId, poId);
+        modalSelectedPurchaseOrderIds = Array.from(poSelect.querySelectorAll('.po-select-checkbox:checked')).map(function (checkboxEl) {
+            return parseInt(checkboxEl.value, 10);
+        });
+        syncPoSelectSelection(modalSelectedPurchaseOrderIds);
+        var selectedOptions = getSelectedPoOptions();
+        if (poSelectedDisplayInput) {
+            poSelectedDisplayInput.value = buildPurchaseOrderSummary(selectedOptions);
+        }
+        await loadGrnLinesForSelectedPurchaseOrders(supplierId, modalSelectedPurchaseOrderIds);
+    });
+
+    poSelectAll?.addEventListener('change', async function () {
+        var checked = this.checked;
+        poSelect?.querySelectorAll('.po-select-checkbox').forEach(function (checkboxEl) {
+            checkboxEl.checked = checked;
+        });
+
+        var supplierId = document.getElementById('supplier_id')?.value;
+        modalSelectedPurchaseOrderIds = checked
+            ? Array.from(poSelect.querySelectorAll('.po-select-checkbox')).map(function (checkboxEl) {
+                return parseInt(checkboxEl.value, 10);
+            })
+            : [];
+        syncPoSelectSelection(modalSelectedPurchaseOrderIds);
+
+        if (poSelectedDisplayInput) {
+            poSelectedDisplayInput.value = buildPurchaseOrderSummary(getSelectedPoOptions());
+        }
+
+        await loadGrnLinesForSelectedPurchaseOrders(supplierId, modalSelectedPurchaseOrderIds);
     });
 
     document.getElementById('grn-select-all')?.addEventListener('change', function () {
@@ -1859,7 +2502,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // Apply GRN selection to item lines
-    document.getElementById('apply-grn-selection')?.addEventListener('click', function () {
+    document.getElementById('apply-grn-selection')?.addEventListener('click', async function () {
         var selected = Array.from(document.querySelectorAll('#grn-lines-table tbody tr'))
             .filter(function (tr) {
                 return tr.querySelector('.grn-line-check')?.checked;
@@ -1876,14 +2519,14 @@ document.addEventListener('DOMContentLoaded', function () {
         var invoiceSet = new Set();
         var challanSet = new Set();
 
-        // Ensure PO linked
-        var poId = poSelect?.value || '';
-        if (poId) {
-            document.getElementById('purchase_order_id').value = poId;
-            document.getElementById('purchase_order_display').value = document.getElementById('po-selected-display').value;
-        }
+        var appliedPoIds = [];
 
         selected.forEach(function (grnRow) {
+            var poId = parseInt(grnRow.dataset.purchaseOrderId || '0', 10);
+            if (!isNaN(poId) && poId > 0) {
+                appliedPoIds.push(poId);
+            }
+
             var itemId = grnRow.dataset.itemId;
             var uomId = grnRow.dataset.uomId;
             var mrId = grnRow.dataset.materialReceiptId;
@@ -1895,6 +2538,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 qty = maxQty;
             }
             var rate = toNum(grnRow.dataset.rate);
+            var discountPercent = toNum(grnRow.dataset.discountPercent);
             var taxRate = toNum(grnRow.dataset.taxRate);
 
             if (grnRow.dataset.invoiceNumber) invoiceSet.add(grnRow.dataset.invoiceNumber);
@@ -1928,6 +2572,8 @@ document.addEventListener('DOMContentLoaded', function () {
             var uomSel = targetRow.querySelector('.uom-select');
             if (itemSel) itemSel.value = itemId;
             if (uomSel) uomSel.value = uomId;
+            setDisplayValue(targetRow.querySelector('.item-display'), itemLabels[itemId] || '');
+            setDisplayValue(targetRow.querySelector('.uom-display'), uomLabels[uomId] || '');
 
             var qtyInput = targetRow.querySelector('.qty-input');
             if (qtyInput) {
@@ -1935,13 +2581,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 qtyInput.max = String(maxQty);
             }
             var rateInput = targetRow.querySelector('.rate-input');
-            if (rateInput) rateInput.value = rate;
+            if (rateInput) rateInput.value = format2(rate);
+            var discountPercentInput = targetRow.querySelector('.discpct-input');
+            if (discountPercentInput) discountPercentInput.value = format2(discountPercent);
 
             var taxRateInput = targetRow.querySelector('.taxrate-input');
-            if (taxRateInput) taxRateInput.value = taxRate;
+            if (taxRateInput) taxRateInput.value = format2(taxRate);
 
             recalcItemRow(targetRow);
         });
+
+        selectedPurchaseOrderIds = normalizePurchaseOrderIds(appliedPoIds);
+        modalSelectedPurchaseOrderIds = selectedPurchaseOrderIds.slice();
+        syncPoSelectSelection(modalSelectedPurchaseOrderIds);
+        syncPurchaseOrderInputs();
+        var appliedPoOptions = getSelectedPoOptions();
+        syncBillProjectSelection(appliedPoOptions, false);
+        await setBranchFromPoOptions(appliedPoOptions);
+        syncBillItemsTableVisibility();
+        syncBillItemsLockNote();
 
         // Auto-fill invoice/challan only if user hasn't already typed AND exactly 1 unique value.
         if (invoiceField && !invoiceField.value && invoiceSet.size === 1) {
@@ -1977,20 +2635,6 @@ document.addEventListener('DOMContentLoaded', function () {
             if (itemSel) tr.dataset.lockItemId = itemSel.value;
             if (uomSel) tr.dataset.lockUomId = uomSel.value;
 
-            // Prevent changing item/uom
-            itemSel?.addEventListener('change', function () {
-                if (tr.dataset.grnLinked === '1') {
-                    this.value = tr.dataset.lockItemId || '';
-                    alert('Item is locked because this line is linked to a GRN.');
-                }
-            });
-            uomSel?.addEventListener('change', function () {
-                if (tr.dataset.grnLinked === '1') {
-                    this.value = tr.dataset.lockUomId || '';
-                    alert('UOM is locked because this line is linked to a GRN.');
-                }
-            });
-
             // Enforce max qty (if known)
             var qtyInput = tr.querySelector('.qty-input');
             qtyInput?.addEventListener('input', function () {
@@ -2009,6 +2653,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Initial branch load (edit mode / old input)
     var initialSupplierId = document.getElementById('supplier_id')?.value || '';
+    syncPurchaseOrderInputs();
+    syncDueDateFromPurchaseOrders();
     loadSupplierBranches(initialSupplierId).finally(function () {
         recalcAll();
     });

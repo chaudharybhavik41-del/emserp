@@ -51,11 +51,41 @@
                         @enderror
                     </div>
 
-                    <div class="col-md-4">
+                    <div class="col-md-3">
+                        <label class="form-label">Issue Purpose</label>
+                        @php $purpose = old('issue_purpose', $requisition->issue_purpose ?? 'general'); @endphp
+                        <select name="issue_purpose" id="issue-purpose"
+                                class="form-select form-select-sm @error('issue_purpose') is-invalid @enderror" required>
+                            <option value="general" {{ $purpose === 'general' ? 'selected' : '' }}>General</option>
+                            <option value="machine_spare" {{ $purpose === 'machine_spare' ? 'selected' : '' }}>Machine Spare</option>
+                        </select>
+                        @error('issue_purpose')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">Machine (for Spare)</label>
+                        <select name="machine_id" id="machine-id"
+                                class="form-select form-select-sm @error('machine_id') is-invalid @enderror">
+                            <option value="">-- Select Machine --</option>
+                            @foreach($machines as $machine)
+                                <option value="{{ $machine->id }}"
+                                        data-project-id="{{ (int) ($machine->current_project_id ?? 0) }}"
+                                    {{ (int) old('machine_id', $requisition->machine_id) === (int) $machine->id ? 'selected' : '' }}>
+                                    {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('machine_id')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+
+                    <div class="col-md-3">
                         <label class="form-label">Project</label>
                         <select name="project_id" id="project-id"
-                                class="form-select form-select-sm @error('project_id') is-invalid @enderror"
-                                required>
+                                class="form-select form-select-sm @error('project_id') is-invalid @enderror">
                             <option value="">-- Select Project --</option>
                             @foreach($projects as $project)
                                 <option value="{{ $project->id }}"
@@ -69,7 +99,7 @@
                         @enderror
                     </div>
 
-                    <div class="col-md-5">
+                    <div class="col-md-3">
                         <label class="form-label">Contractor (optional)</label>
                         <select name="contractor_party_id"
                                 class="form-select form-select-sm @error('contractor_party_id') is-invalid @enderror">
@@ -248,6 +278,30 @@
                 return el ? (el.value || '') : '';
             }
 
+            function getPurpose() {
+                const el = document.getElementById('issue-purpose');
+                return el ? (el.value || 'general') : 'general';
+            }
+
+            function togglePurposeFields() {
+                const purpose = getPurpose();
+                const machineEl = document.getElementById('machine-id');
+                const projectEl = document.getElementById('project-id');
+
+                if (machineEl) {
+                    const enabled = purpose === 'machine_spare';
+                    machineEl.disabled = !enabled;
+                    machineEl.required = enabled;
+                    if (!enabled) {
+                        machineEl.value = '';
+                    }
+                }
+
+                if (projectEl) {
+                    projectEl.required = purpose === 'general';
+                }
+            }
+
             async function refreshBrandSelect(selectEl) {
                 const itemId = selectEl.dataset.itemId;
                 const helpEl = selectEl.closest('td')?.querySelector('.brand-help');
@@ -320,6 +374,31 @@
                     refreshAllBrandSelects();
                 });
             }
+
+            const purposeEl = document.getElementById('issue-purpose');
+            if (purposeEl) {
+                purposeEl.addEventListener('change', function () {
+                    togglePurposeFields();
+                });
+            }
+
+            const machineEl = document.getElementById('machine-id');
+            if (machineEl) {
+                machineEl.addEventListener('change', function () {
+                    if (getPurpose() !== 'machine_spare') {
+                        return;
+                    }
+
+                    const opt = machineEl.selectedOptions[0];
+                    const projectId = parseInt(opt?.dataset?.projectId || '0', 10);
+                    if (projectId > 0 && projectEl && !projectEl.value) {
+                        projectEl.value = String(projectId);
+                        projectEl.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+
+            togglePurposeFields();
         });
     </script>
 @endsection

@@ -35,6 +35,7 @@
                         <th style="width: 140px;">Type</th>
                         <th>Project</th>
                         <th style="width: 160px;">Created By</th>
+                        <th style="width: 120px;" class="text-end">Amount</th>
                         <th style="width: 120px;">Status</th>
                         <th style="width: 80px;"></th>
                     </tr>
@@ -74,6 +75,9 @@
                                     -
                                 @endif
                             </td>
+                            <td class="text-end">
+                                {{ $adj->total_amount !== null ? number_format((float) $adj->total_amount, 2) : '-' }}
+                            </td>
                             <td>
                                 <span class="badge bg-success">{{ ucfirst($adj->status ?? 'posted') }}</span>
                             </td>
@@ -86,7 +90,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-3">
+                            <td colspan="8" class="text-center text-muted py-3">
                                 No stock adjustments found.
                             </td>
                         </tr>

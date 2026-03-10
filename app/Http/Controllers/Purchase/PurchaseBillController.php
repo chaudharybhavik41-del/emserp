@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Purchase;
 
 use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use App\Http\Requests\StorePurchaseBillRequest;
 use App\Http\Requests\UpdatePurchaseBillRequest;
 use App\Models\Accounting\Account;
@@ -16,6 +17,7 @@ use App\Models\PurchaseBillLine;
 use App\Models\Uom;
 use App\Models\PurchaseOrder;
 use App\Models\MaterialReceipt;
+use App\Models\Machine;
 use App\Models\Company;
 use App\Models\Attachment;
 use App\Services\Accounting\PurchaseBillPostingService;
@@ -23,8 +25,12 @@ use App\Support\GstHelper;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use App\Services\Accounting\ItemGstResolver;
 use App\Services\Accounting\AccountGstResolver;
@@ -32,12 +38,21 @@ use App\Models\PurchaseBillExpenseLine;
 use App\Services\Accounting\PurchaseBillReversalService;
 use App\Models\Accounting\AccountBillAllocation;
 use App\Models\Accounting\VoucherLine;
+use App\Models\ActivityLog;
 
 class PurchaseBillController extends Controller
 {
+    protected const CREATE_SUBMISSION_LOCK_PREFIX = 'purchase_bill_create_lock:';
+    protected const CREATE_SUBMISSION_RESULT_PREFIX = 'purchase_bill_create_result:';
+
     public function __construct()
     {
         $this->middleware('auth');
+    }
+
+    protected function makeCreateSubmissionToken(): string
+    {
+        return (string) Str::uuid();
     }
 
     // public function index(Request $request)
@@ -103,7 +118,8 @@ public function index(Request $request)
             'voucher',
             'purchaseOrder.project',
             'project',
-            'expenseLines.project'
+            'expenseLines.project',
+            'expenseLines.machine'
         ])
         ->orderByDesc('posting_date')
         ->orderByDesc('bill_date')
@@ -188,7 +204,7 @@ public function index(Request $request)
     return view('purchase.bills.index', compact('bills', 'suppliers', 'projects'));
 }
 
-    public function create()
+	public function create()
 	{
     $bill            = new PurchaseBill();
     // Bill Date = Invoice Date (GST)
@@ -211,7 +227,14 @@ public function index(Request $request)
         ->get();
     $items      = Item::orderBy('code')->get();
     $uoms       = Uom::orderBy('code')->get();
-    $accounts   = Account::orderBy('name')->get();
+    $accounts   = Account::query()
+        ->where('is_active', true)
+        ->whereHas('group', function ($query) {
+            $query->where('nature', 'expense');
+        })
+        ->orderBy('name')
+        ->get();
+    $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -223,9 +246,220 @@ public function index(Request $request)
         ->get();
 
     $emptyLines = 5;
+    $submissionToken = $this->makeCreateSubmissionToken();
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects', 'submissionToken'));
 	}
+
+    protected function supplierPurchaseOrderQuery(int $supplierId)
+    {
+        $query = PurchaseOrder::query()
+            ->where('vendor_party_id', $supplierId);
+
+        if (Schema::hasColumn('purchase_orders', 'deleted_at')) {
+            $query->whereNull('deleted_at');
+        }
+
+        if (Schema::hasColumn('purchase_orders', 'status')) {
+            $query->where('status', '<>', 'cancelled');
+        }
+
+        return $query;
+    }
+
+    protected function resolveSupplierPurchaseOrder(?int $purchaseOrderId, int $supplierId): ?PurchaseOrder
+    {
+        if (empty($purchaseOrderId)) {
+            return null;
+        }
+
+        $purchaseOrder = $this->supplierPurchaseOrderQuery($supplierId)
+            ->where('id', (int) $purchaseOrderId)
+            ->first();
+
+        if (! $purchaseOrder) {
+            throw ValidationException::withMessages([
+                'purchase_order_id' => 'Selected purchase order does not belong to the chosen supplier or is no longer active.',
+            ]);
+        }
+
+        return $purchaseOrder;
+    }
+
+    protected function normalizeSelectedPurchaseOrderIds(array $data): array
+    {
+        $purchaseOrderIds = collect($data['purchase_order_ids'] ?? []);
+
+        if ($purchaseOrderIds->isEmpty() && ! empty($data['purchase_order_id'])) {
+            $purchaseOrderIds = collect([$data['purchase_order_id']]);
+        }
+
+        return $purchaseOrderIds
+            ->filter(fn ($id) => filled($id))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function resolveSupplierPurchaseOrders(array $purchaseOrderIds, int $supplierId, string $errorKey = 'purchase_order_id'): Collection
+    {
+        if ($purchaseOrderIds === []) {
+            return collect();
+        }
+
+        $purchaseOrders = $this->supplierPurchaseOrderQuery($supplierId)
+            ->whereIn('id', $purchaseOrderIds)
+            ->get()
+            ->keyBy('id');
+
+        $missingIds = collect($purchaseOrderIds)
+            ->reject(fn (int $id) => $purchaseOrders->has($id))
+            ->values();
+
+        if ($missingIds->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                $errorKey => 'One or more selected purchase orders do not belong to the chosen supplier or are no longer active.',
+            ]);
+        }
+
+        return collect($purchaseOrderIds)
+            ->map(fn (int $id) => $purchaseOrders->get($id))
+            ->filter()
+            ->values();
+    }
+
+    protected function extractPurchaseOrderIdsFromLines(array $lines): array
+    {
+        if ($lines === [] || ! Schema::hasColumn('material_receipts', 'purchase_order_id')) {
+            return [];
+        }
+
+        $materialReceiptIds = collect($lines)
+            ->pluck('material_receipt_id')
+            ->filter(fn ($id) => filled($id))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($materialReceiptIds->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('material_receipts')
+            ->whereIn('id', $materialReceiptIds->all())
+            ->whereNotNull('purchase_order_id')
+            ->pluck('purchase_order_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function deriveBillProjectId(array $data, Collection $purchaseOrders): ?int
+    {
+        if ($purchaseOrders->isEmpty()) {
+            return ! empty($data['project_id']) ? (int) $data['project_id'] : null;
+        }
+
+        $projectIds = $purchaseOrders
+            ->pluck('project_id')
+            ->filter(fn ($id) => filled($id))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($projectIds->count() === 1) {
+            return $projectIds->first();
+        }
+
+        return null;
+    }
+
+    protected function deriveBillDueDate(array $data, Collection $purchaseOrders): ?string
+    {
+        $billDate = ! empty($data['bill_date']) ? Carbon::parse((string) $data['bill_date'])->startOfDay() : null;
+        $postingDate = ! empty($data['posting_date'])
+            ? Carbon::parse((string) $data['posting_date'])->startOfDay()
+            : ($billDate ? $billDate->copy() : null);
+        $manualDueDate = ! empty($data['due_date']) ? Carbon::parse((string) $data['due_date'])->startOfDay() : null;
+
+        $paymentTermsDays = $purchaseOrders
+            ->pluck('payment_terms_days')
+            ->filter(fn ($days) => $days !== null && $days !== '' && (int) $days >= 0)
+            ->map(fn ($days) => (int) $days)
+            ->max();
+
+        $dueDate = null;
+        if ($paymentTermsDays !== null && $billDate) {
+            $dueDate = $billDate->copy()->addDays($paymentTermsDays);
+        } elseif ($manualDueDate) {
+            $dueDate = $manualDueDate->copy();
+        }
+
+        if ($dueDate && $postingDate && $dueDate->lt($postingDate)) {
+            $dueDate = $postingDate->copy();
+        }
+
+        return $dueDate?->toDateString();
+    }
+
+    protected function deriveSupplierBranchId(?int $requestedSupplierBranchId, Collection $purchaseOrders): ?int
+    {
+        if (! empty($requestedSupplierBranchId)) {
+            return $requestedSupplierBranchId;
+        }
+
+        if ($purchaseOrders->count() !== 1) {
+            return null;
+        }
+
+        $purchaseOrder = $purchaseOrders->first();
+
+        return $purchaseOrder && ! empty($purchaseOrder->vendor_branch_id)
+            ? (int) $purchaseOrder->vendor_branch_id
+            : null;
+    }
+
+    protected function ensureCreateItemLinesAreGrnLinked(array $lines): void
+    {
+        foreach ($lines as $index => $lineInput) {
+            $itemId = $lineInput['item_id'] ?? null;
+            $qty = (float) ($lineInput['qty'] ?? 0);
+
+            if (empty($itemId) || $qty <= 0) {
+                continue;
+            }
+
+            if (empty($lineInput['material_receipt_id']) || empty($lineInput['material_receipt_line_id'])) {
+                throw ValidationException::withMessages([
+                    'lines.' . $index . '.item_id' => 'Item lines can only be added from fetched GRN rows on purchase bill creation.',
+                ]);
+            }
+        }
+    }
+
+    protected function roundStatutoryAmount(float $amount): float
+    {
+        return (float) round(max(0, $amount), 0);
+    }
+
+    protected function applyTcsFromInput(PurchaseBill $bill, array $data): void
+    {
+        $rate = isset($data['tcs_rate']) ? (float) $data['tcs_rate'] : 0.0;
+        $amount = isset($data['tcs_amount']) ? (float) $data['tcs_amount'] : 0.0;
+
+        $bill->tcs_rate = round(max(0, $rate), 4);
+        $bill->tcs_amount = $this->roundStatutoryAmount($amount);
+
+        if ($bill->tcs_rate <= 0 && $bill->tcs_amount <= 0) {
+            $bill->tcs_rate = max(0, $bill->tcs_rate);
+            $bill->tcs_amount = 0.0;
+        }
+    }
 
 
 
@@ -235,24 +469,55 @@ public function index(Request $request)
 	    AccountGstResolver $accountGstResolver
 	) {
 	    $data = $request->validated();
+        $submissionToken = trim((string) $request->input('submission_token', ''));
+        $submissionLockKey = null;
+        $submissionResultKey = null;
+
+        if ($submissionToken !== '') {
+            $submissionLockKey = self::CREATE_SUBMISSION_LOCK_PREFIX . $submissionToken;
+            $submissionResultKey = self::CREATE_SUBMISSION_RESULT_PREFIX . $submissionToken;
+
+            if (! Cache::add($submissionLockKey, true, now()->addMinutes(10))) {
+                $existingBillId = (int) Cache::get($submissionResultKey, 0);
+
+                if ($existingBillId > 0) {
+                    return redirect()
+                        ->route('purchase.bills.edit', ['bill' => $existingBillId])
+                        ->with('info', 'This purchase bill was already created from the previous save click.');
+                }
+
+                return back()
+                    ->withInput()
+                    ->with('info', 'Purchase bill save is already in progress. Please wait.');
+            }
+        }
+
+        $this->ensureCreateItemLinesAreGrnLinked($data['lines'] ?? []);
 
 	    // Only GRN-linked item lines are checked; expense lines are ignored by this
 	    $this->validateGrnBalances($data['lines'] ?? []);
 
-	    $bill = DB::transaction(function () use ($data, $itemGstResolver, $accountGstResolver) {
+        try {
+	        $bill = DB::transaction(function () use ($data, $itemGstResolver, $accountGstResolver) {
 	        $userId    = Auth::id();
 	        $company   = Company::where('is_default', true)->first();
 	        $companyId = $company?->id ?? 1;
 	        $supplier  = Party::find($data['supplier_id']);
+            $selectedPurchaseOrderIds = $this->normalizeSelectedPurchaseOrderIds($data);
+            $linePurchaseOrderIds = $this->extractPurchaseOrderIdsFromLines($data['lines'] ?? []);
+            $effectivePurchaseOrderIds = $linePurchaseOrderIds !== [] ? $linePurchaseOrderIds : $selectedPurchaseOrderIds;
+            $purchaseOrders = $this->resolveSupplierPurchaseOrders(
+                $effectivePurchaseOrderIds,
+                (int) $data['supplier_id'],
+                count($effectivePurchaseOrderIds) > 1 ? 'purchase_order_ids' : 'purchase_order_id'
+            );
+            $purchaseOrder = $purchaseOrders->count() === 1 ? $purchaseOrders->first() : null;
 
 		// Branch GSTIN selection (optional). If not selected, fallback to PO vendor branch.
-		$supplierBranchId = $data['supplier_branch_id'] ?? null;
-		if (empty($supplierBranchId) && ! empty($data['purchase_order_id'])) {
-		    $poBranch = PurchaseOrder::find((int) $data['purchase_order_id']);
-		    if ($poBranch && (int) $poBranch->vendor_party_id === (int) $data['supplier_id'] && $poBranch->vendor_branch_id) {
-		        $supplierBranchId = (int) $poBranch->vendor_branch_id;
-		    }
-		}
+		$supplierBranchId = $this->deriveSupplierBranchId(
+                ! empty($data['supplier_branch_id']) ? (int) $data['supplier_branch_id'] : null,
+                $purchaseOrders
+            );
 
 		// Use branch GST/state for GST split calculation only (ledger remains against main party).
 		$supplierForGst = $supplier;
@@ -272,25 +537,20 @@ public function index(Request $request)
 
 
 		// Project handling (for project direct expenses)
-		$projectId = $data['project_id'] ?? null;
-		if (!empty($data['purchase_order_id'])) {
-			$po = PurchaseOrder::find((int) $data['purchase_order_id']);
-			if ($po && $po->project_id) {
-				$projectId = $po->project_id;
-			}
-		}
+		$projectId = $this->deriveBillProjectId($data, $purchaseOrders);
+        $dueDate = $this->deriveBillDueDate($data, $purchaseOrders);
 
 	        $billData = [
 	            'company_id'        => $companyId,
 	            'supplier_id'       => $data['supplier_id'],
 		    'supplier_branch_id' => $supplierBranchId,
-	            'purchase_order_id' => $data['purchase_order_id'] ?? null,
+	            'purchase_order_id' => $purchaseOrder?->id,
 	            'project_id'        => $projectId,
 	            'bill_number'       => $data['bill_number'],
 	            'bill_date'         => $data['bill_date'],
 	            // Voucher / books date (can differ from invoice date)
 	            'posting_date'      => $data['posting_date'] ?? $data['bill_date'],
-	            'due_date'          => $data['due_date'] ?? null,
+	            'due_date'          => $dueDate,
 	            // Reference No is the Supplier Invoice No.
 	            'reference_no'      => $data['reference_no'] ?? null,
 	            'challan_number'    => $data['challan_number'] ?? null,
@@ -323,6 +583,7 @@ public function index(Request $request)
 
 	        $bill   = PurchaseBill::create($billData);
 	        $lineNo = 1;
+            $hasExpenseMachineDimension = Schema::hasColumn('purchase_bill_expense_lines', 'machine_id');
 
 	        // 1) ITEM LINES (with ItemGstResolver)
 	        foreach (($data['lines'] ?? []) as $lineInput) {
@@ -405,7 +666,7 @@ public function index(Request $request)
                 }
 
                 // If bill is linked to a PO, keep project strictly same as PO project
-                if (!empty($data['purchase_order_id']) && !empty($projectId)) {
+                if ($purchaseOrders->isNotEmpty() && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
 
@@ -452,7 +713,7 @@ public function index(Request $request)
 	                }
 	                $totalAmount   += $totalLine;
 
-	                $bill->expenseLines()->create([
+	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
                     'is_reverse_charge' => $isReverseCharge,
@@ -465,7 +726,15 @@ public function index(Request $request)
 	                    'igst_amount'  => $igstAmt,
 	                    'total_amount' => $totalLine,
 	                    'line_no'      => $lineNo++,
-	                ]);
+	                ];
+
+                    if ($hasExpenseMachineDimension) {
+                        $expensePayload['machine_id'] = ! empty($expInput['machine_id'])
+                            ? (int) $expInput['machine_id']
+                            : null;
+                    }
+
+	                $bill->expenseLines()->create($expensePayload);
 	            }
 	        }
 
@@ -502,14 +771,36 @@ public function index(Request $request)
 
 	        // Apply TDS section master defaults & optional auto-calculation (based on Total Basic)
 	        $this->applyTdsFromMaster($bill, $data, $companyId);
+            $this->applyTcsFromInput($bill, $data);
 
 	        $bill->save();
 
 	        return $bill;
 	    });
 
-	    // Attachments are saved outside DB transaction (so the DB commit is not blocked by filesystem).
-	    $this->storeBillAttachments($request, $bill);
+            if ($submissionResultKey) {
+                Cache::put($submissionResultKey, $bill->id, now()->addMinutes(10));
+            }
+
+	        // Attachments are saved outside DB transaction (so the DB commit is not blocked by filesystem).
+	        $this->storeBillAttachments($request, $bill);
+        } catch (ValidationException $e) {
+            if ($submissionLockKey) {
+                Cache::forget($submissionLockKey);
+            }
+            if ($submissionResultKey) {
+                Cache::forget($submissionResultKey);
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($submissionLockKey) {
+                Cache::forget($submissionLockKey);
+            }
+            if ($submissionResultKey) {
+                Cache::forget($submissionResultKey);
+            }
+            throw $e;
+        }
 
 	    return redirect()
 	        ->route('purchase.bills.edit', $bill)
@@ -519,7 +810,7 @@ public function index(Request $request)
 	
     public function edit(PurchaseBill $bill)
     {
-        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
+        $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'expenseLines.machine', 'supplier', 'purchaseOrder.project', 'project', 'attachments');
 
         $suppliers  = Party::query()
             ->where(function ($q) {
@@ -530,7 +821,14 @@ public function index(Request $request)
             ->get();
         $items      = Item::orderBy('code')->get();
         $uoms       = Uom::orderBy('code')->get();
-        $accounts   = Account::orderBy('name')->get();
+        $accounts   = Account::query()
+            ->where('is_active', true)
+            ->whereHas('group', function ($query) {
+                $query->where('nature', 'expense');
+            })
+            ->orderBy('name')
+            ->get();
+        $machines   = Machine::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -546,12 +844,23 @@ public function index(Request $request)
 
         $company = Company::find($companyId) ?: Company::where('is_default', true)->first();
 
-        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+        return view('purchase.bills.edit', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
     }
 
    public function show(PurchaseBill $bill)
 	{
-	    $bill->load('lines.item', 'expenseLines.account', 'expenseLines.project', 'supplier', 'voucher', 'purchaseOrder.project', 'project', 'attachments');
+	    $bill->load(
+            'lines.item',
+            'lines.fixedAssetLinks.machine',
+            'expenseLines.account',
+            'expenseLines.project',
+            'expenseLines.machine',
+            'supplier',
+            'voucher',
+            'purchaseOrder.project',
+            'project',
+            'attachments'
+        );
 
     return view('purchase.bills.show', compact('bill'));
 	}
@@ -565,10 +874,10 @@ public function index(Request $request)
 	) {
 	    $data = $request->validated();
 
-	    if ($bill->status === 'posted') {
+	    if ($bill->status !== 'draft') {
 	        return redirect()
-	            ->route('purchase.bills.edit', $bill)
-	            ->with('error', 'Posted bills cannot be edited.');
+	            ->route('purchase.bills.edit', ['bill' => $bill->id])
+	            ->with('error', 'Only draft bills can be edited.');
 	    }
 
 	    $this->validateGrnBalances($data['lines'] ?? [], $bill);
@@ -576,33 +885,33 @@ public function index(Request $request)
 	    $bill = DB::transaction(function () use ($data, $bill, $itemGstResolver, $accountGstResolver) {
 	        $userId  = Auth::id();
 	        $company = Company::where('is_default', true)->first();
+            $selectedPurchaseOrderIds = $this->normalizeSelectedPurchaseOrderIds($data);
+            $linePurchaseOrderIds = $this->extractPurchaseOrderIdsFromLines($data['lines'] ?? []);
+            $effectivePurchaseOrderIds = $linePurchaseOrderIds !== [] ? $linePurchaseOrderIds : $selectedPurchaseOrderIds;
+            $purchaseOrders = $this->resolveSupplierPurchaseOrders(
+                $effectivePurchaseOrderIds,
+                (int) $data['supplier_id'],
+                count($effectivePurchaseOrderIds) > 1 ? 'purchase_order_ids' : 'purchase_order_id'
+            );
+            $purchaseOrder = $purchaseOrders->count() === 1 ? $purchaseOrders->first() : null;
 
 	        // Update header
 	        $bill->supplier_id       = $data['supplier_id'];
-	        $bill->purchase_order_id = $data['purchase_order_id'] ?? null;
+	        $bill->purchase_order_id = $purchaseOrder?->id;
 		// Branch GSTIN selection (optional). If not selected, fallback to PO vendor branch.
-		$supplierBranchId = $data['supplier_branch_id'] ?? null;
-		if (empty($supplierBranchId) && ! empty($data['purchase_order_id'])) {
-		    $poBranch = PurchaseOrder::find((int) $data['purchase_order_id']);
-		    if ($poBranch && $poBranch->vendor_branch_id) {
-		        $supplierBranchId = (int) $poBranch->vendor_branch_id;
-		    }
-		}
+		$supplierBranchId = $this->deriveSupplierBranchId(
+                ! empty($data['supplier_branch_id']) ? (int) $data['supplier_branch_id'] : null,
+                $purchaseOrders
+            );
 		$bill->supplier_branch_id = $supplierBranchId;
 
 		// Project handling (for project direct expenses)
-		$projectId = $data['project_id'] ?? null;
-		if (!empty($data['purchase_order_id'])) {
-			$po = PurchaseOrder::find((int) $data['purchase_order_id']);
-			if ($po && $po->project_id) {
-				$projectId = $po->project_id;
-			}
-		}
+		$projectId = $this->deriveBillProjectId($data, $purchaseOrders);
+        $dueDate = $this->deriveBillDueDate($data, $purchaseOrders);
 		$bill->project_id = $projectId;
-	        $bill->bill_number       = $data['bill_number'];
 	        $bill->bill_date         = $data['bill_date'];
 	        $bill->posting_date      = $data['posting_date'] ?? $data['bill_date'];
-	        $bill->due_date          = $data['due_date'] ?? null;
+	        $bill->due_date          = $dueDate;
 	        // Reference No is the Supplier Invoice No.
 	        $bill->reference_no      = $data['reference_no'] ?? null;
 	        $bill->challan_number    = $data['challan_number'] ?? null;
@@ -615,7 +924,7 @@ public function index(Request $request)
 	        $bill->tcs_rate          = $data['tcs_rate'] ?? 0;
 	        $bill->tcs_amount        = $data['tcs_amount'] ?? 0;
 	        $bill->tcs_section       = $data['tcs_section'] ?? null;
-	        $bill->status            = $data['status'] ?? $bill->status;
+	        $bill->status            = 'draft';
 	        $bill->updated_by        = $userId;
 	        $bill->save();
 
@@ -659,6 +968,7 @@ public function index(Request $request)
 	        $totalAmount   = 0.0;
 
 	        $lineNo = 1;
+            $hasExpenseMachineDimension = Schema::hasColumn('purchase_bill_expense_lines', 'machine_id');
 
 	        // 1) ITEM LINES
 	        foreach (($data['lines'] ?? []) as $lineInput) {
@@ -759,7 +1069,7 @@ public function index(Request $request)
                 }
 
                 // If bill is linked to a PO, keep project strictly same as PO project
-                if (!empty($data['purchase_order_id']) && !empty($projectId)) {
+                if ($purchaseOrders->isNotEmpty() && !empty($projectId)) {
                     $lineProjectId = $projectId;
                 }
 
@@ -806,7 +1116,7 @@ public function index(Request $request)
 	                }
 	                $totalAmount   += $totalLine;
 
-	                $bill->expenseLines()->create([
+	                $expensePayload = [
 	                    'account_id'   => $accountId,
 	                    'project_id'   => $lineProjectId,
                     'is_reverse_charge' => $isReverseCharge,
@@ -819,7 +1129,15 @@ public function index(Request $request)
 	                    'igst_amount'  => $igstAmt,
 	                    'total_amount' => $totalLine,
 	                    'line_no'      => $lineNo++,
-	                ]);
+	                ];
+
+                    if ($hasExpenseMachineDimension) {
+                        $expensePayload['machine_id'] = ! empty($expInput['machine_id'])
+                            ? (int) $expInput['machine_id']
+                            : null;
+                    }
+
+	                $bill->expenseLines()->create($expensePayload);
 	            }
 	        }
 
@@ -857,6 +1175,7 @@ public function index(Request $request)
 	        // Apply TDS section master defaults & optional auto-calculation (based on Total Basic)
 	        $companyIdForTds = (int) ($bill->company_id ?: ($company?->id ?? 1));
 	        $this->applyTdsFromMaster($bill, $data, $companyIdForTds);
+            $this->applyTcsFromInput($bill, $data);
 
 	        $bill->save();
 
@@ -869,15 +1188,13 @@ public function index(Request $request)
 	    $this->storeBillAttachments($request, $bill);
 
 	    return redirect()
-	        ->route('purchase.bills.edit', $bill)
+	        ->route('purchase.bills.edit', ['bill' => $bill->id])
 	        ->with('success', 'Purchase bill updated.');
 	}
 
     /**
      * Fetch POs for supplier (for Fetch from PO/GRN popup).
-     * Includes:
-     *  - POs where vendor_party_id = supplier_id
-     *  - POs used in any GRN for that supplier
+     * Returns non-cancelled POs for the selected supplier.
      */
     public function ajaxPurchaseOrdersForSupplier(Request $request): JsonResponse
     {
@@ -887,11 +1204,22 @@ public function index(Request $request)
 
         $supplierId = (int) $data['supplier_id'];
 
-        $orders = PurchaseOrder::query()
+        $ordersQuery = $this->supplierPurchaseOrderQuery($supplierId)
             ->with('project')
-            ->where('vendor_party_id', $supplierId)
-            ->whereIn('status', ['draft', 'approved'])
-            ->orderByDesc('po_date')
+            ->orderByDesc('po_date');
+
+        if (Schema::hasColumn('material_receipts', 'purchase_order_id')) {
+            $ordersQuery->whereExists(function ($query) use ($supplierId) {
+                $query->selectRaw('1')
+                    ->from('material_receipts as mr')
+                    ->join('material_receipt_lines as mrl', 'mrl.material_receipt_id', '=', 'mr.id')
+                    ->whereColumn('mr.purchase_order_id', 'purchase_orders.id')
+                    ->where('mr.supplier_id', $supplierId)
+                    ->whereIn('mr.status', ['qc_passed', 'QC_PASSED']);
+            });
+        }
+
+        $orders = $ordersQuery
             ->limit(100)
             ->get();
 
@@ -903,6 +1231,7 @@ public function index(Request $request)
                 'project_id'   => $po->project_id,
                 'project_code' => $po->project?->code,
                 'project_name' => $po->project?->name,
+                'payment_terms_days' => $po->payment_terms_days,
                 'total_amount' => (float) $po->total_amount,
 				'vendor_branch_id' => $po->vendor_branch_id,
             ];
@@ -917,10 +1246,26 @@ public function index(Request $request)
     public function ajaxGrnLinesForPurchaseOrder(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'supplier_id'       => ['required', 'integer', 'exists:parties,id'],
-            'purchase_order_id' => ['required', 'integer', 'exists:purchase_orders,id'],
-            'bill_id'           => ['nullable', 'integer', 'exists:purchase_bills,id'],
+            'supplier_id'         => ['required', 'integer', 'exists:parties,id'],
+            'purchase_order_id'   => ['nullable', 'integer', 'exists:purchase_orders,id'],
+            'purchase_order_ids'  => ['nullable', 'array'],
+            'purchase_order_ids.*'=> ['integer', 'distinct', 'exists:purchase_orders,id'],
+            'bill_id'             => ['nullable', 'integer', 'exists:purchase_bills,id'],
         ]);
+
+        $purchaseOrderIds = $this->normalizeSelectedPurchaseOrderIds($data);
+        if ($purchaseOrderIds === []) {
+            throw ValidationException::withMessages([
+                'purchase_order_ids' => 'Please select at least one purchase order.',
+            ]);
+        }
+
+        $purchaseOrders = $this->resolveSupplierPurchaseOrders(
+            $purchaseOrderIds,
+            (int) $data['supplier_id'],
+            count($purchaseOrderIds) > 1 ? 'purchase_order_ids' : 'purchase_order_id'
+        );
+        $purchaseOrderIds = $purchaseOrders->pluck('id')->all();
 
         $excludeBillId = ! empty($data['bill_id']) ? (int) $data['bill_id'] : null;
 
@@ -933,13 +1278,16 @@ public function index(Request $request)
                     $join->where('pbl.purchase_bill_id', '<>', $excludeBillId);
                 }
             })
+            ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id')
+            ->leftJoin('purchase_orders as po', 'po.id', '=', 'mr.purchase_order_id')
             ->leftJoin('purchase_order_items as poi', 'poi.id', '=', 'mrl.purchase_order_item_id')
             ->leftJoin('items as it', 'it.id', '=', 'mrl.item_id')
             ->leftJoin('uoms as u', 'u.id', '=', 'mrl.uom_id')
-            ->where('mr.purchase_order_id', $data['purchase_order_id'])
+            ->whereIn('mr.purchase_order_id', $purchaseOrderIds)
             ->where('mr.supplier_id', $data['supplier_id'])
             ->whereIn('mr.status', ['qc_passed', 'QC_PASSED'])
             ->groupBy(
+                'mr.purchase_order_id',
                 'mr.id',
                 'mr.receipt_number',
                 'mr.receipt_date',
@@ -952,12 +1300,15 @@ public function index(Request $request)
                 'mrl.received_weight_kg',
                 'mrl.purchase_order_item_id',
                 'poi.rate',
+                'poi.discount_percent',
                 'poi.tax_percent',
+                'po.code',
                 'it.code',
                 'it.name',
                 'u.code'
             )
             ->selectRaw('
+                mr.purchase_order_id,
                 mr.id as material_receipt_id,
                 mr.receipt_number,
                 mr.receipt_date,
@@ -970,12 +1321,17 @@ public function index(Request $request)
                 COALESCE(mrl.received_weight_kg, 0) as received_weight_kg,
                 mrl.purchase_order_item_id,
                 poi.rate as po_rate,
+                poi.discount_percent as po_discount_percent,
                 poi.tax_percent as po_tax_percent,
+                po.code as purchase_order_code,
                 it.code as item_code,
                 it.name as item_name,
                 u.code as uom_code,
-                COALESCE(SUM(pbl.qty), 0) as billed_qty
+                COALESCE(SUM(CASE WHEN pb.status = "cancelled" THEN 0 ELSE pbl.qty END), 0) as billed_qty
             ')
+            ->orderBy('po.code')
+            ->orderBy('mr.receipt_date')
+            ->orderBy('mr.receipt_number')
             ->get();
 
         $lines = $rows->map(function ($row) {
@@ -992,6 +1348,8 @@ public function index(Request $request)
             }
 
             return [
+                'purchase_order_id'         => (int) $row->purchase_order_id,
+                'purchase_order_code'       => $row->purchase_order_code,
                 'material_receipt_id'      => $row->material_receipt_id,
                 'material_receipt_line_id' => $row->material_receipt_line_id,
                 'grn_no'                   => $row->receipt_number,
@@ -1009,6 +1367,7 @@ public function index(Request $request)
                 'billed_qty'               => $billedQty,
                 'remaining_qty'            => $remainingQty,
                 'rate'                     => $row->po_rate !== null ? (float) $row->po_rate : 0.0,
+                'discount_percent'         => $row->po_discount_percent !== null ? (float) $row->po_discount_percent : 0.0,
                 'tax_rate'                 => $row->po_tax_percent !== null ? (float) $row->po_tax_percent : 0.0,
             ];
         })->filter()->values();
@@ -1037,7 +1396,7 @@ public function index(Request $request)
 
             $bill->tds_section = null;
             $bill->tds_rate = round(max(0, $rate), 4);
-            $bill->tds_amount = round(max(0, $amount), 2);
+            $bill->tds_amount = $this->roundStatutoryAmount($amount);
 
             if ($bill->tds_rate <= 0) {
                 $bill->tds_rate = 0.0;
@@ -1069,7 +1428,7 @@ public function index(Request $request)
         }
 
         $bill->tds_rate = round(max(0, $rate), 4);
-        $bill->tds_amount = round(max(0, $amount), 2);
+        $bill->tds_amount = $this->roundStatutoryAmount($amount);
 
         if ($bill->tds_rate <= 0) {
             $bill->tds_amount = 0.0;
@@ -1120,7 +1479,8 @@ public function index(Request $request)
         }
 
         $query = DB::table('material_receipt_lines as mrl')
-            ->leftJoin('purchase_bill_lines as pbl', 'pbl.material_receipt_line_id', '=', 'mrl.id');
+            ->leftJoin('purchase_bill_lines as pbl', 'pbl.material_receipt_line_id', '=', 'mrl.id')
+            ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id');
 
         if ($existingBill) {
             $query->where(function ($q) use ($existingBill) {
@@ -1138,7 +1498,7 @@ public function index(Request $request)
                 mrl.uom_id,
                 mrl.qty_pcs,
                 COALESCE(mrl.received_weight_kg, 0) as received_weight_kg,
-                COALESCE(SUM(pbl.qty), 0) as billed_qty
+                COALESCE(SUM(CASE WHEN pb.status = "cancelled" THEN 0 ELSE pbl.qty END), 0) as billed_qty
             ')
             ->get()
             ->keyBy('id');
@@ -1233,10 +1593,10 @@ public function index(Request $request)
 
     public function destroy(PurchaseBill $bill)
     {
-        if ($bill->status === 'posted') {
+        if ($bill->status !== 'draft') {
             return redirect()
                 ->route('purchase.bills.index')
-                ->with('error', 'Posted bills cannot be deleted.');
+                ->with('error', 'Only draft bills can be deleted.');
         }
 
         // Delete uploaded files + attachment records first
@@ -1247,6 +1607,123 @@ public function index(Request $request)
         return redirect()
             ->route('purchase.bills.index')
             ->with('success', 'Purchase bill deleted.');
+    }
+
+    public function changePostingDate(Request $request, PurchaseBill $bill)
+    {
+        if (($bill->status ?? null) !== 'posted') {
+            return redirect()
+                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->with('error', 'Only posted bills can have posting date corrected.');
+        }
+
+        if (! $bill->voucher_id) {
+            return redirect()
+                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->with('error', 'Cannot change posting date because linked accounting voucher is missing.');
+        }
+
+        $postingDateRules = ['required', 'date', 'before_or_equal:today'];
+        if ($bill->bill_date) {
+            $postingDateRules[] = 'after_or_equal:' . $bill->bill_date->toDateString();
+        }
+
+        $data = $request->validate([
+            'posting_date' => $postingDateRules,
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $newPostingDate = (string) $data['posting_date'];
+        $reason = trim((string) $data['reason']);
+        $currentPostingDate = optional($bill->posting_date ?: $bill->bill_date)->toDateString();
+
+        if ($currentPostingDate === $newPostingDate) {
+            return redirect()
+                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->with('info', 'Posting date is already set to the selected date.');
+        }
+
+        try {
+            DB::transaction(function () use ($bill, $newPostingDate, $reason) {
+                $lockedBill = PurchaseBill::query()
+                    ->lockForUpdate()
+                    ->findOrFail($bill->id);
+
+                if (($lockedBill->status ?? null) !== 'posted') {
+                    throw ValidationException::withMessages([
+                        'posting_date' => 'Only posted bills can have posting date corrected.',
+                    ]);
+                }
+
+                if (! $lockedBill->voucher_id) {
+                    throw ValidationException::withMessages([
+                        'posting_date' => 'Linked accounting voucher is missing for this bill.',
+                    ]);
+                }
+
+                $voucher = $lockedBill->voucher()
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $voucher) {
+                    throw ValidationException::withMessages([
+                        'posting_date' => 'Linked accounting voucher could not be found.',
+                    ]);
+                }
+
+                $oldBillValues = [
+                    'posting_date' => optional($lockedBill->posting_date)->toDateString(),
+                ];
+                $oldVoucherValues = [
+                    'voucher_date' => optional($voucher->voucher_date)->toDateString(),
+                ];
+
+                PurchaseBill::query()
+                    ->whereKey($lockedBill->id)
+                    ->update([
+                        'posting_date' => $newPostingDate,
+                        'updated_at' => now(),
+                    ]);
+                $lockedBill->posting_date = $newPostingDate;
+
+                $voucher->voucher_date = $newPostingDate;
+                $voucher->save();
+
+                ActivityLog::logCustom(
+                    'posting_date_corrected',
+                    'Purchase bill ' . ($lockedBill->bill_number ?: ('#' . $lockedBill->id))
+                    . ' posting date changed from '
+                    . ($oldBillValues['posting_date'] ?: 'blank')
+                    . ' to '
+                    . $newPostingDate,
+                    $lockedBill,
+                    [
+                        'reason' => $reason,
+                        'old_posting_date' => $oldBillValues['posting_date'],
+                        'new_posting_date' => $newPostingDate,
+                        'voucher_id' => $voucher->id,
+                        'old_voucher_date' => $oldVoucherValues['voucher_date'],
+                        'new_voucher_date' => $newPostingDate,
+                    ]
+                );
+
+                ActivityLog::logUpdated(
+                    $voucher,
+                    $oldVoucherValues,
+                    'Voucher date corrected for purchase bill ' . ($lockedBill->bill_number ?: ('#' . $lockedBill->id))
+                );
+            });
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->with('error', 'Failed to change posting date: ' . $e->getMessage());
+        }
+
+        return redirect()
+            ->route('purchase.bills.show', ['bill' => $bill->id])
+            ->with('success', 'Purchase bill posting date updated successfully.');
     }
 
    		public function reverse(Request $request, PurchaseBill $bill, PurchaseBillReversalService $reversalService)
@@ -1396,6 +1873,3 @@ public function index(Request $request)
             ->with('success', 'Purchase bill posted to accounting. Voucher ID: ' . $voucher->id);
     }
 }
-
-
-

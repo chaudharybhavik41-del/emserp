@@ -12,6 +12,12 @@
     </div>
 
     <div class="d-flex gap-2">
+        @if(\Illuminate\Support\Facades\Route::has('notifications.push-report'))
+            <a href="{{ route('notifications.push-report') }}" class="btn btn-sm btn-outline-secondary">
+                Push Report
+            </a>
+        @endif
+
         <form method="POST" action="{{ route('notifications.test') }}">
             @csrf
             <button type="submit" class="btn btn-sm btn-outline-primary">

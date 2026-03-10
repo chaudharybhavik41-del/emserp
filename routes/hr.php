@@ -249,10 +249,11 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::match(['get', 'post'], 'year-end', [HrLeaveController::class, 'yearEndProcessing'])->name('year-end');
 
         // Applications under leave prefix (legacy / optional)
-        Route::resource('applications', HrLeaveApplicationController::class);
-        Route::post('applications/{application}/approve', [HrLeaveApplicationController::class, 'approve'])->name('applications.approve');
-        Route::post('applications/{application}/reject', [HrLeaveApplicationController::class, 'reject'])->name('applications.reject');
-        Route::post('applications/{application}/cancel', [HrLeaveApplicationController::class, 'cancel'])->name('applications.cancel');
+        Route::resource('applications', HrLeaveApplicationController::class)
+            ->parameters(['applications' => 'leaveApplication']);
+        Route::post('applications/{leaveApplication}/approve', [HrLeaveApplicationController::class, 'approve'])->name('applications.approve');
+        Route::post('applications/{leaveApplication}/reject', [HrLeaveApplicationController::class, 'reject'])->name('applications.reject');
+        Route::post('applications/{leaveApplication}/cancel', [HrLeaveApplicationController::class, 'cancel'])->name('applications.cancel');
 
         // Show (keep last to avoid catching other routes)
         Route::get('{application}', [HrLeaveController::class, 'show'])->name('show');

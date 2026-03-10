@@ -6,14 +6,25 @@
         background-color: #f8f9fa;
     }
 
-.line-row td {
-    vertical-align: middle;
-}
+    .line-row td {
+        vertical-align: middle;
+    }
 
-.table thead th {
-    white-space: nowrap;
-    font-size: 13px;
-}
+    .table thead th {
+        white-space: nowrap;
+        font-size: 13px;
+    }
+
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
 </style>
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -220,7 +231,7 @@
                             <th style="width: 7%">L (mm)</th>
                             <th style="width: 10%">Section</th>
                             <th style="width: 7%">Qty (pcs)</th>
-                            <th style="width: 10%">Recv Wt (kg)</th>
+                            <th style="width: 10%">Received Qty</th>
                             <th style="width: 8%">UOM</th>
                             <th style="width: 12%">Remarks</th>
                             <th style="width: 4%"></th>
@@ -256,6 +267,44 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             let lineIndex = 0;
+            const rawMaterialCategories = ['steel_plate', 'steel_section'];
+
+            function isRawMaterialCategory(category) {
+                return rawMaterialCategories.includes(String(category || '').trim());
+            }
+
+            function setFieldLockedState(input, locked) {
+                if (!input) return;
+                input.disabled = locked;
+                input.readOnly = locked;
+                input.classList.toggle('bg-light', locked);
+
+                if (locked) {
+                    input.value = '';
+                }
+            }
+
+            function syncLineCategoryFields(row) {
+                if (!row) return;
+
+                const categorySelect = row.querySelector('.material-category-select');
+                const category = categorySelect ? categorySelect.value : '';
+                const isRaw = isRawMaterialCategory(category);
+
+                row.dataset.isRawMaterial = isRaw ? '1' : '0';
+
+                setFieldLockedState(row.querySelector('.thickness-input'), !isRaw);
+                setFieldLockedState(row.querySelector('.width-input'), !isRaw);
+                setFieldLockedState(row.querySelector('.length-input'), !isRaw);
+                setFieldLockedState(row.querySelector('.section-profile-input'), !isRaw);
+
+                if (!isRaw) {
+                    const weightInput = row.querySelector('.received-weight-input');
+                    if (weightInput) {
+                        weightInput.dataset.perPieceWeight = '';
+                    }
+                }
+            }
 
             function makeRow(index) {
                 return `
@@ -338,7 +387,7 @@
             <td style="min-width:130px;">
                 <input type="text"
                        name="lines[${index}][section_profile]"
-                       class="form-control form-control-sm shadow-sm"
+                       class="form-control form-control-sm shadow-sm section-profile-input"
                        placeholder="ISMB300">
             </td>
 
@@ -350,12 +399,12 @@
                        min="1" step="1" value="1" required>
             </td>
 
-            <!-- Weight -->
+            <!-- Received Qty -->
             <td style="width:110px;">
                 <input type="number"
                        name="lines[${index}][received_weight_kg]"
                        class="form-control form-control-sm text-center received-weight-input shadow-sm"
-                       placeholder="Kg"
+                       placeholder="Qty"
                        min="0" step="0.001">
             </td>
 
@@ -395,6 +444,8 @@
                 const tbody = document.querySelector('#lines-table tbody');
                 if (!tbody) return;
                 tbody.insertAdjacentHTML('beforeend', makeRow(lineIndex));
+                const row = tbody.querySelector('tr[data-row-index="' + lineIndex + '"]');
+                syncLineCategoryFields(row);
                 lineIndex++;
             }
 
@@ -407,8 +458,12 @@
                 const thickness   = row.querySelector('.thickness-input');
                 const width       = row.querySelector('.width-input');
                 const length      = row.querySelector('.length-input');
+                const categorySelect = row.querySelector('.material-category-select');
 
                 if (!qtyInput || !weightInput) return;
+                if (!isRawMaterialCategory(row.dataset.materialCategory || (categorySelect ? categorySelect.value : ''))) {
+                    return;
+                }
 
                 const qty = parseFloat(qtyInput.value || '0');
                 if (!qty || qty <= 0) {
@@ -491,7 +546,20 @@
                     const suggested = itemDefaultCategoryMap[itemId];
                     if (suggested) {
                         categorySelect.value = String(suggested);
+                        row.dataset.materialCategory = String(suggested);
                     }
+                    syncLineCategoryFields(row);
+                });
+
+                tableBody.addEventListener('change', function (e) {
+                    if (!e.target.classList.contains('material-category-select')) return;
+
+                    const row = e.target.closest('tr');
+                    if (!row) return;
+
+                    row.dataset.materialCategory = e.target.value || '';
+                    syncLineCategoryFields(row);
+                    recalcGrnLineWeight(row);
                 });
             }
 
@@ -524,6 +592,22 @@
             if (projectSelect) {
                 projectSelect.addEventListener('change', updateClientFromProject);
                 updateClientFromProject();
+            }
+
+            function syncProjectLockFromPo() {
+                if (!projectSelect) return;
+
+                const selectedOption = poSelect ? poSelect.options[poSelect.selectedIndex] : null;
+                const projectId = selectedOption ? (selectedOption.getAttribute('data-project-id') || '') : '';
+                const isClient = clientMaterialRadio && clientMaterialRadio.checked;
+                const hasPo = !isClient && !!(poSelect && poSelect.value);
+
+                if (hasPo) {
+                    projectSelect.value = projectId;
+                    updateClientFromProject();
+                }
+
+                projectSelect.disabled = hasPo;
             }
 
             /**
@@ -562,6 +646,8 @@
                         supplierCol.style.display = '';
                     }
                 }
+
+                syncProjectLockFromPo();
             }
 
             if (ownMaterialRadio) {
@@ -667,6 +753,8 @@
                         if (sectionInput) {
                             sectionInput.value = sectionInput.value || '';
                         }
+
+                        syncLineCategoryFields(row);
 
                         // PO quantities
                         let poQtyPcs   = null;
@@ -779,6 +867,7 @@
                     syncMaterialTypeUi();
 
                     loadLinesFromPurchaseOrder(poSelect.value);
+                    syncProjectLockFromPo();
                 });
 
                 // Load lines on page load if a PO is already selected (after validation error)
@@ -789,6 +878,7 @@
 
             // Initial UI sync (respect old('is_client_material'))
             syncMaterialTypeUi();
+            syncProjectLockFromPo();
         });
     </script>
 @endsection

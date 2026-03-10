@@ -14,7 +14,7 @@
         </div>
 
         <div class="d-flex gap-2">
-            <a href="{{ route('hr.payroll.period', $period) }}" class="btn btn-outline-secondary">
+            <a href="{{ url('/hr/payroll/period/' . $period->getKey()) }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left"></i> Back to Period
             </a>
             <button type="button" class="btn btn-outline-primary" onclick="window.print()">
@@ -111,12 +111,12 @@
                             <td>{{ $p->department_name ?? $p->employee?->department?->name }}</td>
                             <td class="text-end">{{ number_format($p->paid_days ?? 0, 1) }}</td>
 
-                            <td class="text-end">{{ number_format($p->basic_salary ?? 0, 2) }}</td>
+                            <td class="text-end">{{ number_format($p->basic ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->hra ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->da ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->special_allowance ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->conveyance ?? 0, 2) }}</td>
-                            <td class="text-end">{{ number_format($p->medical_allowance ?? 0, 2) }}</td>
+                            <td class="text-end">{{ number_format($p->medical ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->ot_amount ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->bonus ?? 0, 2) }}</td>
                             <td class="text-end">{{ number_format($p->other_earnings ?? 0, 2) }}</td>

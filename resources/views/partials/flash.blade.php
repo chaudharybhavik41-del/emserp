@@ -14,7 +14,7 @@
 @endforeach
 
 {{-- Validation errors --}}
-@if ($errors->any())
+@if (isset($errors) && $errors->any())
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
         <strong>There were some problems with your input.</strong>
         <ul class="mb-0 mt-1 small">

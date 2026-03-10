@@ -33,6 +33,7 @@
                         <th style="width: 12%">Invoice</th>
                         <th style="width: 10%">Type</th>
                         <th style="width: 8%">Status</th>
+                        <th style="width: 10%">Accounting</th>
                         <th style="width: 8%"></th>
                     </tr>
                     </thead>
@@ -84,6 +85,15 @@
                             <td>
                                 <span class="badge bg-secondary">{{ strtoupper($receipt->status) }}</span>
                             </td>
+                            <td>
+                                @if($receipt->is_client_material)
+                                    <span class="badge bg-light text-dark border">N/A</span>
+                                @elseif(($receipt->billing_status ?? null) === 'billed')
+                                    <span class="badge bg-success">BILLED</span>
+                                @else
+                                    <span class="badge bg-warning text-dark">UNBILLED</span>
+                                @endif
+                            </td>
                             <td class="text-end">
                                 <a href="{{ route('material-receipts.show', $receipt) }}"
                                    class="btn btn-sm btn-outline-secondary">
@@ -93,7 +103,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-3">
+                            <td colspan="10" class="text-center text-muted py-3">
                                 No GRNs recorded yet.
                             </td>
                         </tr>

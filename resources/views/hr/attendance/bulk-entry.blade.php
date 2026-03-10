@@ -21,7 +21,7 @@
         <div class="card-body d-flex flex-wrap gap-3 align-items-end">
             <div>
                 <label class="form-label mb-1">Date</label>
-                <input type="date" name="date" value="{{ $date }}" class="form-control" />
+                <input type="date" id="bulk-entry-date" name="date" value="{{ $date }}" class="form-control" />
             </div>
 
             {{-- Optional filters (keep even if you don’t wire dropdowns now) --}}
@@ -45,7 +45,7 @@
 
     <form method="POST" class="card">
         @csrf
-        <input type="hidden" name="date" value="{{ $date }}"/>
+        <input type="hidden" id="bulk-entry-submit-date" name="date" value="{{ $date }}"/>
 
         <div class="card-body">
             <div class="d-flex flex-wrap gap-2 mb-3">
@@ -95,13 +95,13 @@
                             <td>
                                 <input type="time" class="form-control form-control-sm"
                                        name="rows[{{ $emp->id }}][in_time]"
-                                       value="{{ old("rows.{$emp->id}.in_time", $att?->in_time ? \Carbon\Carbon::parse($att->in_time)->format('H:i') : '') }}">
+                                       value="{{ old("rows.{$emp->id}.in_time", $att?->first_in?->format('H:i') ?? '') }}">
                             </td>
 
                             <td>
                                 <input type="time" class="form-control form-control-sm"
                                        name="rows[{{ $emp->id }}][out_time]"
-                                       value="{{ old("rows.{$emp->id}.out_time", $att?->out_time ? \Carbon\Carbon::parse($att->out_time)->format('H:i') : '') }}">
+                                       value="{{ old("rows.{$emp->id}.out_time", $att?->last_out?->format('H:i') ?? '') }}">
                             </td>
 
                             <td>
@@ -139,6 +139,15 @@
     function setAllStatus(value) {
         document.querySelectorAll('.status-select').forEach(function (el) {
             el.value = value;
+        });
+    }
+
+    const bulkEntryDate = document.getElementById('bulk-entry-date');
+    const bulkEntrySubmitDate = document.getElementById('bulk-entry-submit-date');
+
+    if (bulkEntryDate && bulkEntrySubmitDate) {
+        bulkEntryDate.addEventListener('change', function () {
+            bulkEntrySubmitDate.value = this.value;
         });
     }
 </script>

@@ -10,10 +10,19 @@ use App\Models\Production\ProductionBillLine;
 use App\Models\Production\ProductionDprLine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use App\Services\Production\ProductionAudit;
 
 class ProductionBillingController extends Controller
 {
+    protected function activityNeedsTraceability($code, $name, $isFitup): bool
+    {
+        $codeText = strtoupper((string) $code);
+        $nameText = strtoupper((string) $name);
+
+        return (bool) $isFitup || str_contains($codeText, 'CUT') || str_contains($nameText, 'CUT');
+    }
+
     public function __construct()
     {
         $this->middleware('auth');
@@ -24,13 +33,62 @@ class ProductionBillingController extends Controller
 
     public function index(Project $project)
     {
-        $bills = ProductionBill::query()
+        $query = ProductionBill::query()
             ->where('project_id', $project->id)
-            ->with(['contractor'])
-            ->orderByDesc('id')
-            ->paginate(20);
+            ->with(['contractor']);
 
-        return view('projects.production_billing.index', compact('project', 'bills'));
+        $q = trim((string) request('q', ''));
+        if ($q !== '') {
+            $query->where(function ($builder) use ($q) {
+                $builder->where('bill_number', 'like', '%' . $q . '%')
+                    ->orWhere('remarks', 'like', '%' . $q . '%')
+                    ->orWhereHas('contractor', function ($contractorQuery) use ($q) {
+                        $contractorQuery->where('name', 'like', '%' . $q . '%');
+                    });
+            });
+        }
+
+        $status = trim((string) request('status', ''));
+        if ($status !== '') {
+            $query->where('status', $status);
+        }
+
+        if ($contractorId = (int) request('contractor_party_id', 0)) {
+            $query->where('contractor_party_id', $contractorId);
+        }
+
+        $dateFrom = trim((string) request('date_from', ''));
+        if ($dateFrom !== '') {
+            $query->whereDate('bill_date', '>=', $dateFrom);
+        }
+
+        $dateTo = trim((string) request('date_to', ''));
+        if ($dateTo !== '') {
+            $query->whereDate('bill_date', '<=', $dateTo);
+        }
+
+        $sort = (string) request('sort', '');
+        $dir = strtolower((string) request('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $sortable = ['bill_number', 'bill_date', 'status', 'grand_total', 'created_at', 'id'];
+        if ($sort !== '' && in_array($sort, $sortable, true)) {
+            $query->orderBy($sort, $dir);
+        } else {
+            $query->orderByDesc('id');
+        }
+
+        $perPage = (int) request('per_page', 25);
+        if (! in_array($perPage, [10, 25, 50, 100], true)) {
+            $perPage = 25;
+        }
+
+        $bills = $query->paginate($perPage)->withQueryString();
+
+        $contractors = Party::query()
+            ->where('is_contractor', true)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return view('projects.production_billing.index', compact('project', 'bills', 'contractors'));
     }
 
     public function create(Project $project)
@@ -86,11 +144,13 @@ class ProductionBillingController extends Controller
         $rows = ProductionDprLine::query()
             ->join('production_dprs as dpr', 'dpr.id', '=', 'production_dpr_lines.production_dpr_id')
             ->join('production_plans as pp', 'pp.id', '=', 'dpr.production_plan_id')
+            ->join('production_activities as pa', 'pa.id', '=', 'dpr.production_activity_id')
             ->leftJoin('production_plan_item_activities as pia', 'pia.id', '=', 'production_dpr_lines.production_plan_item_activity_id')
             ->leftJoin('production_plan_items as ppi', 'ppi.id', '=', 'production_dpr_lines.production_plan_item_id')
             ->leftJoin('uoms as ruom', 'ruom.id', '=', 'pia.rate_uom_id')
             ->where('pp.project_id', $project->id)
             ->where('dpr.status', 'approved')
+            ->where('production_dpr_lines.is_completed', 1)
             ->whereBetween('dpr.dpr_date', [$from, $to])
 			// A DPR line becomes billable again if the previous bill was cancelled.
 			// So we only exclude DPR lines that are mapped to a NON-cancelled bill (draft/finalized).
@@ -113,6 +173,7 @@ class ProductionBillingController extends Controller
 
                 'production_dpr_lines.qty as dpr_qty',
                 'production_dpr_lines.qty_uom_id as dpr_qty_uom_id',
+                'production_dpr_lines.traceability_done as traceability_done',
 
                 'ppi.id as plan_item_id',
                 'ppi.item_code as item_code',
@@ -125,11 +186,41 @@ class ProductionBillingController extends Controller
 
                 'ruom.code as rate_uom_code',
                 'ruom.category as rate_uom_category',
+                'pa.code as activity_code',
+                'pa.name as activity_name',
+                'pa.is_fitupp as activity_is_fitupp',
             ])
             ->get();
 
         if ($rows->isEmpty()) {
             return back()->withInput()->with('error', 'No eligible approved DPR lines found for billing in this period.');
+        }
+
+        if (Schema::hasColumn('production_dpr_lines', 'traceability_done')) {
+            $missingTraceability = $rows->filter(function ($r) {
+                if (! $this->activityNeedsTraceability($r->activity_code ?? null, $r->activity_name ?? null, $r->activity_is_fitupp ?? false)) {
+                    return false;
+                }
+
+                return (int) ($r->traceability_done ?? 0) !== 1;
+            });
+
+            if ($missingTraceability->isNotEmpty()) {
+                $examples = $missingTraceability
+                    ->take(8)
+                    ->map(function ($r) {
+                        $item = (string) ($r->item_code ?: ('Item#' . ((int) ($r->plan_item_id ?? 0))));
+                        $asm = trim((string) ($r->assembly_mark ?? ''));
+
+                        return $asm !== '' ? ($asm . ' / ' . $item) : $item;
+                    })
+                    ->implode(', ');
+
+                return back()->withInput()->with(
+                    'error',
+                    'Cannot generate bill: traceability is pending for one or more completed DPR lines. Complete traceability first. Examples: ' . $examples
+                );
+            }
         }
 
         // Convert each DPR line into a billing qty aligned with rate UOM.

@@ -26,6 +26,7 @@ class ItemLookupController extends Controller
     {
         $ids = $request->input('ids');
         $q   = trim((string) $request->input('q', ''));
+        $purpose = trim((string) $request->input('purpose', ''));
 
         $query = Item::query()
             ->with(['uom', 'type'])
@@ -40,6 +41,46 @@ class ItemLookupController extends Controller
         if ($request->boolean('non_raw_only')) {
             $query->whereHas('type', function ($q) {
                 $q->where('code', '!=', 'RAW');
+            });
+        }
+
+        $materialTypeCode = trim((string) $request->input('material_type_code', ''));
+        if ($materialTypeCode !== '') {
+            $query->whereHas('type', function ($q) use ($materialTypeCode) {
+                $q->where('code', $materialTypeCode);
+            });
+        }
+
+        $excludeCategoryCodes = $request->input('exclude_material_category_codes');
+        if (! is_array($excludeCategoryCodes)) {
+            $excludeCategoryCodes = explode(',', (string) $excludeCategoryCodes);
+        }
+        $excludeCategoryCodes = array_values(array_filter(array_map(
+            fn ($code) => trim((string) $code),
+            $excludeCategoryCodes
+        )));
+
+        // Machine spare requisitions should not include fuel items.
+        if ($purpose === 'machine_spare') {
+            $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
+            if (! empty($allowedTypeCodes)) {
+                $query->whereHas('type', function ($q) use ($allowedTypeCodes) {
+                    $q->whereIn('code', $allowedTypeCodes);
+                });
+            }
+
+            $excludeCategoryCodes = array_values(array_unique(array_merge(
+                $excludeCategoryCodes,
+                $this->machineSpareExcludedCategoryCodes()
+            )));
+        }
+
+        if (! empty($excludeCategoryCodes)) {
+            $query->where(function ($q) use ($excludeCategoryCodes) {
+                $q->whereNull('material_category_id')
+                    ->orWhereDoesntHave('category', function ($cat) use ($excludeCategoryCodes) {
+                        $cat->whereIn('code', $excludeCategoryCodes);
+                    });
             });
         }
 
@@ -99,5 +140,41 @@ class ItemLookupController extends Controller
         return response()->json([
             'results' => $results,
         ]);
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareAllowedTypeCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['CONSUMABLE']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        $normalized = array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
+
+        return $normalized ?: ['CONSUMABLE'];
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareExcludedCategoryCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_excluded_material_category_codes', ['FUEL', 'FUELS']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        $normalized = array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
+
+        return $normalized;
     }
 }

@@ -362,7 +362,7 @@ class AccountController extends Controller
 
     public function store(Request $request)
     {
-        $companyId = (int) $request->input('company_id', $this->defaultCompanyId());
+        $companyId = $this->defaultCompanyId();
 
         $ledgerTypes = $this->ledgerTypeOptions($companyId);
 
@@ -523,9 +523,8 @@ class AccountController extends Controller
 
     public function update(Request $request, Account $account)
     {
-
-  
-        $ledgerTypes = $this->ledgerTypeOptions((int) $account->company_id);
+        $accountCompanyId = (int) ($account->company_id ?: $this->defaultCompanyId());
+        $ledgerTypes = $this->ledgerTypeOptions($accountCompanyId);
 
         $rules = [
             'account_group_id'     => ['required', 'integer', 'exists:account_groups,id'],
@@ -535,7 +534,7 @@ class AccountController extends Controller
                 'string',
                 'max:64',
                 Rule::unique('accounts', 'code')
-                    ->where(fn ($q) => $q->where('company_id', $account->company_id))
+                    ->where(fn ($q) => $q->where('company_id', $accountCompanyId))
                     ->ignore($account->id),
             ],
             'type'                 => ['required', 'string', Rule::in(array_keys($ledgerTypes))],
@@ -559,7 +558,7 @@ class AccountController extends Controller
 
         // Enforce type validity for selected group (prevents mismatch)
         $selectedGroup = AccountGroup::query()
-            ->where('company_id', (int) $account->company_id)
+            ->where('company_id', $accountCompanyId)
             ->where('id', (int) $data['account_group_id'])
             ->first();
 
@@ -629,34 +628,28 @@ $hasVouchers  = VoucherLine::where('account_id', $account->id)->exists();
             // }
 
 
-            if ($hasVouchers) {
-    $incomingObAmount = $data['opening_balance'] ?? null;
-    $incomingObType   = $data['opening_balance_type'] ?? null;
-    $incomingObDate   = $data['opening_balance_date'] ?? null;
+        if ($hasVouchers) {
+            $incomingObAmount = $data['opening_balance'] ?? null;
+            $incomingObType   = $data['opening_balance_type'] ?? null;
+            $incomingObDate   = $data['opening_balance_date'] ?? null;
 
-    $currentObAmount = $account->opening_balance;
-    $currentObType   = $account->opening_balance_type;
-    $currentObDate   = $account->opening_balance_date ? $account->opening_balance_date->format('Y-m-d') : null;
+            $currentObAmount = $account->opening_balance;
+            $currentObType   = $account->opening_balance_type;
+            $currentObDate   = $account->opening_balance_date ? $account->opening_balance_date->format('Y-m-d') : null;
 
-    // Optional: log a notice if balances are different
-    if (
-        (string) $incomingObAmount !== (string) $currentObAmount
-        || (string) $incomingObType !== (string) $currentObType
-        || (string) $incomingObDate !== (string) $currentObDate
-    ) {
-        // No error, just allow update
-        // You can log or handle audit here if needed
-        // Example:
-        // Log::info("Opening balance changed for account {$account->id}");
-    }
-}
+            if (
+                (string) $incomingObAmount !== (string) $currentObAmount
+                || (string) $incomingObType !== (string) $currentObType
+                || (string) $incomingObDate !== (string) $currentObDate
+            ) {
+                return back()
+                    ->withErrors([
+                        'opening_balance' => 'Opening balance fields cannot be changed after vouchers exist for this ledger. Please use a journal voucher to adjust balances.',
+                    ])
+                    ->withInput();
+            }
+        }
 
-// Proceed to update the account normally
-$account->update([
-    'opening_balance' => $data['opening_balance'] ?? $account->opening_balance,
-    'opening_balance_type' => $data['opening_balance_type'] ?? $account->opening_balance_type,
-    'opening_balance_date' => $data['opening_balance_date'] ?? $account->opening_balance_date,
-]);
         if ($isSystem) {
             $blocked = [];
 

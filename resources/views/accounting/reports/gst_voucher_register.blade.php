@@ -28,19 +28,19 @@
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Input GST</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['input_total'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['input_total'] ?? 0) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Output GST</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['output_total'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['output_total'] ?? 0) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Net (Out - In)</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['net'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['net'] ?? 0) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
@@ -132,13 +132,13 @@
                             <tbody>
                             <tr>
                                 <th class="text-muted" style="width: 170px;">Input GST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['input_total'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['input_total'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 170px;">Output GST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['output_total'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['output_total'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 170px;">Net (Output - Input)</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['net'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['net'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">Vouchers</th>
                                 <td class="text-end">{{ $totals['rows'] ?? 0 }}</td>
@@ -179,27 +179,31 @@
                                     @php
                                         $partyAcc = $r->party_account_id ? ($partyAccounts[$r->party_account_id] ?? null) : null;
                                         $party    = $partyAcc?->relatedModel;
+                                        $partyLabel = $party?->name ?? $partyAcc?->name ?? ($r->party_display_name ?? '');
+                                        $partyGstin = ($r->party_account_count ?? 0) > 1
+                                            ? ''
+                                            : ($party?->gstin ?? $partyAcc?->gstin);
 
-                                        $inCgstPaise  = \\App\\Support\\MoneyHelper::toPaise($r->input_cgst ?? 0);
-                                        $inSgstPaise  = \\App\\Support\\MoneyHelper::toPaise($r->input_sgst ?? 0);
-                                        $inIgstPaise  = \\App\\Support\\MoneyHelper::toPaise($r->input_igst ?? 0);
+                                        $inCgstPaise  = \App\Support\MoneyHelper::toPaise($r->input_cgst ?? 0);
+                                        $inSgstPaise  = \App\Support\MoneyHelper::toPaise($r->input_sgst ?? 0);
+                                        $inIgstPaise  = \App\Support\MoneyHelper::toPaise($r->input_igst ?? 0);
 
-                                        $outCgstPaise = \\App\\Support\\MoneyHelper::toPaise($r->output_cgst ?? 0);
-                                        $outSgstPaise = \\App\\Support\\MoneyHelper::toPaise($r->output_sgst ?? 0);
-                                        $outIgstPaise = \\App\\Support\\MoneyHelper::toPaise($r->output_igst ?? 0);
+                                        $outCgstPaise = \App\Support\MoneyHelper::toPaise($r->output_cgst ?? 0);
+                                        $outSgstPaise = \App\Support\MoneyHelper::toPaise($r->output_sgst ?? 0);
+                                        $outIgstPaise = \App\Support\MoneyHelper::toPaise($r->output_igst ?? 0);
 
                                         $inputTotalPaise  = $inCgstPaise + $inSgstPaise + $inIgstPaise;
                                         $outputTotalPaise = $outCgstPaise + $outSgstPaise + $outIgstPaise;
                                         $netPaise         = $outputTotalPaise - $inputTotalPaise;
 
-                                        $amountBasePaise  = \\App\\Support\\MoneyHelper::toPaise($r->amount_base ?? 0);
+                                        $amountBasePaise  = \App\Support\MoneyHelper::toPaise($r->amount_base ?? 0);
                                         $searchText = strtolower(trim(
                                             ($r->voucher_date ?? '') . ' ' .
                                             ($r->voucher_no ?? '') . ' ' .
                                             ($r->voucher_type ?? '') . ' ' .
                                             ($r->project_name ?? '') . ' ' .
-                                            ($party?->name ?? $partyAcc?->name ?? '') . ' ' .
-                                            ($party?->gstin ?? $partyAcc?->gstin ?? '') . ' ' .
+                                            ($partyLabel ?? '') . ' ' .
+                                            ($partyGstin ?? '') . ' ' .
                                             ($r->status ?? '')
                                         ));
                                     @endphp
@@ -215,27 +219,27 @@
                                         <td>
                                             @if($partyAcc)
                                                 <a href="{{ route('accounting.reports.ledger', ['account_id' => $partyAcc->id, 'from_date' => $periodFrom, 'to_date' => $periodTo]) }}" class="text-decoration-none">
-                                                    {{ $party?->name ?? $partyAcc->name }}
+                                                    {{ $partyLabel }}
                                                 </a>
                                             @else
-                                                {{ $party?->name ?? $partyAcc?->name }}
+                                                {{ $partyLabel }}
                                             @endif
                                         </td>
-                                        <td>{{ $party?->gstin ?? $partyAcc?->gstin }}</td>
+                                        <td>{{ $partyGstin }}</td>
 
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($inCgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($inSgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($inIgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($inCgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($inSgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($inIgstPaise) }}</td>
 
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($outCgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($outSgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($outIgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($outCgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($outSgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($outIgstPaise) }}</td>
 
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($inputTotalPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($outputTotalPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($netPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($inputTotalPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($outputTotalPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($netPaise) }}</td>
 
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($amountBasePaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($amountBasePaise) }}</td>
 
                                         <td>
                                             <span class="badge bg-{{ ($r->status ?? '') === 'posted' ? 'success' : 'secondary' }}">

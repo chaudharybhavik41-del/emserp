@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Accounting;
 
 use App\Http\Controllers\Controller;
 use App\Models\Accounting\Account;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,21 @@ class CashFlowReportController extends Controller
     protected function defaultCompanyId(): int
     {
         return (int) (Config::get('accounting.default_company_id', 1));
+    }
+
+    protected function signedOpening(Account $account, Carbon $asOfDate): float
+    {
+        $opening = (float) ($account->opening_balance ?? 0.0);
+
+        if ($account->opening_balance_date && $account->opening_balance_date->gt($asOfDate)) {
+            return 0.0;
+        }
+
+        if ($opening != 0.0) {
+            $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
+        }
+
+        return $opening;
     }
 
     /**
@@ -41,10 +57,10 @@ class CashFlowReportController extends Controller
         // Detect cash / bank ledgers
         $cashAccountTypes = Config::get('accounting.cashflow_cash_account_types', ['bank', 'cash']);
         $cashGroupCodes   = Config::get('accounting.cashflow_cash_group_codes', []);
+        $openingAsOfDate  = $fromDate->copy()->subDay()->startOfDay();
 
         $cashAccountsQuery = Account::with('group')
-            ->where('company_id', $companyId)
-            ->where('is_active', true);
+            ->where('company_id', $companyId);
 
         if (! empty($cashAccountTypes)) {
             $cashAccountsQuery->whereIn('type', $cashAccountTypes);
@@ -56,7 +72,6 @@ class CashFlowReportController extends Controller
         if ($cashAccounts->isEmpty() && ! empty($cashGroupCodes)) {
             $cashAccounts = Account::with('group')
                 ->where('company_id', $companyId)
-                ->where('is_active', true)
                 ->whereHas('group', function ($q) use ($cashGroupCodes) {
                     $q->whereIn('code', $cashGroupCodes);
                 })
@@ -97,11 +112,7 @@ class CashFlowReportController extends Controller
         $openingCash = 0.0;
 
         foreach ($cashAccounts as $account) {
-            $opening = (float) ($account->opening_balance ?? 0.0);
-            if ($opening != 0.0) {
-                $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
-            }
-
+            $opening = $this->signedOpening($account, $openingAsOfDate);
             $agg = $before->get($account->id);
             $movementBefore = $agg ? ((float) $agg->total_debit - (float) $agg->total_credit) : 0.0;
 

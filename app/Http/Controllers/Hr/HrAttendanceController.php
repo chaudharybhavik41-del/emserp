@@ -9,6 +9,7 @@ use App\Models\Hr\HrAttendancePunch;
 use App\Models\Hr\HrAttendanceRegularization;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrHoliday;
+use App\Models\Hr\HrLeaveApplication;
 use App\Models\Hr\HrShift;
 use App\Enums\Hr\AttendanceStatus;
 use Illuminate\Http\RedirectResponse;
@@ -19,6 +20,15 @@ use Illuminate\View\View;
 
 class HrAttendanceController extends Controller
 {
+    private const PRESENT_DAY_STATUSES = [
+        'present',
+        'late',
+        'early_leaving',
+        'late_and_early',
+        'on_duty',
+        'comp_off',
+    ];
+
     public function __construct()
     {
         $this->middleware('auth');
@@ -33,7 +43,7 @@ class HrAttendanceController extends Controller
         $date = $request->get('date') ? Carbon::parse($request->get('date')) : now();
         
         $query = HrAttendance::with(['employee', 'shift'])
-            ->where('attendance_date', $date->toDateString())
+            ->whereDate('attendance_date', $date->toDateString())
             ->orderBy('hr_employee_id');
 
         if ($department = $request->get('department_id')) {
@@ -49,17 +59,17 @@ class HrAttendanceController extends Controller
         // Summary for the day
         $summary = [
             'total' => HrEmployee::active()->count(),
-            'present' => HrAttendance::where('attendance_date', $date->toDateString())
-                ->whereIn('status', ['present', 'late', 'early_leaving', 'late_and_early'])->count(),
-            'absent' => HrAttendance::where('attendance_date', $date->toDateString())
+            'present' => HrAttendance::whereDate('attendance_date', $date->toDateString())
+                ->whereIn('status', self::PRESENT_DAY_STATUSES)->count(),
+            'absent' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->where('status', 'absent')->count(),
-            'half_day' => HrAttendance::where('attendance_date', $date->toDateString())
+            'half_day' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->where('status', 'half_day')->count(),
-            'on_leave' => HrAttendance::where('attendance_date', $date->toDateString())
+            'on_leave' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->where('status', 'leave')->count(),
-            'late' => HrAttendance::where('attendance_date', $date->toDateString())
+            'late' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->where('late_minutes', '>', 0)->count(),
-            'ot_hours' => HrAttendance::where('attendance_date', $date->toDateString())
+            'ot_hours' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->sum('ot_hours'),
         ];
 
@@ -139,7 +149,10 @@ class HrAttendanceController extends Controller
                     $empData['summary']['ot_hours'] += $attendance->ot_hours;
                     
                     match ($attendance->status) {
-                        AttendanceStatus::PRESENT => $empData['summary']['present']++,
+                        AttendanceStatus::PRESENT,
+                        AttendanceStatus::EARLY_LEAVING,
+                        AttendanceStatus::ON_DUTY,
+                        AttendanceStatus::COMP_OFF => $empData['summary']['present']++,
                         AttendanceStatus::ABSENT => $empData['summary']['absent']++,
                         AttendanceStatus::HALF_DAY => $empData['summary']['half_day']++,
                         AttendanceStatus::LEAVE => $empData['summary']['leave']++,
@@ -185,51 +198,63 @@ class HrAttendanceController extends Controller
         return view('hr.attendance.show', compact('attendance'));
     }
 
-    public function manualEntry(Request $request): View|RedirectResponse
-    {
-        if ($request->isMethod('post')) {
-            $validated = $request->validate([
-                'hr_employee_id' => 'required|exists:hr_employees,id',
-                'attendance_date' => 'required|date',
-                'first_in' => 'nullable|date_format:H:i',
-                'last_out' => 'nullable|date_format:H:i',
-                'status' => 'required|in:present,absent,half_day,on_duty',
-                'remarks' => 'required|string|max:500',
-            ]);
+   public function manualEntry(Request $request): View|RedirectResponse
+{
+    if ($request->isMethod('post')) {
+        $validated = $request->validate([
+            'hr_employee_id' => 'required|exists:hr_employees,id',
+            'attendance_date' => 'required|date',
+            'first_in' => 'nullable|date_format:H:i',
+            'last_out' => 'nullable|date_format:H:i',
+            'status' => 'required|in:present,absent,half_day,on_duty',
+            'remarks' => 'required|string|max:500',
+        ]);
 
-            $employee = HrEmployee::findOrFail($validated['hr_employee_id']);
-            $date = Carbon::parse($validated['attendance_date']);
-            
-            $attendance = HrAttendance::updateOrCreate(
-                [
-                    'hr_employee_id' => $validated['hr_employee_id'],
-                    'attendance_date' => $date->toDateString(),
-                ],
-                [
-                    'hr_shift_id' => $employee->default_shift_id,
-                    'first_in' => $validated['first_in'] ? $date->copy()->setTimeFromTimeString($validated['first_in']) : null,
-                    'last_out' => $validated['last_out'] ? $date->copy()->setTimeFromTimeString($validated['last_out']) : null,
-                    'status' => $validated['status'],
-                    'is_manual_entry' => true,
-                    'remarks' => $validated['remarks'],
-                    'created_by' => auth()->id(),
-                ]
-            );
+        $employee = HrEmployee::findOrFail($validated['hr_employee_id']);
+        $date = Carbon::parse($validated['attendance_date']);
 
-            // Recalculate if times provided
-            if ($attendance->first_in && $attendance->last_out && $attendance->shift) {
-                $attendance->recalculate();
-                $attendance->save();
-            }
+        $attendance = HrAttendance::updateOrCreate(
+            [
+                'hr_employee_id' => $validated['hr_employee_id'],
+                'attendance_date' => $date->toDateString(),
+            ],
+            [
+                'hr_shift_id' => $employee->default_shift_id,
+                'first_in' => $validated['first_in'] ? $date->copy()->setTimeFromTimeString($validated['first_in']) : null,
+                'last_out' => $validated['last_out'] ? $date->copy()->setTimeFromTimeString($validated['last_out']) : null,
+                'status' => $validated['status'],
+                'is_manual_entry' => true,
+                'remarks' => $validated['remarks'],
+                'created_by' => auth()->id(),
+            ]
+        );
 
-            return redirect()
-                ->route('hr.attendance.index', ['date' => $date->toDateString()])
-                ->with('success', 'Attendance entry saved successfully.');
+        if ($attendance->first_in && $attendance->last_out && $attendance->shift) {
+            $attendance->recalculate();
+            $attendance->save();
         }
 
-        $employees = HrEmployee::active()->orderBy('first_name')->get();
-        return view('hr.attendance.manual-entry', compact('employees'));
+        return redirect()
+            ->route('hr.attendance.index', ['date' => $date->toDateString()])
+            ->with('success', 'Attendance entry saved successfully.');
     }
+
+    // Load all active employees
+    $employees = HrEmployee::active()->orderBy('first_name')->get();
+
+    // Get selected employee from query param or localStorage
+    $selectedEmployeeId = $request->query('employee_id') ?? null;
+
+    // Fetch existing attendance if exists
+    $attendance = null;
+   if ($selectedEmployeeId && $request->query('date')) {
+    $attendance = HrAttendance::where('hr_employee_id', $selectedEmployeeId)
+                                ->whereDate('attendance_date', $request->query('date'))
+                              ->first();
+}
+
+    return view('hr.attendance.manual-entry', compact('employees', 'selectedEmployeeId', 'attendance'));
+}
 
     public function process(Request $request): RedirectResponse
     {
@@ -583,7 +608,7 @@ class HrAttendanceController extends Controller
             $reportData[] = [
                 'employee' => $employee,
                 'total_days' => $startDate->diffInDays($endDate) + 1,
-                'present' => $attendances->whereIn('status', ['present', 'late', 'early_leaving'])->count(),
+                'present' => $attendances->whereIn('status', self::PRESENT_DAY_STATUSES)->count(),
                 'absent' => $attendances->where('status', 'absent')->count(),
                 'half_day' => $attendances->where('status', 'half_day')->count(),
                 'leave' => $attendances->where('status', 'leave')->count(),
@@ -797,9 +822,13 @@ class HrAttendanceController extends Controller
             $isWeekOff = true;
         }
 
-        // Check for approved leave
-        $leaveApplication = null;
-        // Would check hr_leave_applications here
+        $leaveApplication = HrLeaveApplication::query()
+            ->where('hr_employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('from_date', '<=', $date->toDateString())
+            ->whereDate('to_date', '>=', $date->toDateString())
+            ->orderBy('from_date')
+            ->first();
 
         // Create/Update attendance record
         $attendance = HrAttendance::updateOrCreate(
@@ -813,6 +842,7 @@ class HrAttendanceController extends Controller
                 'is_week_off' => $isWeekOff,
                 'is_holiday' => $isHoliday,
                 'hr_holiday_id' => $holidayId,
+                'hr_leave_application_id' => $leaveApplication?->id,
             ]
         );
 
@@ -842,7 +872,9 @@ class HrAttendanceController extends Controller
             }
         } else {
             // No punches
-            if ($isWeekOff) {
+            if ($leaveApplication) {
+                $attendance->status = AttendanceStatus::LEAVE;
+            } elseif ($isWeekOff) {
                 $attendance->status = AttendanceStatus::WEEKLY_OFF;
             } elseif ($isHoliday) {
                 $attendance->status = AttendanceStatus::HOLIDAY;

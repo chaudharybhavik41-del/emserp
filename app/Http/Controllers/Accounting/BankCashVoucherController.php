@@ -9,14 +9,20 @@ use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherLine;
 use App\Models\Accounting\TdsSection;
 use App\Models\Accounting\TdsCertificate;
+use App\Models\Party;
+use App\Models\PurchaseOrder;
 use App\Models\Project;
+use App\Models\SubcontractorRaBill;
+use App\Models\SubcontractorWorkOrder;
 use App\Services\Accounting\BillAllocationService;
+use App\Services\Accounting\PartyAccountService;
 use App\Services\Accounting\VoucherNumberService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 
@@ -24,13 +30,14 @@ class BankCashVoucherController extends Controller
 {
     public function __construct(
         protected BillAllocationService $billAllocationService,
+        protected PartyAccountService $partyAccountService,
         protected VoucherNumberService $voucherNumberService
     ) {
         $this->middleware('permission:accounting.vouchers.create')
             ->only(['createPayment', 'storePayment', 'createReceipt', 'storeReceipt']);
 
         $this->middleware('permission:accounting.vouchers.view')
-            ->only(['openPurchaseBills', 'openClientBills']);
+            ->only(['indexPayment', 'indexReceipt', 'openPurchaseBills', 'accountSummary', 'openSupplierPurchaseOrders', 'openSubcontractorWorkOrders', 'openClientBills']);
     }
 
     protected function defaultCompanyId(): int
@@ -59,24 +66,128 @@ class BankCashVoucherController extends Controller
     {
         $companyId = $this->defaultCompanyId();
 
-        return Account::where('company_id', $companyId)
+        $accounts = Account::where('company_id', $companyId)
             ->where('is_active', true)
             ->whereNotIn('type', ['bank', 'cash'])
             ->orderBy('name')
             ->get();
+
+        $partyIds = $accounts
+            ->filter(fn (Account $account) => $account->related_model_type === Party::class && ! empty($account->related_model_id))
+            ->pluck('related_model_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $partiesById = $partyIds->isEmpty()
+            ? collect()
+            : Party::query()
+                ->whereIn('id', $partyIds)
+                ->get(['id', 'is_supplier', 'is_contractor', 'is_client'])
+                ->keyBy('id');
+
+        return $accounts->each(function (Account $account) use ($partiesById) {
+            $party = $account->related_model_type === Party::class
+                ? $partiesById->get((int) ($account->related_model_id ?? 0))
+                : null;
+
+            $account->setAttribute('party_is_supplier', (bool) ($party?->is_supplier));
+            $account->setAttribute('party_is_contractor', (bool) ($party?->is_contractor));
+            $account->setAttribute('party_is_client', (bool) ($party?->is_client));
+        });
+    }
+
+    protected function resolvePartyFromAccount(Account $account): ?Party
+    {
+        if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
+            return null;
+        }
+
+        return Party::query()->find((int) $account->related_model_id);
+    }
+
+    protected function accountBalanceAsOf(Account $account, Carbon|string|null $asOfDate = null): float
+    {
+        $asOf = $asOfDate instanceof Carbon
+            ? $asOfDate->copy()->startOfDay()
+            : ($asOfDate ? Carbon::parse((string) $asOfDate)->startOfDay() : now()->startOfDay());
+
+        $opening = 0.0;
+        if ((float) ($account->opening_balance ?? 0) !== 0.0) {
+            $opening = (float) $account->opening_balance;
+
+            if ($account->opening_balance_date && $account->opening_balance_date->gt($asOf)) {
+                $opening = 0.0;
+            } elseif (($account->opening_balance_type ?? 'dr') === 'cr') {
+                $opening *= -1;
+            }
+        }
+
+        $query = DB::table('voucher_lines as vl')
+            ->join('vouchers as v', 'v.id', '=', 'vl.voucher_id')
+            ->where('v.company_id', (int) $account->company_id)
+            ->where('v.status', 'posted')
+            ->where('vl.account_id', $account->id)
+            ->whereDate('v.voucher_date', '<=', $asOf->toDateString());
+
+        if ($account->opening_balance_date) {
+            $query->whereDate('v.voucher_date', '>=', $account->opening_balance_date->toDateString());
+        }
+
+        $agg = $query
+            ->selectRaw('COALESCE(SUM(vl.debit),0) as debit_total, COALESCE(SUM(vl.credit),0) as credit_total')
+            ->first();
+
+        return round($opening + (float) ($agg->debit_total ?? 0) - (float) ($agg->credit_total ?? 0), 2);
+    }
+
+    protected function paymentCounterpartyAccounts(): \Illuminate\Support\Collection
+    {
+        $companyId = $this->defaultCompanyId();
+
+        Party::query()
+            ->where(function ($query) {
+                $query->where('is_supplier', true)
+                    ->orWhere('is_contractor', true);
+            })
+            ->orderBy('name')
+            ->get()
+            ->each(function (Party $party) use ($companyId) {
+                $this->partyAccountService->syncAccountForParty($party, $companyId);
+            });
+
+        return $this->counterpartyAccounts();
+    }
+
+    protected function receiptCounterpartyAccounts(): \Illuminate\Support\Collection
+    {
+        $companyId = $this->defaultCompanyId();
+
+        Party::query()
+            ->where('is_client', true)
+            ->orderBy('name')
+            ->get()
+            ->each(function (Party $party) use ($companyId) {
+                $this->partyAccountService->syncAccountForParty($party, $companyId);
+            });
+
+        return $this->counterpartyAccounts();
     }
 
     // ---------------------------------------------------------------------
     // Payment
     // ---------------------------------------------------------------------
 
+    public function indexPayment(Request $request)
+    {
+        return $this->renderVoucherIndex('payment', $request);
+    }
+
     public function createPayment()
     {
         $companyId            = $this->defaultCompanyId();
         $bankCashAccounts     = $this->bankCashAccounts();
-        $counterpartyAccounts = $this->counterpartyAccounts();
-        $projects             = Project::orderBy('name')->get();
-        $costCenters          = CostCenter::orderBy('name')->get();
+        $counterpartyAccounts = $this->paymentCounterpartyAccounts();
         $tdsSections          = TdsSection::where('company_id', $companyId)
             ->where('is_active', true)
             ->orderBy('code')
@@ -86,8 +197,6 @@ class BankCashVoucherController extends Controller
             'companyId',
             'bankCashAccounts',
             'counterpartyAccounts',
-            'projects',
-            'costCenters',
             'tdsSections'
         ));
     }
@@ -101,14 +210,17 @@ class BankCashVoucherController extends Controller
             'voucher_date'     => ['required', 'date'],
             'bank_account_id'  => ['required', 'integer', 'exists:accounts,id'],
             'party_account_id' => ['required', 'integer', 'exists:accounts,id', 'different:bank_account_id'],
+            'payment_type'     => ['required', Rule::in(['bill_allocation', 'on_account', 'advance_po', 'advance_work_order'])],
+            'purchase_order_id' => ['nullable', 'integer', 'exists:purchase_orders,id'],
+            'subcontractor_work_order_id' => ['nullable', 'integer', 'exists:subcontractor_work_orders,id'],
             'amount'           => ['required', 'numeric', 'gt:0'],
             'narration'        => ['nullable', 'string', 'max:500'],
             'reference'        => ['nullable', 'string', 'max:100'],
-            'project_id'       => ['nullable', 'integer', 'exists:projects,id'],
-            'cost_center_id'   => ['nullable', 'integer', 'exists:cost_centers,id'],
 
             'purchase_allocations'               => ['nullable', 'array'],
-            'purchase_allocations.*.bill_id'     => ['nullable', 'integer', 'exists:purchase_bills,id'],
+            'purchase_allocations.*.bill_type'   => ['nullable', 'string'],
+            'purchase_allocations.*.bill_id'     => ['nullable', 'integer'],
+            'purchase_allocations.*.selected'    => ['nullable'],
             'purchase_allocations.*.amount'      => ['nullable', 'numeric', 'min:0'],
         ];
 
@@ -125,27 +237,114 @@ class BankCashVoucherController extends Controller
             ->where('is_active', true)
             ->firstOrFail();
 
-        try {
+        $party = null;
+        if ($partyAccount->related_model_type === Party::class && ! empty($partyAccount->related_model_id)) {
+            $party = $partyAccount->relationLoaded('relatedModel')
+                ? $partyAccount->relatedModel
+                : Party::query()->find((int) $partyAccount->related_model_id);
+        }
+
+        $paymentType = (string) ($data['payment_type'] ?? 'on_account');
+        $voucherDate = Carbon::parse((string) $data['voucher_date'])->startOfDay();
+        $allocRows = [];
+        $purchaseOrder = null;
+        $subcontractorWorkOrder = null;
+
+        if ($paymentType === 'bill_allocation'
+            && (! $party || (! $party->is_supplier && ! $party->is_contractor))) {
+            throw ValidationException::withMessages([
+                'payment_type' => 'Selected payee ledger must be linked to a supplier or subcontractor for bill allocation.',
+            ]);
+        }
+
+        if ($paymentType === 'advance_po'
+            && (! $party || ! $party->is_supplier)) {
+            throw ValidationException::withMessages([
+                'payment_type' => 'Selected payee ledger must be linked to a supplier for PO advance.',
+            ]);
+        }
+
+        if ($paymentType === 'advance_work_order'
+            && (! $party || ! $party->is_contractor)) {
+            throw ValidationException::withMessages([
+                'payment_type' => 'Selected payee ledger must be linked to a subcontractor for work-order advance.',
+            ]);
+        }
+
+        if ($paymentType === 'bill_allocation') {
             $allocRows = $this->billAllocationService->validatePurchasePaymentAllocations(
                 $partyAccount,
                 (float) $data['amount'],
-                $data['purchase_allocations'] ?? []
+                $data['purchase_allocations'] ?? [],
+                $voucherDate
             );
-        } catch (ValidationException $e) {
-            throw $e;
+        } elseif ($paymentType === 'advance_po') {
+            $purchaseOrderQuery = PurchaseOrder::query()
+                ->where('id', (int) ($data['purchase_order_id'] ?? 0))
+                ->where('vendor_party_id', (int) ($party?->id ?? 0));
+
+            if (Schema::hasColumn('purchase_orders', 'deleted_at')) {
+                $purchaseOrderQuery->whereNull('deleted_at');
+            }
+
+            if (Schema::hasColumn('purchase_orders', 'status')) {
+                $purchaseOrderQuery->where('status', '<>', 'cancelled');
+            }
+
+            $purchaseOrder = $purchaseOrderQuery->first();
+
+            if (! $purchaseOrder) {
+                throw ValidationException::withMessages([
+                    'purchase_order_id' => 'Select a valid purchase order for the chosen supplier.',
+                ]);
+            }
+        } elseif ($paymentType === 'advance_work_order') {
+            $workOrderQuery = SubcontractorWorkOrder::query()
+                ->where('company_id', $companyId)
+                ->where('id', (int) ($data['subcontractor_work_order_id'] ?? 0))
+                ->where('subcontractor_id', (int) ($party?->id ?? 0));
+
+            if (Schema::hasColumn('subcontractor_work_orders', 'status')) {
+                $workOrderQuery->where('status', '<>', 'cancelled');
+            }
+
+            $subcontractorWorkOrder = $workOrderQuery->first();
+
+            if (! $subcontractorWorkOrder) {
+                throw ValidationException::withMessages([
+                    'subcontractor_work_order_id' => 'Select a valid work order for the chosen subcontractor.',
+                ]);
+            }
         }
 
-        DB::transaction(function () use ($companyId, $data, $bankAccount, $partyAccount, $allocRows) {
+        $allocatedTotal = round(collect($allocRows)->sum('amount'), 2);
+        $unallocatedAmount = round(max(0, (float) $data['amount'] - $allocatedTotal), 2);
+
+        DB::transaction(function () use (
+            $companyId,
+            $data,
+            $bankAccount,
+            $partyAccount,
+            $allocRows,
+            $unallocatedAmount,
+            $paymentType,
+            $purchaseOrder,
+            $subcontractorWorkOrder,
+            $party
+        ) {
             $voucher               = new Voucher();
             $voucher->company_id   = $companyId;
             // Centralised voucher numbering (Phase 5a)
             $voucher->voucher_no   = $this->voucherNumberService->next('payment', $companyId, $data['voucher_date']);
             $voucher->voucher_type = 'payment';
+            $voucher->payment_type = $paymentType;
+            $voucher->purchase_order_id = $paymentType === 'advance_po' ? $purchaseOrder?->id : null;
+            $voucher->subcontractor_work_order_id = $paymentType === 'advance_work_order' ? $subcontractorWorkOrder?->id : null;
             $voucher->voucher_date = $data['voucher_date'];
             $voucher->reference    = $data['reference'] ?? null;
             $voucher->narration    = $data['narration'] ?? ('Payment - ' . $partyAccount->name);
-            $voucher->project_id   = $data['project_id'] ?? null;
-            $voucher->cost_center_id = $data['cost_center_id'] ?? null;
+            $voucher->project_id   = null;
+            $voucher->cost_center_id = null;
             $voucher->currency_id  = null;
             $voucher->exchange_rate = 1;
             $voucher->amount_base  = $data['amount'];
@@ -162,7 +361,7 @@ class BankCashVoucherController extends Controller
                 'voucher_id'     => $voucher->id,
                 'line_no'        => $lineNo++,
                 'account_id'     => $partyAccount->id,
-                'cost_center_id' => $data['cost_center_id'] ?? null,
+                'cost_center_id' => null,
                 'description'    => $data['narration'] ?? ('Payment - ' . $partyAccount->name),
                 'debit'          => $data['amount'],
                 'credit'         => 0,
@@ -175,7 +374,7 @@ class BankCashVoucherController extends Controller
                 'voucher_id'     => $voucher->id,
                 'line_no'        => $lineNo++,
                 'account_id'     => $bankAccount->id,
-                'cost_center_id' => $data['cost_center_id'] ?? null,
+                'cost_center_id' => null,
                 'description'    => $data['narration'] ?? ('Payment - ' . $bankAccount->name),
                 'debit'          => 0,
                 'credit'         => $data['amount'],
@@ -185,6 +384,14 @@ class BankCashVoucherController extends Controller
 
             if (! empty($allocRows)) {
                 $this->billAllocationService->storePurchaseAllocationsForPayment($partyLine, $allocRows);
+            }
+
+            if ($paymentType === 'advance_po' && $purchaseOrder && $unallocatedAmount > 0) {
+                $this->billAllocationService->storeAdvanceForPayment($partyLine, $purchaseOrder, $unallocatedAmount);
+            } elseif ($paymentType === 'advance_work_order' && $subcontractorWorkOrder && $unallocatedAmount > 0) {
+                $this->billAllocationService->storeAdvanceForSubcontractorPayment($partyLine, $subcontractorWorkOrder, $unallocatedAmount);
+            } elseif ($party && ($party->is_supplier || $party->is_contractor) && $unallocatedAmount > 0) {
+                $this->billAllocationService->storeOnAccountForPayment($partyLine, $unallocatedAmount);
             }
 
             // Finalize posting (validates balance + normalizes amount_base)
@@ -203,13 +410,16 @@ class BankCashVoucherController extends Controller
     // Receipt
     // ---------------------------------------------------------------------
 
+    public function indexReceipt(Request $request)
+    {
+        return $this->renderVoucherIndex('receipt', $request);
+    }
+
     public function createReceipt()
     {
         $companyId            = $this->defaultCompanyId();
         $bankCashAccounts     = $this->bankCashAccounts();
-        $counterpartyAccounts = $this->counterpartyAccounts();
-        $projects             = Project::orderBy('name')->get();
-        $costCenters          = CostCenter::orderBy('name')->get();
+        $counterpartyAccounts = $this->receiptCounterpartyAccounts();
         $tdsSections          = TdsSection::where('company_id', $companyId)
             ->where('is_active', true)
             ->orderBy('code')
@@ -219,8 +429,6 @@ class BankCashVoucherController extends Controller
             'companyId',
             'bankCashAccounts',
             'counterpartyAccounts',
-            'projects',
-            'costCenters',
             'tdsSections'
         ));
     }
@@ -237,8 +445,6 @@ class BankCashVoucherController extends Controller
             'amount'           => ['required', 'numeric', 'gt:0'],
             'narration'        => ['nullable', 'string', 'max:500'],
             'reference'        => ['nullable', 'string', 'max:100'],
-            'project_id'       => ['nullable', 'integer', 'exists:projects,id'],
-            'cost_center_id'   => ['nullable', 'integer', 'exists:cost_centers,id'],
 
             'tds_section'      => ['nullable', 'string', 'max:20', Rule::exists('tds_sections', 'code')->where(fn ($q) => $q->where('company_id', $companyId)->where('is_active', true))],
             'tds_rate'         => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -247,6 +453,7 @@ class BankCashVoucherController extends Controller
 
             'receipt_allocations'               => ['nullable', 'array'],
             'receipt_allocations.*.bill_id'     => ['nullable', 'integer'],
+            'receipt_allocations.*.selected'    => ['nullable'],
             'receipt_allocations.*.amount'      => ['nullable', 'numeric', 'min:0'],
         ];
 
@@ -280,8 +487,8 @@ class BankCashVoucherController extends Controller
             $voucher->voucher_date = $data['voucher_date'];
             $voucher->reference    = $data['reference'] ?? null;
             $voucher->narration    = $data['narration'] ?? ('Receipt - ' . $partyAccount->name);
-            $voucher->project_id   = $data['project_id'] ?? null;
-            $voucher->cost_center_id = $data['cost_center_id'] ?? null;
+            $voucher->project_id   = null;
+            $voucher->cost_center_id = null;
             $voucher->currency_id  = null;
             $voucher->exchange_rate = 1;
             $voucher->amount_base  = $data['amount'];
@@ -298,7 +505,7 @@ class BankCashVoucherController extends Controller
                 'voucher_id'     => $voucher->id,
                 'line_no'        => $lineNo++,
                 'account_id'     => $bankAccount->id,
-                'cost_center_id' => $data['cost_center_id'] ?? null,
+                'cost_center_id' => null,
                 'description'    => $data['narration'] ?? ('Receipt - ' . $bankAccount->name),
                 'debit'          => $data['amount'],
                 'credit'         => 0,
@@ -311,7 +518,7 @@ class BankCashVoucherController extends Controller
                 'voucher_id'     => $voucher->id,
                 'line_no'        => $lineNo++,
                 'account_id'     => $partyAccount->id,
-                'cost_center_id' => $data['cost_center_id'] ?? null,
+                'cost_center_id' => null,
                 'description'    => $data['narration'] ?? ('Receipt - ' . $partyAccount->name),
                 'debit'          => 0,
                 'credit'         => $data['amount'],
@@ -481,6 +688,78 @@ class BankCashVoucherController extends Controller
         ];
     }
 
+    protected function renderVoucherIndex(string $voucherType, Request $request)
+    {
+        $companyId = $this->defaultCompanyId();
+        $query = Voucher::query()
+            ->with(['createdBy', 'lines.account'])
+            ->where('company_id', $companyId)
+            ->where('voucher_type', $voucherType)
+            ->orderByDesc('voucher_date')
+            ->orderByDesc('id');
+
+        if ($request->filled('status')) {
+            $query->where('status', (string) $request->input('status'));
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('voucher_date', '>=', (string) $request->input('date_from'));
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('voucher_date', '<=', (string) $request->input('date_to'));
+        }
+
+        if ($request->filled('bank_account_id')) {
+            $bankAccountId = (int) $request->input('bank_account_id');
+            $query->whereHas('lines.account', function ($lineQuery) use ($bankAccountId) {
+                $lineQuery->where('accounts.id', $bankAccountId)
+                    ->whereIn('accounts.type', ['bank', 'cash']);
+            });
+        }
+
+        if ($request->filled('party_account_id')) {
+            $partyAccountId = (int) $request->input('party_account_id');
+            $query->whereHas('lines', function ($lineQuery) use ($partyAccountId) {
+                $lineQuery->where('account_id', $partyAccountId);
+            });
+        }
+
+        if ($request->filled('q')) {
+            $term = trim((string) $request->input('q'));
+            $query->where(function ($inner) use ($term) {
+                $inner->where('voucher_no', 'like', '%' . $term . '%')
+                    ->orWhere('reference', 'like', '%' . $term . '%')
+                    ->orWhere('narration', 'like', '%' . $term . '%');
+            });
+        }
+
+        $vouchers = $query->paginate(20)->withQueryString();
+        $bankCashAccounts = $this->bankCashAccounts();
+        $counterpartyAccounts = $voucherType === 'payment'
+            ? $this->paymentCounterpartyAccounts()
+            : $this->receiptCounterpartyAccounts();
+        $pageTitle = $voucherType === 'payment' ? 'Payment Vouchers' : 'Receipt Vouchers';
+        $createRoute = $voucherType === 'payment'
+            ? route('accounting.payments.create')
+            : route('accounting.receipts.create');
+        $resetRoute = $voucherType === 'payment'
+            ? route('accounting.payments.index')
+            : route('accounting.receipts.index');
+        $viewName = $voucherType === 'payment'
+            ? 'accounting.vouchers.payment_index'
+            : 'accounting.vouchers.receipt_index';
+
+        return view($viewName, compact(
+            'vouchers',
+            'bankCashAccounts',
+            'counterpartyAccounts',
+            'pageTitle',
+            'createRoute',
+            'resetRoute'
+        ));
+    }
+
     // ---------------------------------------------------------------------
     // APIs: Open bills
     // ---------------------------------------------------------------------
@@ -491,33 +770,211 @@ class BankCashVoucherController extends Controller
     public function openPurchaseBills(Request $request): JsonResponse
     {
         $accountId = (int) $request->input('party_account_id');
+        $companyId = $this->defaultCompanyId();
 
         if (! $accountId) {
             return response()->json(['data' => []]);
         }
 
-        $account = Account::with('relatedModel')->findOrFail($accountId);
+        $account = Account::query()
+            ->where('company_id', $companyId)
+            ->where('id', $accountId)
+            ->where('is_active', true)
+            ->firstOrFail();
 
-        $rows = $this->billAllocationService->getOpenPurchaseBillsForAccount($account);
-		$rows = $rows->filter(function ($row) {
-   		 $bill = $row['bill'] ?? null;
-   		 return $bill && ($bill->status ?? null) === 'posted';
-		})->values();
+        $rows = $this->billAllocationService->getOpenPayableBillsForAccount(
+            $account,
+            $request->input('as_of_date')
+        );
+        $rows = $rows->filter(function ($row) {
+            $bill = $row['bill'] ?? null;
+
+            return $bill && ($bill->status ?? null) === 'posted';
+        })->values();
 
         $data = collect($rows)->map(function (array $row) {
-            /** @var \App\Models\PurchaseBill $bill */
+            /** @var \Illuminate\Database\Eloquent\Model $bill */
             $bill = $row['bill'];
+            $billType = (string) ($row['bill_type'] ?? '');
+            $isPurchase = $billType === \App\Models\PurchaseBill::class;
+            $isSubcontractorRa = $billType === SubcontractorRaBill::class;
 
             return [
                 'id'                 => $bill->id,
-                'bill_number'        => $bill->bill_number,
+                'bill_type'          => $billType,
+                'bill_kind'          => $isSubcontractorRa ? 'Subcontractor RA Bill' : 'Purchase Bill',
+                'bill_number'        => $isSubcontractorRa
+                    ? ($bill->ra_number ?: $bill->bill_number)
+                    : $bill->bill_number,
+                'bill_reference'     => $isSubcontractorRa ? ($bill->bill_number ?: null) : null,
                 'bill_date'          => $bill->bill_date ? ( ($bill->bill_date instanceof \Carbon\Carbon) ? $bill->bill_date->toDateString() : \Carbon\Carbon::parse($bill->bill_date)->toDateString() ) : null,
                 'total_amount'       => (float) ($row['bill_amount'] ?? $bill->total_amount),
                 'invoice_total'      => (float) ($bill->total_amount ?? 0),
-                'tcs_amount'         => (float) ($bill->tcs_amount ?? 0),
-                'tds_amount'         => (float) ($bill->tds_amount ?? 0),
+                'tcs_amount'         => $isPurchase ? (float) ($bill->tcs_amount ?? 0) : 0.0,
+                'tds_amount'         => $isPurchase ? (float) ($bill->tds_amount ?? 0) : (float) ($bill->tds_amount ?? 0),
                 'allocated_amount'   => (float) $row['allocated'],
                 'outstanding_amount' => (float) $row['outstanding'],
+            ];
+        })->values();
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function accountSummary(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'role' => ['required', Rule::in(['bank', 'payee', 'client'])],
+            'as_of_date' => ['nullable', 'date'],
+        ]);
+
+        $companyId = $this->defaultCompanyId();
+
+        $account = Account::query()
+            ->where('company_id', $companyId)
+            ->where('id', (int) $data['account_id'])
+            ->where('is_active', true)
+            ->firstOrFail();
+
+        $asOfDate = $data['as_of_date'] ?? null;
+
+        if ($data['role'] === 'bank') {
+            $balance = $this->accountBalanceAsOf($account, $asOfDate);
+
+            return response()->json([
+                'data' => [
+                    'role' => 'bank',
+                    'account_id' => (int) $account->id,
+                    'balance' => abs($balance),
+                    'balance_side' => $balance >= 0 ? 'dr' : 'cr',
+                    'balance_signed' => $balance,
+                ],
+            ]);
+        }
+
+        if ($data['role'] === 'client') {
+            $totalOutstanding = (float) $this->billAllocationService
+                ->getOpenClientBillsForAccount($account, $asOfDate, 'posted')
+                ->sum('outstanding');
+
+            return response()->json([
+                'data' => [
+                    'role' => 'client',
+                    'account_id' => (int) $account->id,
+                    'total_outstanding' => round($totalOutstanding, 2),
+                ],
+            ]);
+        }
+
+        $totalOutstanding = (float) $this->billAllocationService
+            ->getOpenPayableBillsForAccount($account, $asOfDate)
+            ->sum('outstanding');
+
+        return response()->json([
+            'data' => [
+                'role' => 'payee',
+                'account_id' => (int) $account->id,
+                'total_outstanding' => round($totalOutstanding, 2),
+            ],
+        ]);
+    }
+
+    public function openSupplierPurchaseOrders(Request $request): JsonResponse
+    {
+        $accountId = (int) $request->input('party_account_id');
+        $companyId = $this->defaultCompanyId();
+
+        if (! $accountId) {
+            return response()->json(['data' => []]);
+        }
+
+        $account = Account::query()
+            ->where('company_id', $companyId)
+            ->where('id', $accountId)
+            ->where('is_active', true)
+            ->firstOrFail();
+
+        $party = $this->resolvePartyFromAccount($account);
+
+        if (! $party || ! $party->is_supplier) {
+            return response()->json(['data' => []]);
+        }
+
+        $orders = PurchaseOrder::query()
+            ->with('project')
+            ->where('vendor_party_id', (int) $party->id)
+            ->orderByDesc('po_date')
+            ->limit(100);
+
+        if (Schema::hasColumn('purchase_orders', 'deleted_at')) {
+            $orders->whereNull('deleted_at');
+        }
+
+        if (Schema::hasColumn('purchase_orders', 'status')) {
+            $orders->where('status', '<>', 'cancelled');
+        }
+
+        $orders = $orders->get();
+
+        $data = $orders->map(function (PurchaseOrder $purchaseOrder) {
+            return [
+                'id' => (int) $purchaseOrder->id,
+                'code' => (string) $purchaseOrder->code,
+                'po_date' => $purchaseOrder->po_date?->format('Y-m-d'),
+                'status' => (string) ($purchaseOrder->status ?? ''),
+                'project_code' => (string) ($purchaseOrder->project?->code ?? ''),
+                'project_name' => (string) ($purchaseOrder->project?->name ?? ''),
+                'total_amount' => (float) ($purchaseOrder->total_amount ?? 0),
+            ];
+        })->values();
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function openSubcontractorWorkOrders(Request $request): JsonResponse
+    {
+        $accountId = (int) $request->input('party_account_id');
+        $companyId = $this->defaultCompanyId();
+
+        if (! $accountId) {
+            return response()->json(['data' => []]);
+        }
+
+        $account = Account::query()
+            ->where('company_id', $companyId)
+            ->where('id', $accountId)
+            ->where('is_active', true)
+            ->firstOrFail();
+
+        $party = $this->resolvePartyFromAccount($account);
+
+        if (! $party || ! $party->is_contractor) {
+            return response()->json(['data' => []]);
+        }
+
+        $workOrders = SubcontractorWorkOrder::query()
+            ->with('project')
+            ->where('company_id', $companyId)
+            ->where('subcontractor_id', (int) $party->id)
+            ->orderByDesc('work_order_date')
+            ->orderBy('work_order_number')
+            ->limit(100);
+
+        if (Schema::hasColumn('subcontractor_work_orders', 'status')) {
+            $workOrders->where('status', '<>', 'cancelled');
+        }
+
+        $data = $workOrders->get()->map(function (SubcontractorWorkOrder $workOrder) {
+            return [
+                'id' => (int) $workOrder->id,
+                'code' => (string) $workOrder->work_order_number,
+                'work_order_date' => $workOrder->work_order_date?->format('Y-m-d'),
+                'status' => (string) ($workOrder->status ?? ''),
+                'project_code' => (string) ($workOrder->project?->code ?? ''),
+                'project_name' => (string) ($workOrder->project?->name ?? ''),
+                'payment_terms_days' => $workOrder->payment_terms_days,
+                'retention_percent' => (float) ($workOrder->retention_percent ?? 0),
+                'security_deposit_percent' => (float) ($workOrder->security_deposit_percent ?? 0),
             ];
         })->values();
 
@@ -532,12 +989,17 @@ class BankCashVoucherController extends Controller
     public function openClientBills(Request $request): JsonResponse
     {
         $accountId = (int) $request->input('party_account_id');
+        $companyId = $this->defaultCompanyId();
 
         if (! $accountId) {
             return response()->json(['data' => []]);
         }
 
-        $account = Account::with('relatedModel')->findOrFail($accountId);
+        $account = Account::query()
+            ->where('company_id', $companyId)
+            ->where('id', $accountId)
+            ->where('is_active', true)
+            ->firstOrFail();
 
         $asOfDate = $request->input('as_of_date');
         $status   = (string) $request->input('status', 'posted');

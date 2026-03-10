@@ -16,6 +16,7 @@ use App\Models\Production\ProductionRemnant;
 use App\Services\Production\ProductionAudit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProductionTraceabilityController extends Controller
 {
@@ -210,6 +211,158 @@ class ProductionTraceabilityController extends Controller
         return $this->saveFitup($request, $project, $production_dpr);
     }
 
+    protected function activityNeedsTraceability($activity): bool
+    {
+        $code = strtoupper((string) ($activity->code ?? ''));
+        $name = strtoupper((string) ($activity->name ?? ''));
+        $isFitup = (bool) ($activity->is_fitupp ?? false);
+
+        return $isFitup || str_contains($code, 'CUT') || str_contains($name, 'CUT');
+    }
+
+    protected function syncNonQcCompletionAfterTraceability(Project $project, ProductionDpr $dpr): void
+    {
+        $dpr->loadMissing(['activity']);
+        $activity = $dpr->activity;
+
+        if (! $activity || ! $this->activityNeedsTraceability($activity)) {
+            return;
+        }
+
+        if ((int) ($activity->requires_qc ?? 0) === 1) {
+            return;
+        }
+
+        $lines = ProductionDprLine::query()
+            ->where('production_dpr_id', $dpr->id)
+            ->where('is_completed', 1)
+            ->where('traceability_done', 1)
+            ->whereNotNull('production_plan_item_activity_id')
+            ->get([
+                'production_plan_item_activity_id',
+                'production_plan_item_id',
+            ]);
+
+        if ($lines->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+
+        foreach ($lines as $line) {
+            $piaId = (int) ($line->production_plan_item_activity_id ?? 0);
+            if ($piaId <= 0) {
+                continue;
+            }
+
+            DB::table('production_plan_item_activities')
+                ->where('id', $piaId)
+                ->update([
+                    'status' => 'done',
+                    'qc_status' => 'na',
+                    'updated_at' => $now,
+                ]);
+
+            $planItemId = (int) ($line->production_plan_item_id ?? 0);
+            if ($planItemId <= 0) {
+                continue;
+            }
+
+            $pending = DB::table('production_plan_item_activities')
+                ->where('production_plan_item_id', $planItemId)
+                ->where('is_enabled', 1)
+                ->where('status', '!=', 'done')
+                ->exists();
+
+            DB::table('production_plan_items')
+                ->where('id', $planItemId)
+                ->update([
+                    'status' => $pending ? 'in_progress' : 'done',
+                    'updated_at' => $now,
+                ]);
+
+            if (! $pending && DB::getSchemaBuilder()->hasTable('production_assemblies')) {
+                DB::table('production_assemblies')
+                    ->where('production_plan_item_id', $planItemId)
+                    ->where('status', '!=', 'completed')
+                    ->update([
+                        'status' => 'completed',
+                        'updated_at' => $now,
+                    ]);
+            }
+        }
+    }
+
+    protected function lockAndValidateCuttingMotherStock(Project $project, ProductionDpr $dpr, int $stockId): StoreStockItem
+    {
+        $stock = StoreStockItem::lockForUpdate()->findOrFail($stockId);
+
+        if (($stock->status ?? '') !== 'available') {
+            throw new \RuntimeException('Selected mother plate/stock #' . $stock->id . ' is not available (already consumed/scrap).');
+        }
+
+        if (($stock->material_category ?? '') !== 'steel_plate') {
+            throw new \RuntimeException('Selected mother stock #' . $stock->id . ' is not a steel plate.');
+        }
+
+        if (! empty($stock->project_id) && (int) $stock->project_id !== (int) $project->id) {
+            throw new \RuntimeException('Selected mother stock #' . $stock->id . ' does not belong to this project.');
+        }
+
+        if (Schema::hasColumn('production_dprs', 'mother_stock_item_id')) {
+            $dprMotherId = (int) ($dpr->mother_stock_item_id ?? 0);
+
+            if ($dprMotherId > 0 && $dprMotherId !== (int) $stock->id) {
+                throw new \RuntimeException(
+                    'Selected mother stock #' . $stock->id
+                    . ' must match DPR linked mother stock #' . $dprMotherId . '.'
+                );
+            }
+
+            if ($dprMotherId <= 0) {
+                DB::table('production_dprs')
+                    ->where('id', (int) $dpr->id)
+                    ->update([
+                        'mother_stock_item_id' => (int) $stock->id,
+                        'updated_by' => auth()->id(),
+                        'updated_at' => now(),
+                    ]);
+
+                $dpr->mother_stock_item_id = (int) $stock->id;
+            }
+        }
+
+        return $stock;
+    }
+
+    protected function enforceLineMotherStockLink(ProductionDprLine $line, int $stockId): void
+    {
+        if (! Schema::hasColumn('production_dpr_lines', 'mother_stock_item_id')) {
+            return;
+        }
+
+        $linkedStockId = (int) ($line->mother_stock_item_id ?? 0);
+
+        if ($linkedStockId > 0 && $linkedStockId !== $stockId) {
+            throw new \RuntimeException(
+                'Line #' . (int) $line->id
+                . ' is already linked to mother stock #' . $linkedStockId
+                . ' and cannot be remapped to #' . $stockId . '.'
+            );
+        }
+
+        if ($linkedStockId <= 0) {
+            DB::table('production_dpr_lines')
+                ->where('id', (int) $line->id)
+                ->update([
+                    'mother_stock_item_id' => $stockId,
+                    'updated_at' => now(),
+                ]);
+
+            $line->mother_stock_item_id = $stockId;
+        }
+    }
+
     /**
      * Legacy / Single-line cutting capture.
      * Improved: supports partial tagging (multiple plates for same DPR line) by
@@ -262,15 +415,18 @@ class ProductionTraceabilityController extends Controller
             }
         }
 
-        // Prevent duplicate mother stock in same submission
+        // Strict stock mapping: one DPR should consume one mother stock plate.
+        // If multiple plates are required, create separate DPRs per plate.
         $motherIds = $activeRows
             ->pluck('mother_stock_item_id')
-            ->map(fn ($v) => (int) $v);
+            ->map(fn ($v) => (int) $v)
+            ->unique()
+            ->values();
 
-        if ($motherIds->count() !== $motherIds->unique()->count()) {
+        if ($motherIds->count() > 1) {
             return back()
                 ->withInput()
-                ->with('error', 'Same mother plate is selected in multiple rows. Use Cutting Batch mode (one plate -> many parts) for this, or select different plates.');
+                ->with('error', 'Multiple mother plates selected in one DPR traceability save. Use one mother plate per DPR for strict stock linkage.');
         }
 
         try {
@@ -318,10 +474,8 @@ class ProductionTraceabilityController extends Controller
                         throw new \RuntimeException('Pieces entered exceeds remaining qty for item ' . ($line->planItem?->item_code ?? ('Line#' . $line->id)) . '. Remaining: ' . $remaining);
                     }
 
-                    $stock = StoreStockItem::lockForUpdate()->findOrFail((int) $row['mother_stock_item_id']);
-                    if ($stock->status !== 'available') {
-                        throw new \RuntimeException('Selected mother plate/stock #' . $stock->id . ' is not available (already consumed/scrap).');
-                    }
+                    $stock = $this->lockAndValidateCuttingMotherStock($project, $dpr, (int) $row['mother_stock_item_id']);
+                    $this->enforceLineMotherStockLink($line, (int) $stock->id);
 
                     for ($i = 0; $i < $count; $i++) {
                         $pieceNo = ProductionPiece::generatePieceNumber($project->code);
@@ -444,6 +598,8 @@ class ProductionTraceabilityController extends Controller
             return back()->withInput()->with('error', $e->getMessage());
         }
 
+        $this->syncNonQcCompletionAfterTraceability($project, $dpr);
+
         return redirect()
             ->route('projects.production-dprs.show', [$project, $dpr])
             ->with('success', 'Cutting traceability saved.');
@@ -497,11 +653,7 @@ class ProductionTraceabilityController extends Controller
                     }
                 }
 
-                $stock = StoreStockItem::lockForUpdate()->findOrFail((int) $data['batch_mother_stock_item_id']);
-
-                if ($stock->status !== 'available') {
-                    throw new \RuntimeException('Selected mother plate/stock is not available (already consumed/scrap).');
-                }
+                $stock = $this->lockAndValidateCuttingMotherStock($project, $dpr, (int) $data['batch_mother_stock_item_id']);
 
                 $totalPieces = 0;
                 $anchorLineId = null;
@@ -517,6 +669,7 @@ class ProductionTraceabilityController extends Controller
                         ->where('id', (int) $row['dpr_line_id'])
                         ->with(['planItem'])
                         ->firstOrFail();
+                    $this->enforceLineMotherStockLink($line, (int) $stock->id);
 
                     // Only allow traceability for completed DPR lines.
                     if ((int) ($line->is_completed ?? 0) !== 1) {
@@ -691,6 +844,8 @@ class ProductionTraceabilityController extends Controller
             return back()->withInput()->with('error', $e->getMessage());
         }
 
+        $this->syncNonQcCompletionAfterTraceability($project, $dpr);
+
         return redirect()
             ->route('projects.production-dprs.show', [$project, $dpr])
             ->with('success', 'Cutting batch traceability saved.');
@@ -773,10 +928,11 @@ class ProductionTraceabilityController extends Controller
             }
         });
 
+        $this->syncNonQcCompletionAfterTraceability($project, $dpr);
+
         return redirect()
             ->route('projects.production-dprs.show', [$project, $dpr])
             ->with('success', 'Fitup traceability saved.');
     }
 }
-
 

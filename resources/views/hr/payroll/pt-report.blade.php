@@ -14,7 +14,7 @@
         </div>
 
         <div class="d-flex gap-2">
-            <a href="{{ route('hr.payroll.period', $period) }}" class="btn btn-outline-secondary">
+            <a href="{{ url('/hr/payroll/period/' . $period->getKey()) }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left"></i> Back to Period
             </a>
             <button type="button" class="btn btn-outline-primary" onclick="window.print()">

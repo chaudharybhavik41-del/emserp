@@ -3,26 +3,49 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 class StorePurchaseBillRequest extends FormRequest
 {
+    protected const CREATE_SUBMISSION_RESULT_PREFIX = 'purchase_bill_create_result:';
+
     public function authorize(): bool
     {
         return true;
     }
 
+    protected function getExistingBillIdForSubmissionToken(): int
+    {
+        $submissionToken = trim((string) $this->input('submission_token', ''));
+        if ($submissionToken === '') {
+            return 0;
+        }
+
+        return (int) Cache::get(self::CREATE_SUBMISSION_RESULT_PREFIX . $submissionToken, 0);
+    }
+
     public function rules(): array
     {
+        $existingBillIdForToken = $this->getExistingBillIdForSubmissionToken();
+        $expenseMachineRule = Schema::hasTable('machines')
+            ? ['nullable', 'integer', Rule::exists('machines', 'id')]
+            : ['nullable'];
+
         $rules = [
             'supplier_id'        => ['required', 'integer', Rule::exists('parties', 'id')],
             'supplier_branch_id' => ['nullable', 'integer'],
 
             'purchase_order_id'  => ['nullable', 'integer', Rule::exists('purchase_orders', 'id')],
+            'purchase_order_ids' => ['nullable', 'array'],
+            'purchase_order_ids.*' => ['integer', 'distinct', Rule::exists('purchase_orders', 'id')],
             'project_id'         => ['nullable', 'integer', Rule::exists('projects', 'id')],
 
-            'bill_number'        => ['required', 'string', 'max:50', Rule::unique('purchase_bills', 'bill_number')],
+            'submission_token'   => ['nullable', 'string', 'max:100'],
+            'bill_number'        => $existingBillIdForToken > 0
+                ? ['required', 'string', 'max:50']
+                : ['required', 'string', 'max:50', Rule::unique('purchase_bills', 'bill_number')],
             'bill_date'          => ['required', 'date'],
             'posting_date'       => ['required', 'date'],
             'due_date'           => ['nullable', 'date'],
@@ -59,6 +82,7 @@ class StorePurchaseBillRequest extends FormRequest
             'lines.*.discount_percent'    => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.tax_rate'            => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.material_receipt_id' => ['nullable', 'integer', Rule::exists('material_receipts', 'id')],
+            'lines.*.material_receipt_line_id' => ['nullable', 'integer', Rule::exists('material_receipt_lines', 'id')],
             'lines.*.grn_line_id'         => ['nullable', 'integer'],
 
             // Expense lines
@@ -66,6 +90,7 @@ class StorePurchaseBillRequest extends FormRequest
             'expense_lines.*.id'             => ['nullable', 'integer'],
             'expense_lines.*.account_id'     => ['nullable', 'integer', Rule::exists('accounts', 'id')],
             'expense_lines.*.project_id'     => ['nullable', 'integer', Rule::exists('projects', 'id')],
+            'expense_lines.*.machine_id'     => $expenseMachineRule,
             'expense_lines.*.description'    => ['nullable', 'string', 'max:500'],
             'expense_lines.*.amount'         => ['nullable', 'numeric', 'min:0'],
             'expense_lines.*.tax_rate'       => ['nullable', 'numeric', 'min:0', 'max:100'],

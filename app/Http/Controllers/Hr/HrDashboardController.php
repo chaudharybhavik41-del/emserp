@@ -15,6 +15,10 @@ class HrDashboardController extends Controller
 {
     public function index()
     {
+        $today = now()->startOfDay();
+        $nextSevenDays = $today->copy()->addDays(7)->endOfDay();
+        $nextThirtyDays = $today->copy()->addDays(30)->endOfDay();
+
         // Employee Statistics
         $employeeStats = [
             'total' => HrEmployee::count(),
@@ -80,37 +84,56 @@ class HrDashboardController extends Controller
         // Upcoming Birthdays (next 7 days)
         $upcomingBirthdays = HrEmployee::active()
             ->whereNotNull('date_of_birth')
-            ->whereRaw("DATE_FORMAT(date_of_birth, '%m-%d') BETWEEN ? AND ?", [
-                now()->format('m-d'),
-                now()->addDays(7)->format('m-d')
-            ])
-            ->orderByRaw("DATE_FORMAT(date_of_birth, '%m-%d')")
-            ->limit(5)
-            ->get();
+            ->get()
+            ->map(function (HrEmployee $employee) use ($today) {
+                $nextBirthday = $this->nextAnnualOccurrence($employee->date_of_birth, $today);
+
+                return [
+                    'employee' => $employee,
+                    'event_date' => $nextBirthday,
+                ];
+            })
+            ->filter(fn (array $item) => $item['event_date'] !== null && $item['event_date']->lte($nextSevenDays))
+            ->sortBy(fn (array $item) => $item['event_date']->timestamp)
+            ->take(5)
+            ->pluck('employee')
+            ->values();
 
         // Upcoming Work Anniversaries (next 7 days)
         $upcomingAnniversaries = HrEmployee::active()
             ->whereNotNull('date_of_joining')
-            ->whereRaw("DATE_FORMAT(date_of_joining, '%m-%d') BETWEEN ? AND ?", [
-                now()->format('m-d'),
-                now()->addDays(7)->format('m-d')
-            ])
             ->whereYear('date_of_joining', '<', now()->year)
-            ->orderByRaw("DATE_FORMAT(date_of_joining, '%m-%d')")
-            ->limit(5)
-            ->get();
+            ->get()
+            ->map(function (HrEmployee $employee) use ($today) {
+                $nextAnniversary = $this->nextAnnualOccurrence($employee->date_of_joining, $today);
+
+                return [
+                    'employee' => $employee,
+                    'event_date' => $nextAnniversary,
+                ];
+            })
+            ->filter(fn (array $item) => $item['event_date'] !== null && $item['event_date']->lte($nextSevenDays))
+            ->sortBy(fn (array $item) => $item['event_date']->timestamp)
+            ->take(5)
+            ->pluck('employee')
+            ->values();
 
         // Probation Due (next 30 days)
         $probationDue = HrEmployee::active()
-            ->onProbation()
             ->whereNotNull('date_of_joining')
             ->whereNotNull('probation_period_months')
-            ->whereRaw("DATE_ADD(date_of_joining, INTERVAL probation_period_months MONTH) BETWEEN ? AND ?", [
-                now()->format('Y-m-d'),
-                now()->addDays(30)->format('Y-m-d')
-            ])
-            ->limit(5)
-            ->get();
+            ->whereNull('confirmation_date')
+            ->get()
+            ->filter(function (HrEmployee $employee) use ($today, $nextThirtyDays) {
+                $probationEndDate = $employee->probation_end_date;
+
+                return $probationEndDate !== null
+                    && $probationEndDate->gte($today)
+                    && $probationEndDate->lte($nextThirtyDays);
+            })
+            ->sortBy(fn (HrEmployee $employee) => $employee->probation_end_date?->timestamp ?? PHP_INT_MAX)
+            ->take(5)
+            ->values();
 
         // Attendance Trend (last 7 days)
         $attendanceTrend = HrAttendance::select(
@@ -150,5 +173,20 @@ class HrDashboardController extends Controller
             'recentLeaves',
             'onLeaveToday'
         ));
+    }
+
+    private function nextAnnualOccurrence(?Carbon $date, Carbon $today): ?Carbon
+    {
+        if ($date === null) {
+            return null;
+        }
+
+        $occurrence = $date->copy()->year($today->year);
+
+        if ($occurrence->lt($today)) {
+            $occurrence->addYear();
+        }
+
+        return $occurrence;
     }
 }

@@ -37,10 +37,31 @@ class StoreStockAdjustmentController extends Controller
 
     public function index(): View
     {
-        $adjustments = StoreStockAdjustment::with(['project', 'createdBy'])
+        $adjustments = StoreStockAdjustment::with(['project', 'createdBy', 'lines.stockItem'])
             ->orderByDesc('adjustment_date')
             ->orderByDesc('id')
             ->paginate(25);
+
+        $adjustments->getCollection()->transform(function (StoreStockAdjustment $adjustment) {
+            $totalAmount = 0.0;
+            $hasValuation = false;
+
+            foreach ($adjustment->lines as $line) {
+                $qty = (float) ($line->quantity ?? 0);
+                $rate = (float) ($line->stockItem?->opening_unit_rate ?? 0);
+
+                if ($qty <= 0 || $rate <= 0) {
+                    continue;
+                }
+
+                $hasValuation = true;
+                $totalAmount += $qty * $rate;
+            }
+
+            $adjustment->total_amount = $hasValuation ? $totalAmount : null;
+
+            return $adjustment;
+        });
 
         return view('store_stock_adjustments.index', compact('adjustments'));
     }
@@ -64,13 +85,14 @@ public function getBrands($id)
 // $uoms = \App\Models\Uom::where('is_active', 1)->orderBy('name')->get();
 
         // Build item meta for Brand dropdown (id, name, brands)
-        $itemMetaJson = $items->map(function (Item $i) {
-            return [
+        $itemMetaJson = $items->mapWithKeys(function (Item $i) {
+            return [$i->id => [
                 'id'     => $i->id,
                 'name'   => ($i->code ? ($i->code . ' - ') : '') . $i->name,
+                'uom_id' => $i->uom_id,
                 'brands' => $this->normalizeBrands($i->brands),
-            ];
-        })->values()->toJson();
+            ]];
+        })->toJson();
 
         // Only non-raw stock items for adjustment (no plates/sections)
         // Exclude QC-hold stock
@@ -344,6 +366,7 @@ public function getBrands($id)
             'project',
             'createdBy',
             'lines.item.uom',
+            'lines.stockItem.item',
             'lines.stockItem.project',
         ]);
 

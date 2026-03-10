@@ -6,6 +6,7 @@ use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherSeries;
 use App\Models\Accounting\VoucherSeriesCounter;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -52,11 +53,22 @@ class VoucherNumberService
             $maxUsed = $this->maxUsedSequence($companyId, $series, $fyCode);
 
             if (! $counter) {
-                $counter = VoucherSeriesCounter::create([
-                    'voucher_series_id' => $series->id,
-                    'fy_code'           => $fyCode,
-                    'next_number'       => max(1, $maxUsed + 1),
-                ]);
+                try {
+                    $counter = VoucherSeriesCounter::create([
+                        'voucher_series_id' => $series->id,
+                        'fy_code'           => $fyCode,
+                        'next_number'       => max(1, $maxUsed + 1),
+                    ]);
+                } catch (QueryException $e) {
+                    if (! $this->isDuplicateKeyException($e)) {
+                        throw $e;
+                    }
+
+                    $counter = VoucherSeriesCounter::where('voucher_series_id', $series->id)
+                        ->where('fy_code', $fyCode)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                }
             } elseif ((int) $counter->next_number <= (int) $maxUsed) {
                 // If counters got out of sync (manual edits / old data), bump forward.
                 $counter->next_number = $maxUsed + 1;
@@ -125,7 +137,7 @@ class VoucherNumberService
         $prefix = trim($prefix);
 
         // Default format rules
-        $noFyKeys = ['purchase', 'store_issue'];
+        $noFyKeys = ['purchase', 'store_issue', 'store_return', 'stock_adjustment', 'fuel_issue'];
         $noFy = in_array($seriesKey, $noFyKeys, true);
 
         // Ensure prefix is unique within company
@@ -140,16 +152,26 @@ class VoucherNumberService
             );
         }
 
-        return VoucherSeries::create([
-            'company_id'          => $companyId,
-            'key'                 => $seriesKey,
-            'name'                => ucwords(str_replace('_', ' ', $seriesKey)),
-            'prefix'              => $prefix,
-            'use_financial_year'  => ! $noFy,
-            'separator'           => $noFy ? '-' : '/',
-            'pad_length'          => $noFy ? 6 : 4,
-            'is_active'           => true,
-        ]);
+        try {
+            return VoucherSeries::create([
+                'company_id'          => $companyId,
+                'key'                 => $seriesKey,
+                'name'                => ucwords(str_replace('_', ' ', $seriesKey)),
+                'prefix'              => $prefix,
+                'use_financial_year'  => ! $noFy,
+                'separator'           => $noFy ? '-' : '/',
+                'pad_length'          => $noFy ? 6 : 4,
+                'is_active'           => true,
+            ]);
+        } catch (QueryException $e) {
+            if (! $this->isDuplicateKeyException($e)) {
+                throw $e;
+            }
+
+            return VoucherSeries::where('company_id', $companyId)
+                ->where('key', $seriesKey)
+                ->firstOrFail();
+        }
     }
 
     /**
@@ -208,5 +230,14 @@ class VoucherNumberService
     protected function asCarbon(Carbon|string $date): Carbon
     {
         return $date instanceof Carbon ? $date : Carbon::parse($date);
+    }
+
+    protected function isDuplicateKeyException(QueryException $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'duplicate')
+            || str_contains($message, 'unique constraint')
+            || str_contains($message, 'integrity constraint');
     }
 }

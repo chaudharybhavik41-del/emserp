@@ -146,6 +146,11 @@ class HrLeaveController extends Controller
                             ->where('to_date', '>=', $endDate);
                     });
             })
+            ->when($request->filled('department_id'), function ($q) use ($request) {
+                $q->whereHas('employee', function ($employeeQuery) use ($request) {
+                    $employeeQuery->where('department_id', $request->integer('department_id'));
+                });
+            })
             ->get();
 
         // Get holidays
@@ -158,7 +163,7 @@ class HrLeaveController extends Controller
                 return $date->between($leave->from_date, $leave->to_date);
             });
 
-            $holiday = $holidays->firstWhere('date', $date->format('Y-m-d'));
+            $holiday = $holidays->firstWhere('holiday_date', $date->format('Y-m-d'));
 
             $calendarData[$date->format('Y-m-d')] = [
                 'date' => $date,
@@ -253,7 +258,7 @@ class HrLeaveController extends Controller
 
         $availableBalance = $balance ? $balance->available_balance : 0;
 
-        if (!$leaveType->is_negative_balance_allowed && $totalDays > $availableBalance) {
+        if (!$leaveType->allow_negative_balance && $totalDays > $availableBalance) {
             return back()->withErrors(['days' => "Insufficient leave balance. Available: {$availableBalance} days"])->withInput();
         }
 
@@ -304,7 +309,7 @@ class HrLeaveController extends Controller
      */
     public function show(HrLeaveApplication $application)
     {
-        $application->load(['employee', 'leaveType', 'approvedBy', 'transactions']);
+        $application->load(['employee', 'leaveType', 'approvedBy', 'handoverEmployee', 'createdByUser']);
 
         return view('hr.leave.show', compact('application'));
     }
@@ -340,22 +345,25 @@ class HrLeaveController extends Controller
                     'year' => $year,
                 ],
                 [
-                    'company_id' => $application->company_id,
                     'opening_balance' => 0,
                     'credited' => 0,
-                    'availed' => 0,
+                    'used' => 0,
+                    'pending' => 0,
                     'adjusted' => 0,
                 ]
             );
 
-            $balance->increment('availed', $application->total_days);
+            $balance->increment('used', $application->total_days);
+            $balance->refresh();
 
             // Create transaction
             HrLeaveTransaction::create([
-                'company_id' => $application->company_id,
+                'hr_employee_id' => $application->hr_employee_id,
+                'hr_leave_type_id' => $application->hr_leave_type_id,
                 'hr_leave_balance_id' => $balance->id,
-                'hr_leave_application_id' => $application->id,
-                'transaction_type' => 'availed',
+                'reference_type' => 'hr_leave_applications',
+                'reference_id' => $application->id,
+                'transaction_type' => 'debit',
                 'days' => -$application->total_days,
                 'balance_after' => $balance->available_balance,
                 'remarks' => "Leave approved: {$application->application_number}",
@@ -422,13 +430,16 @@ class HrLeaveController extends Controller
                     ->first();
 
                 if ($balance) {
-                    $balance->decrement('availed', $application->total_days);
+                    $balance->decrement('used', $application->total_days);
+                    $balance->refresh();
 
                     HrLeaveTransaction::create([
-                        'company_id' => $application->company_id,
+                        'hr_employee_id' => $application->hr_employee_id,
+                        'hr_leave_type_id' => $application->hr_leave_type_id,
                         'hr_leave_balance_id' => $balance->id,
-                        'hr_leave_application_id' => $application->id,
-                        'transaction_type' => 'restored',
+                        'reference_type' => 'hr_leave_applications',
+                        'reference_id' => $application->id,
+                        'transaction_type' => 'reversal',
                         'days' => $application->total_days,
                         'balance_after' => $balance->available_balance,
                         'remarks' => "Leave cancelled: {$application->application_number}",
@@ -472,15 +483,15 @@ class HrLeaveController extends Controller
                             'year' => $year,
                         ],
                         [
-                            'company_id' => $application->company_id,
                             'opening_balance' => 0,
                             'credited' => 0,
-                            'availed' => 0,
+                            'used' => 0,
+                            'pending' => 0,
                             'adjusted' => 0,
                         ]
                     );
 
-                    $balance->increment('availed', $application->total_days);
+                    $balance->increment('used', $application->total_days);
                 });
                 $count++;
             }
@@ -586,7 +597,6 @@ class HrLeaveController extends Controller
                         'year' => $toYear,
                     ],
                     [
-                        'company_id' => $balance->company_id,
                         'opening_balance' => 0,
                         'credited' => 0,
                         'used' => 0,
@@ -596,18 +606,18 @@ class HrLeaveController extends Controller
                         'encashed' => 0,
                         'carry_forward' => 0,
                         'closing_balance' => 0,
-                        'available_balance' => 0,
                         'is_processed' => false,
                     ]
                 );
 
                 $newBalance->increment('opening_balance', $carryForward);
                 $newBalance->increment('carry_forward', $carryForward);
-                $newBalance->increment('available_balance', $carryForward);
+                $newBalance->refresh();
 
                 // Create transaction
                 HrLeaveTransaction::create([
-                    'company_id' => $balance->company_id,
+                    'hr_employee_id' => $balance->hr_employee_id,
+                    'hr_leave_type_id' => $balance->hr_leave_type_id,
                     'hr_leave_balance_id' => $newBalance->id,
                     'transaction_type' => 'carry_forward',
                     'days' => $carryForward,
@@ -635,8 +645,8 @@ class HrLeaveController extends Controller
         $end = Carbon::parse($toDate);
 
         // Get holidays in range
-        $holidays = HrHoliday::whereBetween('date', [$start, $end])
-            ->pluck('date')
+        $holidays = HrHoliday::whereBetween('holiday_date', [$start, $end])
+            ->pluck('holiday_date')
             ->map(fn($d) => Carbon::parse($d)->format('Y-m-d'))
             ->toArray();
 
@@ -688,7 +698,7 @@ class HrLeaveController extends Controller
                     'leave_type' => $balance->leaveType->name,
                     'opening' => $balance->opening_balance,
                     'credited' => $balance->credited,
-                    'availed' => $balance->availed,
+                    'availed' => $balance->used,
                     'available' => $balance->available_balance,
                 ];
             });

@@ -16,6 +16,8 @@ use App\Http\Controllers\SecuritySettingsController;
 use App\Http\Controllers\MailProfileController;
 use App\Http\Controllers\MailTemplateController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\PwaPushReportController;
+use App\Http\Controllers\PwaPushSubscriptionController;
 use App\Http\Controllers\SessionController;
 
 // Audit & Logs
@@ -63,6 +65,7 @@ use App\Http\Controllers\StoreStockAdjustmentController;
 use App\Http\Controllers\StoreStockRegisterController;
 use App\Http\Controllers\StoreRequisitionController;
 use App\Http\Controllers\StoreIssueController;
+use App\Http\Controllers\FuelIssueController;
 use App\Http\Controllers\StoreReturnController;
 use App\Http\Controllers\MaterialReceiptController;
 use App\Http\Controllers\StoreReorderLevelController;
@@ -105,6 +108,8 @@ use App\Http\Controllers\Production\ProductionDashboardController;
 use App\Http\Controllers\Production\ProductionPlanFromBomController;
 use App\Http\Controllers\Production\ProductionTraceabilitySearchController;
 use App\Http\Controllers\Production\ProductionPlanRouteMatrixController;
+use App\Http\Controllers\Production\ProductionModuleEntryController;
+use App\Http\Controllers\Production\ProductionWorkbenchController;
 
 
 // Approval Module
@@ -230,9 +235,16 @@ Route::middleware('auth')->group(function () {
 
     // Notifications
     Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/push-report', [PwaPushReportController::class, 'index'])->name('notifications.push-report');
+    Route::post('notifications/push-report/prune', [PwaPushReportController::class, 'prune'])->name('notifications.push-report.prune');
+    Route::post('notifications/push-report/test-user/{user}', [PwaPushReportController::class, 'testUser'])->name('notifications.push-report.test-user');
     Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.read_all');
     Route::post('notifications/test', [NotificationController::class, 'sendTest'])->name('notifications.test');
+    Route::prefix('pwa')->name('pwa.')->group(function () {
+        Route::post('push-subscriptions', [PwaPushSubscriptionController::class, 'store'])->name('push-subscriptions.store');
+        Route::delete('push-subscriptions', [PwaPushSubscriptionController::class, 'destroy'])->name('push-subscriptions.destroy');
+    });
 
     /*
     |--------------------------------------------------------------------------
@@ -422,13 +434,19 @@ Route::middleware('auth')->group(function () {
     ->name('ajax.store-requisitions.available-brands');
 
    
- 	 // Store Issues
+  	// Store Issues
     Route::resource('store-issues', StoreIssueController::class)->only(['index', 'create', 'store', 'show']);
     Route::post('store-issues/{store_issue}/post-to-accounts', [StoreIssueController::class, 'postToAccounts'])
         ->name('store-issues.post-to-accounts')
         ->middleware('permission:store.issue.post_to_accounts');
     Route::get('ajax/store-issues/{store_issue}/lines', [StoreIssueController::class, 'ajaxLines'])
         ->name('ajax.store-issues.lines');
+
+    // Fuel Issues (separate flow from general store issues)
+    Route::resource('fuel-issues', FuelIssueController::class)->only(['index', 'create', 'store', 'show']);
+    Route::post('fuel-issues/{fuelIssue}/post-to-accounts', [FuelIssueController::class, 'postToAccounts'])
+        ->name('fuel-issues.post-to-accounts')
+        ->middleware('permission:store.issue.post_to_accounts');
 
     // Store Returns
     Route::resource('store-returns', StoreReturnController::class)->only(['index', 'create', 'store', 'show']);
@@ -479,6 +497,9 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
     // Purchase Bills (Supplier Invoices)
     Route::prefix('purchase')->name('purchase.')->group(function () {
         Route::post('bills/{bill}/post', [PurchaseBillController::class, 'post'])->name('bills.post');
+        Route::post('bills/{bill}/change-posting-date', [PurchaseBillController::class, 'changePostingDate'])
+            ->name('bills.change-posting-date')
+            ->middleware('permission:purchase.bill.update|purchase.bill.change_posting_date');
         Route::resource('bills', PurchaseBillController::class);
     Route::post('bills/{bill}/reverse', [PurchaseBillController::class, 'reverse'])
         ->name('bills.reverse');
@@ -602,6 +623,10 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
 
         Route::post('production-plans/{production_plan}/approve', [ProductionPlanController::class, 'approve'])
             ->name('production-plans.approve');
+        Route::post('production-plans/{production_plan}/cancel', [ProductionPlanController::class, 'cancel'])
+            ->name('production-plans.cancel');
+        Route::post('production-plans/{production_plan}/reopen', [ProductionPlanController::class, 'reopen'])
+            ->name('production-plans.reopen');
 
 		// Production Plan Routes
         Route::get('production-plans/{production_plan}/items/{item}/route', [ProductionPlanRouteController::class, 'edit'])
@@ -612,8 +637,10 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
       // Route Matrix (bulk route enable/disable + assignments)
 	Route::get('production-plans/{production_plan}/route-matrix', [ProductionPlanRouteMatrixController::class, 'edit'])
     ->name('production-plans.route-matrix.edit');
-	Route::post('production-plans/{production_plan}/route-matrix', [ProductionPlanRouteMatrixController::class, 'update'])
+	Route::put('production-plans/{production_plan}/route-matrix', [ProductionPlanRouteMatrixController::class, 'update'])
     ->name('production-plans.route-matrix.update');
+    // Backward compatibility for existing forms posting without method spoofing.
+    Route::post('production-plans/{production_plan}/route-matrix', [ProductionPlanRouteMatrixController::class, 'update']);
 	Route::post('production-plans/{production_plan}/route-matrix/assign', [ProductionPlanRouteMatrixController::class, 'bulkAssign'])
     ->name('production-plans.route-matrix.assign');
 
@@ -626,6 +653,10 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
             ->name('production-dprs.submit');
         Route::post('production-dprs/{production_dpr}/approve', [ProductionDprController::class, 'approve'])
             ->name('production-dprs.approve');
+        Route::post('production-dprs/{production_dpr}/cancel', [ProductionDprController::class, 'cancel'])
+            ->name('production-dprs.cancel');
+        Route::post('production-dprs/{production_dpr}/reopen', [ProductionDprController::class, 'reopen'])
+            ->name('production-dprs.reopen');
 
         // Production QC (Project-scoped)
         Route::get('production-qc', [ProductionQcController::class, 'index'])->name('production-qc.index');
@@ -667,11 +698,30 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
     | Production Module (Global Routes)
     |--------------------------------------------------------------------------
     */
+    Route::get('production', [ProductionWorkbenchController::class, 'index'])
+        ->name('production.workbench');
+    Route::get('production/project/{project}', [ProductionWorkbenchController::class, 'index'])
+        ->name('production.workbench.project');
+    Route::get('production/production-plans', [ProductionPlanController::class, 'index'])
+        ->name('production.production-plans.index');
+    Route::get('production/production-dashboard', [ProductionModuleEntryController::class, 'dashboard'])
+        ->name('production.production-dashboard.index');
+    Route::get('production/production-billing', [ProductionModuleEntryController::class, 'billing'])
+        ->name('production.production-billing.index');
+    Route::get('production/production-dispatches', [ProductionModuleEntryController::class, 'dispatch'])
+        ->name('production.production-dispatches.index');
+    Route::get('production/production-traceability', [ProductionModuleEntryController::class, 'traceability'])
+        ->name('production.production-traceability.index');
+
     Route::prefix('production')->name('production.')->group(function () {
         // Production Activities Master
         Route::resource('activities', ProductionActivityController::class)
             ->parameters(['activities' => 'activity'])
             ->except(['show']);
+
+        // DPR lookups
+        Route::get('lookup/projects/{project}/production-plans', [ProductionDprController::class, 'lookupPlans'])
+            ->name('production-dprs.lookup.plans');
 
         // Global Production DPRs
         Route::resource('production-dprs', ProductionDprController::class)
@@ -681,6 +731,10 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
             ->name('production-dprs.submit');
         Route::post('production-dprs/{production_dpr}/approve', [ProductionDprController::class, 'approve'])
             ->name('production-dprs.approve');
+        Route::post('production-dprs/{production_dpr}/cancel', [ProductionDprController::class, 'cancel'])
+            ->name('production-dprs.cancel');
+        Route::post('production-dprs/{production_dpr}/reopen', [ProductionDprController::class, 'reopen'])
+            ->name('production-dprs.reopen');
 
         // Global Production QC
         Route::get('production-qc', [ProductionQcController::class, 'index'])->name('production-qc.index');
@@ -712,10 +766,13 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
 
   // Machines (base URL: /machinery, route names: machines.*)
 	Route::prefix('machinery')->name('machines.')->group(function () {
-    Route::get('/', [MachineController::class, 'index'])->name('index');
-    Route::get('/create', [MachineController::class, 'create'])->name('create');
-    Route::post('/', [MachineController::class, 'store'])->name('store');
-    Route::get('/{machine}', [MachineController::class, 'show'])->name('show');
+	    Route::get('/', [MachineController::class, 'index'])->name('index');
+	    Route::get('/create', [MachineController::class, 'create'])->name('create');
+	    Route::get('/import-opening', [MachineController::class, 'importOpeningForm'])->name('import-opening');
+	    Route::post('/import-opening', [MachineController::class, 'importOpening'])->name('import-opening.store');
+	    Route::post('/import-opening/post-fa-jv', [MachineController::class, 'postOpeningFaVoucher'])->name('import-opening.post-fa-jv');
+	    Route::post('/', [MachineController::class, 'store'])->name('store');
+	    Route::get('/{machine}', [MachineController::class, 'show'])->name('show');
     Route::get('/{machine}/edit', [MachineController::class, 'edit'])->name('edit');
     Route::put('/{machine}', [MachineController::class, 'update'])->name('update');
     Route::delete('/{machine}', [MachineController::class, 'destroy'])->name('destroy');

@@ -7,6 +7,7 @@ use App\Models\Accounting\Account;
 use App\Models\Accounting\PurchaseDebitNote;
 use App\Models\Party;
 use App\Services\Accounting\BillAllocationService;
+use App\Services\Accounting\PartyAccountService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
@@ -15,7 +16,8 @@ use Carbon\Carbon;
 class SupplierOutstandingReportController extends Controller
 {
     public function __construct(
-        protected BillAllocationService $billAllocationService
+        protected BillAllocationService $billAllocationService,
+        protected PartyAccountService $partyAccountService,
     ) {
         $this->middleware('permission:accounting.reports.view')->only(['index']);
     }
@@ -36,15 +38,10 @@ class SupplierOutstandingReportController extends Controller
         $suppliers = Party::where('is_supplier', true)
             ->orderBy('name')
             ->get();
-
-        $accounts = Account::with('relatedModel')
-            ->where('company_id', $companyId)
-            ->where('is_active', true)
-            ->where('type', 'creditor')
-            ->whereNotNull('related_model_type')
-            ->where('related_model_type', Party::class)
-            ->orderBy('name')
-            ->get();
+        $reportSuppliers = $suppliers
+            ->filter(fn (Party $party) => ! $supplierId || (int) $party->id === $supplierId)
+            ->values();
+        $accountsBySupplierId = $this->resolveSupplierAccounts($reportSuppliers, $companyId);
 
         // Debit Notes totals per supplier (posted up to As-of)
         $dnTotalsBySupplierId = collect();
@@ -68,14 +65,9 @@ class SupplierOutstandingReportController extends Controller
 
         $summaryRows = [];
 
-        foreach ($accounts as $account) {
-            /** @var Party|null $party */
-            $party = $account->relatedModel;
-            if (! $party || ! $party->is_supplier) {
-                continue;
-            }
-
-            if ($supplierId && (int) $party->id !== $supplierId) {
+        foreach ($reportSuppliers as $party) {
+            $account = $accountsBySupplierId[(int) $party->id] ?? null;
+            if (! $account instanceof Account) {
                 continue;
             }
 
@@ -126,7 +118,7 @@ class SupplierOutstandingReportController extends Controller
             $selectedParty = $suppliers->firstWhere('id', $supplierId);
 
             if ($selectedParty) {
-                $selectedAccount = $accounts->firstWhere('related_model_id', $selectedParty->id);
+                $selectedAccount = $accountsBySupplierId[(int) $selectedParty->id] ?? null;
 
                 if ($selectedAccount) {
                     $detailBills = $this->billAllocationService->getOpenPurchaseBillsForAccount($selectedAccount, $asOfDate);
@@ -171,5 +163,30 @@ class SupplierOutstandingReportController extends Controller
             'grandTotalNet'      => $grandTotalNet,
             'dnEnabled'          => $dnEnabled,
         ]);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int,Party>  $suppliers
+     * @return array<int,Account>
+     */
+    protected function resolveSupplierAccounts($suppliers, int $companyId): array
+    {
+        $accounts = [];
+
+        foreach ($suppliers as $party) {
+            $account = $this->partyAccountService->syncAccountForParty($party, $companyId);
+
+            if (! $account instanceof Account) {
+                continue;
+            }
+
+            if ($account->related_model_type !== Party::class || (int) $account->related_model_id !== (int) $party->id) {
+                continue;
+            }
+
+            $accounts[(int) $party->id] = $account;
+        }
+
+        return $accounts;
     }
 }

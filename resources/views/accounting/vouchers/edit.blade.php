@@ -3,6 +3,7 @@
 @section('title', 'Edit Voucher')
 
 @section('content')
+                    @php $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? [])); @endphp
                     <div class="container-fluid">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h1 class="h4 mb-0">Edit Voucher</h1>
@@ -28,7 +29,7 @@
                                         </div>
                                         <div class="col-md-3">
                                             <label class="form-label form-label-sm">Type</label>
-                                            <select name="voucher_type" class="form-select form-select-sm">
+                                            <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
                                                 @foreach($voucherTypes as $key => $label)
                                                     <option value="{{ $key }}" @selected(old('voucher_type', $voucher->voucher_type) === $key)>
                                                         {{ $label }}
@@ -97,6 +98,9 @@
                                         <th>#</th>
                                         <th>Account</th>
                                         <th>Cost Center</th>
+                                        @if($hasMachineLineDimension)
+                                            <th>Machine</th>
+                                        @endif
                                         <th>Description</th>
                                         <th>Debit</th>
                                         <th>Credit</th>
@@ -109,10 +113,14 @@
                                         <tr>
                                             <td class="row-number">{{ $i + 1 }}</td>
                                             <td>
-                                                <select name="lines[{{ $i }}][account_id]" class="form-select form-select-sm">
+                                                <select name="lines[{{ $i }}][account_id]" class="form-select form-select-sm voucher-account-select">
                                                     <option value="">-- select --</option>
                                                     @foreach($accounts as $account)
-                                                        <option value="{{ $account->id }}" @selected((string) old("lines.$i.account_id", $ln?->account_id) === (string) $account->id)>
+                                                        <option
+                                                            value="{{ $account->id }}"
+                                                            data-contra-allowed="{{ isset($contraAccountLookup[(int) $account->id]) ? '1' : '0' }}"
+                                                            @selected((string) old("lines.$i.account_id", $ln?->account_id) === (string) $account->id)
+                                                        >
                                                             {{ $account->name }}
                                                         </option>
                                                     @endforeach
@@ -128,6 +136,18 @@
                                                     @endforeach
                                                 </select>
                                             </td>
+                                            @if($hasMachineLineDimension)
+                                                <td>
+                                                    <select name="lines[{{ $i }}][machine_id]" class="form-select form-select-sm">
+                                                        <option value="">-- none --</option>
+                                                        @foreach($machines as $machine)
+                                                            <option value="{{ $machine->id }}" @selected((string) old("lines.$i.machine_id", $ln?->machine_id) === (string) $machine->id)>
+                                                                {{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                </td>
+                                            @endif
                                             <td>
                                                 <input type="text" name="lines[{{ $i }}][description]" class="form-control form-control-sm"
                                                     value="{{ old("lines.$i.description", $ln?->description) }}">
@@ -148,13 +168,13 @@
                                 </tbody>
                                 <tfoot>
                                     <tr>
-                                        <th colspan="4" class="text-end">Total</th>
+                                        <th colspan="{{ $hasMachineLineDimension ? 5 : 4 }}" class="text-end">Total</th>
                                         <th id="total-debit">0.00</th>
                                         <th id="total-credit">0.00</th>
                                         <th id="total-diff">0.00</th>
                                     </tr>
                                     <tr>
-                                        <td colspan="7" class="text-center">
+                                        <td colspan="{{ $hasMachineLineDimension ? 8 : 7 }}" class="text-center">
                                             <span id="balance-status" class="fw-bold text-danger">Voucher not matched balanced</span>
                                         </td>
                                     </tr>
@@ -180,6 +200,7 @@
                                 const saveDraftBtn = document.getElementById('save-draft');
                                 const savePostBtn = document.getElementById('save-post');
                                 const balanceStatus = document.getElementById('balance-status');
+                                const voucherTypeSelect = document.getElementById('voucher_type');
 
                                 // Hide any blank rows initially
                                 tbody.querySelectorAll('tr').forEach(row => {
@@ -199,6 +220,7 @@
                                         });
                                         row.style.display = 'table-row'; // show rows
                                     });
+                                    syncContraAccountOptions();
                                     calculateTotals();
                                 }
 
@@ -208,10 +230,10 @@
                                     newRow.innerHTML = `
                                     <td class="row-number"></td>
                                     <td>
-                                        <select name="lines[${lineIndex}][account_id]" class="form-select form-select-sm">
+                                        <select name="lines[${lineIndex}][account_id]" class="form-select form-select-sm voucher-account-select">
                                             <option value="">-- select --</option>
                                             @foreach($accounts as $account)
-                                                <option value="{{ $account->id }}">{{ $account->name }}</option>
+                                                <option value="{{ $account->id }}" data-contra-allowed="{{ isset($contraAccountLookup[(int) $account->id]) ? '1' : '0' }}">{{ $account->name }}</option>
                                             @endforeach
                                         </select>
                                     </td>
@@ -223,6 +245,16 @@
                                             @endforeach
                                         </select>
                                     </td>
+                                    @if($hasMachineLineDimension)
+                                    <td>
+                                        <select name="lines[${lineIndex}][machine_id]" class="form-select form-select-sm">
+                                            <option value="">-- none --</option>
+                                            @foreach($machines as $machine)
+                                                <option value="{{ $machine->id }}">{{ $machine->code ? ($machine->code . ' - ') : '' }}{{ $machine->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    </td>
+                                    @endif
                                     <td><input type="text" name="lines[${lineIndex}][description]" class="form-control form-control-sm"></td>
                                     <td><input type="number" step="0.01" name="lines[${lineIndex}][debit]" class="form-control form-control-sm debit"></td>
                                     <td><input type="number" step="0.01" name="lines[${lineIndex}][credit]" class="form-control form-control-sm credit"></td>
@@ -232,6 +264,31 @@
                                     lineIndex++;
                                     updateRows();
                                 });
+
+                                function syncContraAccountOptions() {
+                                    const isContra = voucherTypeSelect?.value === 'contra';
+
+                                    tbody.querySelectorAll('.voucher-account-select').forEach(select => {
+                                        Array.from(select.options).forEach((option, index) => {
+                                            if (index === 0) {
+                                                option.hidden = false;
+                                                option.disabled = false;
+                                                return;
+                                            }
+
+                                            const isAllowed = option.dataset.contraAllowed === '1';
+                                            const shouldRestrict = isContra && !isAllowed;
+
+                                            option.hidden = shouldRestrict;
+                                            option.disabled = shouldRestrict;
+                                        });
+
+                                        const selectedOption = select.options[select.selectedIndex];
+                                        if (isContra && selectedOption && selectedOption.value && selectedOption.dataset.contraAllowed !== '1') {
+                                            select.value = '';
+                                        }
+                                    });
+                                }
 
                                 // Remove row
                                 tbody.addEventListener('click', e => {
@@ -302,7 +359,10 @@
                                     balanceStatus.classList.toggle('text-danger', !enable);
                                 }
 
+                                voucherTypeSelect?.addEventListener('change', syncContraAccountOptions);
+
                                 // Initial calculation
+                                syncContraAccountOptions();
                                 calculateTotals();
                             });
                         </script>

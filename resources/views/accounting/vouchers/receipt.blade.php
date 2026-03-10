@@ -4,11 +4,14 @@
 
 @section('content')
 <div class="container-fluid">
-    <h1 class="h4 mb-3">Receipt Voucher</h1>
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <h1 class="h4 mb-0">Receipt Voucher</h1>
+        <a href="{{ route('accounting.receipts.index') }}" class="btn btn-outline-secondary btn-sm">Back To Receipts</a>
+    </div>
 
     <div class="card">
         <div class="card-body">
-            <form method="POST" action="{{ route('accounting.receipts.store') }}" data-prevent-enter-submit="1">
+            <form method="POST" action="{{ route('accounting.receipts.store') }}" data-prevent-enter-submit="1" autocomplete="off">
                 @csrf
 
                 <input type="hidden" name="company_id" value="{{ $companyId }}">
@@ -32,46 +35,12 @@
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
                     </div>
-
-                    <div class="col-md-3">
-                        <label class="form-label form-label-sm">Project (optional)</label>
-                        <select name="project_id"
-                                class="form-select form-select-sm @error('project_id') is-invalid @enderror">
-                            <option value="">-- None --</option>
-                            @foreach($projects as $project)
-                                <option value="{{ $project->id }}"
-                                    @selected(old('project_id') == $project->id)>
-                                    {{ $project->name }}
-                                </option>
-                            @endforeach
-                        </select>
-                        @error('project_id')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                    </div>
-
-                    <div class="col-md-3">
-                        <label class="form-label form-label-sm">Cost Center (optional)</label>
-                        <select name="cost_center_id"
-                                class="form-select form-select-sm @error('cost_center_id') is-invalid @enderror">
-                            <option value="">-- None --</option>
-                            @foreach($costCenters as $cc)
-                                <option value="{{ $cc->id }}"
-                                    @selected(old('cost_center_id') == $cc->id)>
-                                    {{ $cc->name }}
-                                </option>
-                            @endforeach
-                        </select>
-                        @error('cost_center_id')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                    </div>
                 </div>
 
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
                         <label class="form-label form-label-sm">Bank / Cash Account</label>
-                        <select name="bank_account_id"
+                        <select name="bank_account_id" id="bank_account_id"
                                 class="form-select form-select-sm @error('bank_account_id') is-invalid @enderror">
                             <option value="">-- Select --</option>
                             @foreach($bankCashAccounts as $acc)
@@ -84,6 +53,7 @@
                         @error('bank_account_id')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
+                        <div class="form-text" id="bank-account-balance-text">Select a bank or cash account to view current balance.</div>
                     </div>
 
                     <div class="col-md-4">
@@ -101,6 +71,7 @@
                         @error('party_account_id')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
+                        <div class="form-text" id="payee-outstanding-text">Select a client ledger to view total outstanding.</div>
                     </div>
 
                     <div class="col-md-4">
@@ -143,7 +114,7 @@
                         <span class="text-muted small ms-2">(optional)</span>
                     </div>
                     <div class="small text-muted">
-                        This will become active once Client RA / Invoice module is wired to accounts.
+                        Select client ledger to load open receivable bills.
                     </div>
                 </div>
 
@@ -151,20 +122,27 @@
                     <table class="table table-sm table-bordered align-middle mb-0">
                         <thead class="table-light">
                             <tr>
+                                <th style="width: 10%;">Select</th>
                                 <th style="width: 18%;">Bill No</th>
-                                <th style="width: 18%;">Bill Date</th>
-                                <th style="width: 18%;">Bill Amount</th>
-                                <th style="width: 18%;">Outstanding</th>
-                                <th style="width: 28%;">Allocate Amount</th>
+                                <th style="width: 16%;">Bill Date</th>
+                                <th style="width: 16%;">Bill Amount</th>
+                                <th style="width: 16%;">Outstanding</th>
+                                <th style="width: 24%;">Allocate Now</th>
                             </tr>
                         </thead>
                         <tbody id="client-bill-rows">
                             <tr class="text-muted">
-                                <td colspan="5" class="text-center small py-2">
+                                <td colspan="6" class="text-center small py-2">
                                     Select a client/debtor ledger to load open bills for allocation.
                                 </td>
                             </tr>
                         </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <th colspan="5" class="text-end">Total Allocated</th>
+                                <th class="text-end" id="receipt-allocated-total">0.00</th>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
 
@@ -178,6 +156,28 @@
                 <div class="small text-muted mb-3">
                     You do not have to allocate the full amount. Any unallocated balance will be treated as on-account receipt.
                 </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light-subtle">
+                            <div class="text-muted small">Total Receipt</div>
+                            <div class="fw-semibold" id="summary-total-receipt">0.00</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light-subtle">
+                            <div class="text-muted small">Total Allocated</div>
+                            <div class="fw-semibold" id="summary-total-allocated">0.00</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light-subtle">
+                            <div class="text-muted small">On Account</div>
+                            <div class="fw-semibold" id="summary-on-account">0.00</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="small text-danger mb-3 d-none" id="allocation-warning"></div>
 
                 <div class="border rounded p-3 bg-light mb-3">
                     <div class="d-flex align-items-center justify-content-between mb-2">
@@ -253,22 +253,98 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const bankSelect    = document.getElementById('bank_account_id');
     const partySelect   = document.getElementById('party_account_id');
     const dateInput    = document.getElementById('voucher_date');
+    const amountInput  = document.getElementById('voucher_amount');
     const tbody         = document.getElementById('client-bill-rows');
+    const allocatedFoot = document.getElementById('receipt-allocated-total');
+    const totalReceipt = document.getElementById('summary-total-receipt');
+    const totalAllocated = document.getElementById('summary-total-allocated');
+    const onAccountAmount = document.getElementById('summary-on-account');
+    const warningBox = document.getElementById('allocation-warning');
+    const bankBalanceText = document.getElementById('bank-account-balance-text');
+    const payeeOutstandingText = document.getElementById('payee-outstanding-text');
     const oldAlloc      = @json(old('receipt_allocations', []));
+    const accountSummaryUrl = @json(route('accounting.api.account-summary'));
     let allocMap        = {};
+    let selectedMap     = {};
 
     const tdsSectionSel     = document.getElementById('tds_section');
     const tdsRateInput      = document.getElementById('tds_rate');
     const expectedTdsInput  = document.getElementById('expected_tds_amount');
 
     if (Array.isArray(oldAlloc)) {
-        oldAlloc.forEach(function (row, index) {
+        oldAlloc.forEach(function (row) {
             if (row && row.bill_id) {
                 allocMap[Number(row.bill_id)] = parseFloat(row.amount || 0) || 0;
+                if (parseFloat(row.amount || 0) > 0 || row.selected) {
+                    selectedMap[Number(row.bill_id)] = true;
+                }
             }
         });
+    }
+
+    function parseNumber(value) {
+        const parsed = parseFloat(value || 0);
+
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function money(value) {
+        return parseNumber(value).toFixed(2);
+    }
+
+    function formatBalance(amount, side) {
+        return money(amount) + ' ' + String(side || 'dr').toUpperCase();
+    }
+
+    function currentReceiptAmount() {
+        return parseNumber(amountInput ? amountInput.value : 0);
+    }
+
+    function currentAllocatedTotal() {
+        let total = 0;
+
+        tbody.querySelectorAll('tr').forEach(function (row) {
+            const input = row.querySelector('input[data-role="allocate-amount"]');
+            const checkbox = row.querySelector('input[data-role="allocate-select"]');
+            const selectedFlag = row.querySelector('input[data-role="selected-flag"]');
+
+            if (!input || input.disabled) {
+                return;
+            }
+
+            const isSelected = (checkbox && checkbox.checked)
+                || (selectedFlag && selectedFlag.value === '1');
+
+            if (!isSelected) {
+                return;
+            }
+
+            total += parseNumber(input.value);
+        });
+
+        return total;
+    }
+
+    function updateSummary() {
+        const receiptAmount = currentReceiptAmount();
+        const allocated = currentAllocatedTotal();
+        const onAccount = receiptAmount - allocated;
+
+        totalReceipt.textContent = money(receiptAmount);
+        totalAllocated.textContent = money(allocated);
+        onAccountAmount.textContent = money(Math.max(onAccount, 0));
+        allocatedFoot.textContent = money(allocated);
+
+        if (onAccount < -0.009) {
+            warningBox.textContent = 'Allocated amount cannot exceed the receipt amount.';
+            warningBox.classList.remove('d-none');
+        } else {
+            warningBox.textContent = '';
+            warningBox.classList.add('d-none');
+        }
     }
 
     function renderRows(bills) {
@@ -277,9 +353,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!bills || !bills.length) {
             const tr = document.createElement('tr');
             tr.classList.add('text-muted');
-            tr.innerHTML = '<td colspan="5" class="text-center small py-2">No open client bills for this ledger.</td>';
+            tr.innerHTML = '<td colspan="6" class="text-center small py-2">No open client bills for this ledger.</td>';
             tbody.appendChild(tr);
             if (expectedTdsInput) { expectedTdsInput.value = '0.00'; }
+            updateSummary();
             return;
         }
 
@@ -287,31 +364,96 @@ document.addEventListener('DOMContentLoaded', function () {
             const tr = document.createElement('tr');
             const key = bill.id;
             const oldAmount = allocMap[key] || '';
+            const checked = selectedMap[key] || parseNumber(oldAmount) > 0;
 
             const total = typeof bill.total_amount === 'number' ? bill.total_amount : parseFloat(bill.total_amount || 0) || 0;
             const outstd = typeof bill.outstanding_amount === 'number' ? bill.outstanding_amount : parseFloat(bill.outstanding_amount || 0) || 0;
 
             tr.innerHTML = ''
+                + '<td class="text-center">'
+                + '  <input type="checkbox"'
+                + '         class="form-check-input mt-0"'
+                + '         data-role="allocate-select"'
+                + '         data-outstanding="' + outstd + '"'
+                + '         ' + (checked ? 'checked' : '') + '>'
+                + '</td>'
                 + '<td class="small">' + bill.bill_number + '</td>'
                 + '<td class="small">' + (bill.bill_date || '') + '</td>'
                 + '<td class="small text-end">' + total.toFixed(2) + '</td>'
                 + '<td class="small text-end">' + outstd.toFixed(2) + '</td>'
                 + '<td>'
                 + '  <input type="hidden" name="receipt_allocations[' + idx + '][bill_id]" value="' + bill.id + '">'
+                + '  <input type="hidden" name="receipt_allocations[' + idx + '][selected]" value="' + (checked ? '1' : '') + '" data-role="selected-flag">'
                 + '  <input type="number" step="0.01"'
                 + '         name="receipt_allocations[' + idx + '][amount]"'
                 + '         class="form-control form-control-sm"'
+                + '         data-role="allocate-amount"'
+                + '         autocomplete="off"'
                 + '         data-tds-amount="' + ((bill.tds_amount !== undefined && bill.tds_amount !== null) ? bill.tds_amount : 0) + '"'
                 + '         data-receivable-amount="' + ((bill.receivable_amount !== undefined && bill.receivable_amount !== null) ? bill.receivable_amount : total) + '"'
                 + '         data-tds-section="' + ((bill.tds_section !== undefined && bill.tds_section !== null) ? bill.tds_section : '') + '"'
                 + '         data-tds-rate="' + ((bill.tds_rate !== undefined && bill.tds_rate !== null) ? bill.tds_rate : 0) + '"'
                 + '         max="' + outstd + '"'
-                + '         value="' + (oldAmount !== '' ? oldAmount : '') + '">'
+                + '         value="' + (oldAmount !== '' ? oldAmount : '') + '"'
+                + '         ' + (checked ? '' : 'disabled') + '>'
                 + '</td>';
 
             tbody.appendChild(tr);
         });
 
+        bindAllocationRowEvents();
+        updateSummary();
+    }
+
+    function bindAllocationRowEvents() {
+        tbody.querySelectorAll('tr').forEach(function (row) {
+            const checkbox = row.querySelector('input[data-role="allocate-select"]');
+            const amountField = row.querySelector('input[data-role="allocate-amount"]');
+            const selectedFlag = row.querySelector('input[data-role="selected-flag"]');
+
+            if (!checkbox || !amountField || !selectedFlag) {
+                return;
+            }
+
+            checkbox.addEventListener('change', function () {
+                amountField.disabled = !checkbox.checked;
+                selectedFlag.value = checkbox.checked ? '1' : '';
+
+                if (checkbox.checked) {
+                    if (parseNumber(amountField.value) <= 0) {
+                        amountField.value = money(checkbox.dataset.outstanding);
+                    }
+                    amountField.focus();
+                } else {
+                    amountField.value = '';
+                }
+
+                updateSummary();
+                recalcExpectedTds();
+            });
+
+            amountField.addEventListener('input', function () {
+                const cap = parseNumber(amountField.max);
+                let value = parseNumber(amountField.value);
+
+                if (value > cap) {
+                    value = cap;
+                    amountField.value = money(value);
+                }
+
+                if (value > 0) {
+                    checkbox.checked = true;
+                    amountField.disabled = false;
+                    selectedFlag.value = '1';
+                } else {
+                    checkbox.checked = false;
+                    selectedFlag.value = '';
+                }
+
+                updateSummary();
+                recalcExpectedTds();
+            });
+        });
     }
 
     function recalcExpectedTds() {
@@ -378,9 +520,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (!accountId) {
             tbody.innerHTML = '<tr class="text-muted">'
-                + '<td colspan="5" class="text-center small py-2">Select a client/debtor ledger to load open bills.</td>'
+                + '<td colspan="6" class="text-center small py-2">Select a client/debtor ledger to load open bills.</td>'
                 + '</tr>';
             if (expectedTdsInput) { expectedTdsInput.value = '0.00'; }
+            updateSummary();
             return;
         }
 
@@ -404,9 +547,78 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (e) {
             console.error(e);
             tbody.innerHTML = '<tr class="text-danger">'
-                + '<td colspan="5" class="text-center small py-2">Could not load client bills. Please retry or contact admin.</td>'
+                + '<td colspan="6" class="text-center small py-2">Could not load client bills. Please retry or contact admin.</td>'
                 + '</tr>';
             if (expectedTdsInput) { expectedTdsInput.value = '0.00'; }
+            updateSummary();
+        }
+    }
+
+    async function loadBankSummary() {
+        if (!bankSelect || !bankBalanceText) {
+            return;
+        }
+
+        const accountId = bankSelect.value;
+        if (!accountId) {
+            bankBalanceText.textContent = 'Select a bank or cash account to view current balance.';
+            return;
+        }
+
+        try {
+            const asOfDate = dateInput && dateInput.value ? dateInput.value : '';
+            const url = accountSummaryUrl
+                + '?role=bank&account_id=' + encodeURIComponent(accountId)
+                + (asOfDate ? '&as_of_date=' + encodeURIComponent(asOfDate) : '');
+
+            const resp = await fetch(url, {
+                headers: { 'Accept': 'application/json' }
+            });
+
+            if (!resp.ok) {
+                throw new Error('Failed to load bank balance');
+            }
+
+            const json = await resp.json();
+            const data = json.data || {};
+            bankBalanceText.textContent = 'Current balance: ' + formatBalance(data.balance || 0, data.balance_side || 'dr');
+        } catch (error) {
+            console.error(error);
+            bankBalanceText.textContent = 'Could not load current balance.';
+        }
+    }
+
+    async function loadPayeeSummary() {
+        if (!partySelect || !payeeOutstandingText) {
+            return;
+        }
+
+        const accountId = partySelect.value;
+        if (!accountId) {
+            payeeOutstandingText.textContent = 'Select a client ledger to view total outstanding.';
+            return;
+        }
+
+        try {
+            const asOfDate = dateInput && dateInput.value ? dateInput.value : '';
+            const url = accountSummaryUrl
+                + '?role=client&account_id=' + encodeURIComponent(accountId)
+                + (asOfDate ? '&as_of_date=' + encodeURIComponent(asOfDate) : '');
+
+            const resp = await fetch(url, {
+                headers: { 'Accept': 'application/json' }
+            });
+
+            if (!resp.ok) {
+                throw new Error('Failed to load client outstanding');
+            }
+
+            const json = await resp.json();
+            const data = json.data || {};
+            payeeOutstandingText.textContent = 'Total outstanding: ' + money(data.total_outstanding || 0);
+        } catch (error) {
+            console.error(error);
+            payeeOutstandingText.textContent = 'Could not load total outstanding.';
         }
     }
 
@@ -432,16 +644,38 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (partySelect) {
-        partySelect.addEventListener('change', loadBills);
+        partySelect.addEventListener('change', function () {
+            loadPayeeSummary();
+            loadBills();
+        });
 
         if (dateInput) {
-            dateInput.addEventListener('change', loadBills);
+            dateInput.addEventListener('change', function () {
+                loadBankSummary();
+                loadPayeeSummary();
+                loadBills();
+            });
         }
 
         if (partySelect.value) {
+            loadPayeeSummary();
             loadBills();
         }
     }
+
+    if (bankSelect) {
+        bankSelect.addEventListener('change', loadBankSummary);
+
+        if (bankSelect.value) {
+            loadBankSummary();
+        }
+    }
+
+    if (amountInput) {
+        amountInput.addEventListener('input', updateSummary);
+    }
+
+    updateSummary();
 });
 </script>
 @endpush

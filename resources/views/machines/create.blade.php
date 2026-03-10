@@ -117,6 +117,18 @@
                         </div>
 
                         <div class="mb-3">
+                            <input type="hidden" name="allow_fuel_issue" value="0">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="allow_fuel_issue" value="1"
+                                       id="allow_fuel_issue" {{ old('allow_fuel_issue') == '1' ? 'checked' : '' }}>
+                                <label class="form-check-label" for="allow_fuel_issue">
+                                    Allow this machine in Fuel Issue
+                                </label>
+                            </div>
+                            <small class="text-muted">Enable only for machines that consume fuel and require fuel issue entries.</small>
+                        </div>
+
+                        <div class="mb-3">
                             <label class="form-label">Specifications</label>
                             <textarea name="spec" class="form-control" rows="3">{{ old('spec') }}</textarea>
                         </div>
@@ -151,6 +163,48 @@
                                 <label class="form-label">Purchase Price</label>
                                 <input type="number" name="purchase_price" class="form-control" 
                                        value="{{ old('purchase_price', 0) }}" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <hr>
+                        <div class="mb-2">
+                            <strong>Opening Asset Values (Cutover)</strong>
+                            <div class="small text-muted">Use for old machinery existing before ERP cutover.</div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Opening Date</label>
+                                <input type="date" name="opening_date" class="form-control @error('opening_date') is-invalid @enderror"
+                                       value="{{ old('opening_date', '2026-01-01') }}">
+                                @error('opening_date')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Opening WDV</label>
+                                <input type="number" step="0.01" min="0" name="opening_wdv" class="form-control @error('opening_wdv') is-invalid @enderror"
+                                       value="{{ old('opening_wdv', 0) }}">
+                                @error('opening_wdv')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Opening Cost (Optional)</label>
+                                <input type="number" step="0.01" min="0" name="opening_cost" class="form-control @error('opening_cost') is-invalid @enderror"
+                                       value="{{ old('opening_cost') }}">
+                                @error('opening_cost')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Opening Accum. Depr. (Optional)</label>
+                                <input type="number" step="0.01" min="0" name="opening_accum_depr" class="form-control @error('opening_accum_depr') is-invalid @enderror"
+                                       value="{{ old('opening_accum_depr') }}">
+                                @error('opening_accum_depr')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
                             </div>
                         </div>
 

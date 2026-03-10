@@ -21,6 +21,21 @@ class BalanceSheetReportController extends Controller
         return (int) (Config::get('accounting.default_company_id', 1));
     }
 
+    protected function signedOpening(Account $account, $asOfDate): float
+    {
+        $opening = (float) ($account->opening_balance ?? 0.0);
+
+        if ($account->opening_balance_date && $account->opening_balance_date->gt($asOfDate)) {
+            return 0.0;
+        }
+
+        if ($opening !== 0.0) {
+            $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
+        }
+
+        return $opening;
+    }
+
     /**
      * Balance Sheet as on a date.
      *
@@ -28,7 +43,8 @@ class BalanceSheetReportController extends Controller
      * - Opening balances (effective on/before asOfDate)
      * - Posted vouchers up to asOfDate
      *
-     * We exclude Income & Expense groups and add a Profit/Loss balancing line.
+     * We exclude Income & Expense groups from the two base sides and present
+     * accumulated profit/loss separately.
      */
     public function index(Request $request)
     {
@@ -72,14 +88,7 @@ class BalanceSheetReportController extends Controller
             $debit  = $agg ? (float) $agg->total_debit : 0.0;
             $credit = $agg ? (float) $agg->total_credit : 0.0;
 
-            // Opening (company-level)
-            $opening = (float) ($account->opening_balance ?? 0.0);
-            if ($account->opening_balance_date && $account->opening_balance_date->gt($asOfDate)) {
-                $opening = 0.0;
-            }
-            if ($opening != 0.0) {
-                $opening *= ($account->opening_balance_type === 'cr') ? -1 : 1;
-            }
+            $opening = $this->signedOpening($account, $asOfDate);
 
             // Net as-of (Dr positive, Cr negative)
             $net = $opening + ($debit - $credit);
@@ -142,8 +151,32 @@ class BalanceSheetReportController extends Controller
         $totalAssets = array_reduce($assetGroups, fn ($carry, $g) => $carry + (float) $g['total'], 0.0);
         $totalLiabilities = array_reduce($liabilityGroups, fn ($carry, $g) => $carry + (float) $g['total'], 0.0);
 
-        // Profit/Loss balancing line
-        $plBalance = $totalAssets - $totalLiabilities;
+        $profitLoss = 0.0;
+        foreach ($accounts as $accountId => $account) {
+            $group = $account->group;
+            if (! $group || ! in_array($group->nature, ['income', 'expense'], true)) {
+                continue;
+            }
+
+            $agg = $movements->get($accountId);
+            $debit = $agg ? (float) $agg->total_debit : 0.0;
+            $credit = $agg ? (float) $agg->total_credit : 0.0;
+            $net = $this->signedOpening($account, $asOfDate) + ($debit - $credit);
+
+            if ($group->nature === 'income') {
+                $profitLoss += (-1 * $net);
+            } else {
+                $profitLoss -= $net;
+            }
+        }
+
+        $profitLoss = round($profitLoss, 2);
+        $lossAmount = $profitLoss < 0 ? abs($profitLoss) : 0.0;
+        $profitAmount = $profitLoss > 0 ? $profitLoss : 0.0;
+
+        $presentedTotalAssets = round($totalAssets + $lossAmount, 2);
+        $presentedTotalLiabilities = round($totalLiabilities + $profitAmount, 2);
+        $balanceDifference = round($presentedTotalAssets - $presentedTotalLiabilities, 2);
 
         if ($export === 'csv') {
             return $this->exportCsv(
@@ -153,7 +186,10 @@ class BalanceSheetReportController extends Controller
                 liabilityGroups: $liabilityGroups,
                 totalAssets: $totalAssets,
                 totalLiabilities: $totalLiabilities,
-                plBalance: $plBalance,
+                profitLoss: $profitLoss,
+                presentedTotalAssets: $presentedTotalAssets,
+                presentedTotalLiabilities: $presentedTotalLiabilities,
+                balanceDifference: $balanceDifference,
             );
         }
 
@@ -164,7 +200,10 @@ class BalanceSheetReportController extends Controller
             'liabilityGroups' => $liabilityGroups,
             'totalAssets' => $totalAssets,
             'totalLiabilities' => $totalLiabilities,
-            'plBalance' => $plBalance,
+            'profitLoss' => $profitLoss,
+            'presentedTotalAssets' => $presentedTotalAssets,
+            'presentedTotalLiabilities' => $presentedTotalLiabilities,
+            'balanceDifference' => $balanceDifference,
         ]);
     }
 
@@ -175,7 +214,10 @@ class BalanceSheetReportController extends Controller
         array $liabilityGroups,
         float $totalAssets,
         float $totalLiabilities,
-        float $plBalance,
+        float $profitLoss,
+        float $presentedTotalAssets,
+        float $presentedTotalLiabilities,
+        float $balanceDifference,
     ): StreamedResponse {
         $fileName = 'balance_sheet_' . $asOfDate->format('Y-m-d') . '.csv';
 
@@ -195,7 +237,7 @@ class BalanceSheetReportController extends Controller
             'Dr/Cr',
         ];
 
-        $callback = function () use ($columns, $companyId, $asOfDate, $assetGroups, $liabilityGroups, $totalAssets, $totalLiabilities, $plBalance) {
+        $callback = function () use ($columns, $companyId, $asOfDate, $assetGroups, $liabilityGroups, $totalAssets, $totalLiabilities, $profitLoss, $presentedTotalAssets, $presentedTotalLiabilities, $balanceDifference) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, $columns);
 
@@ -245,20 +287,23 @@ class BalanceSheetReportController extends Controller
                 $emitGroup('LIABILITIES', $g, fn (float $amt) => $amt >= 0 ? 'Cr' : 'Dr');
             }
 
-            // Profit/Loss balancing
-            if (abs($plBalance) >= 0.005) {
-                if ($plBalance > 0) {
-                    // Profit (credit) on liabilities side
-                    fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'LIABILITIES', 'Profit/Loss', '', 'Profit (Balancing)', number_format(abs($plBalance), 2, '.', ''), 'Cr']);
-                } else {
-                    // Loss (debit) on assets side
-                    fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'ASSETS', 'Profit/Loss', '', 'Loss (Balancing)', number_format(abs($plBalance), 2, '.', ''), 'Dr']);
-                }
+            if ($profitLoss > 0.004) {
+                fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'LIABILITIES', 'Profit/Loss', '', 'Accumulated Profit', number_format($profitLoss, 2, '.', ''), 'Cr']);
+            } elseif ($profitLoss < -0.004) {
+                fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'ASSETS', 'Profit/Loss', '', 'Accumulated Loss', number_format(abs($profitLoss), 2, '.', ''), 'Dr']);
+            }
+
+            if (abs($balanceDifference) >= 0.005) {
+                $side = $balanceDifference > 0 ? 'LIABILITIES' : 'ASSETS';
+                $drCr = $balanceDifference > 0 ? 'Cr' : 'Dr';
+                fputcsv($handle, [$companyId, $asOfDate->toDateString(), $side, 'Imbalance', '', 'Balance Sheet Difference', number_format(abs($balanceDifference), 2, '.', ''), $drCr]);
             }
 
             fputcsv($handle, []);
-            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Total Assets', number_format(abs($totalAssets), 2, '.', ''), $totalAssets >= 0 ? 'Dr' : 'Cr']);
-            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Total Liabilities', number_format(abs($totalLiabilities), 2, '.', ''), $totalLiabilities >= 0 ? 'Cr' : 'Dr']);
+            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Base Total Assets', number_format(abs($totalAssets), 2, '.', ''), $totalAssets >= 0 ? 'Dr' : 'Cr']);
+            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Base Total Liabilities', number_format(abs($totalLiabilities), 2, '.', ''), $totalLiabilities >= 0 ? 'Cr' : 'Dr']);
+            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Presented Total Assets', number_format(abs($presentedTotalAssets), 2, '.', ''), $presentedTotalAssets >= 0 ? 'Dr' : 'Cr']);
+            fputcsv($handle, [$companyId, $asOfDate->toDateString(), 'TOTALS', '', '', 'Presented Total Liabilities', number_format(abs($presentedTotalLiabilities), 2, '.', ''), $presentedTotalLiabilities >= 0 ? 'Cr' : 'Dr']);
 
             fclose($handle);
         };

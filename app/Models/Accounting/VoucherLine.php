@@ -2,6 +2,8 @@
 
 namespace App\Models\Accounting;
 
+use App\Models\Machine;
+use App\Models\FixedAssetLink;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,6 +19,7 @@ class VoucherLine extends Model
         'line_no',
         'account_id',
         'cost_center_id',
+        'machine_id',
         'description',
         'debit',
         'credit',
@@ -25,6 +28,7 @@ class VoucherLine extends Model
     ];
 
     protected $casts = [
+        'machine_id' => 'integer',
         'debit'  => 'decimal:2',
         'credit' => 'decimal:2',
     ];
@@ -44,6 +48,11 @@ class VoucherLine extends Model
         return $this->belongsTo(CostCenter::class);
     }
 
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(Machine::class);
+    }
+
     public function reference(): MorphTo
     {
         return $this->morphTo();
@@ -57,5 +66,10 @@ class VoucherLine extends Model
     public function billAllocations(): HasMany
     {
         return $this->hasMany(AccountBillAllocation::class, 'voucher_line_id');
+    }
+
+    public function fixedAssetLinks(): HasMany
+    {
+        return $this->hasMany(FixedAssetLink::class, 'voucher_line_id');
     }
 }

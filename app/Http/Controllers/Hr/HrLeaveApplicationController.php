@@ -33,8 +33,17 @@ class HrLeaveApplicationController extends Controller
             $query->where('status', $request->status);
         }
 
-        if ($request->filled('hr_leave_type_id')) {
-            $query->where('hr_leave_type_id', $request->hr_leave_type_id);
+        $leaveTypeId = $request->input('hr_leave_type_id', $request->input('leave_type_id'));
+        if (!empty($leaveTypeId)) {
+            $query->where('hr_leave_type_id', $leaveTypeId);
+        }
+
+        if ($request->filled('from_date')) {
+            $query->whereDate('from_date', '>=', $request->date('from_date'));
+        }
+
+        if ($request->filled('to_date')) {
+            $query->whereDate('to_date', '<=', $request->date('to_date'));
         }
 
         $applications = $query->orderByDesc('created_at')
@@ -48,9 +57,9 @@ class HrLeaveApplicationController extends Controller
 
     public function create()
     {
-        $employees = HrEmployee::where('employment_status', 'active')
-                               ->orderBy('first_name')
-                               ->get();
+        $employees = HrEmployee::active()
+            ->orderBy('first_name')
+            ->get();
         $leaveTypes = HrLeaveType::where('is_active', true)->orderBy('name')->get();
 
         return view('hr.leave-applications.form', compact('employees', 'leaveTypes'));
@@ -63,8 +72,8 @@ class HrLeaveApplicationController extends Controller
             'hr_leave_type_id' => 'required|exists:hr_leave_types,id',
             'from_date' => 'required|date',
             'to_date' => 'required|date|after_or_equal:from_date',
-            'from_session' => 'nullable|in:first_half,second_half,full_day',
-            'to_session' => 'nullable|in:first_half,second_half,full_day',
+            'from_session' => 'required|in:first_half,second_half,full_day',
+            'to_session' => 'required|in:first_half,second_half,full_day',
             'reason' => 'required|string|max:1000',
             'contact_during_leave' => 'nullable|string|max:20',
             'handover_to' => 'nullable|exists:hr_employees,id',
@@ -83,11 +92,26 @@ class HrLeaveApplicationController extends Controller
             $days -= 0.5;
         }
 
-        $validated['total_days'] = $days;
-        $validated['status'] = 'pending';
-        $validated['applied_by'] = Auth::id();
+        $isHalfDay = $days === 0.5 && $fromDate->isSameDay($toDate);
 
-        HrLeaveApplication::create($validated);
+        HrLeaveApplication::create([
+            'application_number' => HrLeaveApplication::generateApplicationNumber(),
+            'hr_employee_id' => $validated['hr_employee_id'],
+            'hr_leave_type_id' => $validated['hr_leave_type_id'],
+            'from_date' => $validated['from_date'],
+            'to_date' => $validated['to_date'],
+            'total_days' => $days,
+            'is_half_day' => $isHalfDay,
+            'half_day_type' => $isHalfDay
+                ? ($validated['from_session'] !== 'full_day' ? $validated['from_session'] : $validated['to_session'])
+                : null,
+            'half_day_date' => $isHalfDay ? $validated['from_date'] : null,
+            'reason' => $validated['reason'],
+            'contact_during_leave' => $validated['contact_during_leave'] ?? null,
+            'handover_to' => $validated['handover_to'] ?? null,
+            'status' => 'pending',
+            'created_by' => Auth::id(),
+        ]);
 
         return redirect()->route('hr.leave-applications.index')
                          ->with('success', 'Leave application submitted successfully.');
@@ -95,8 +119,8 @@ class HrLeaveApplicationController extends Controller
 
     public function show(HrLeaveApplication $leaveApplication)
     {
-        $leaveApplication->load(['employee', 'leaveType', 'approvedBy', 'appliedByUser']);
-        return view('hr.leave-applications.show', ['application' => $leaveApplication]);
+        $leaveApplication->load(['employee', 'leaveType', 'approvedBy', 'createdByUser', 'handoverEmployee']);
+        return view('hr.leave-applications.show', ['leaveApplication' => $leaveApplication]);
     }
 
     public function edit(HrLeaveApplication $leaveApplication)
@@ -105,9 +129,9 @@ class HrLeaveApplicationController extends Controller
             return back()->with('error', 'Cannot edit application. It has already been processed.');
         }
 
-        $employees = HrEmployee::where('employment_status', 'active')
-                               ->orderBy('first_name')
-                               ->get();
+        $employees = HrEmployee::active()
+            ->orderBy('first_name')
+            ->get();
         $leaveTypes = HrLeaveType::where('is_active', true)->orderBy('name')->get();
 
         return view('hr.leave-applications.form', [
@@ -128,8 +152,8 @@ class HrLeaveApplicationController extends Controller
             'hr_leave_type_id' => 'required|exists:hr_leave_types,id',
             'from_date' => 'required|date',
             'to_date' => 'required|date|after_or_equal:from_date',
-            'from_session' => 'nullable|in:first_half,second_half,full_day',
-            'to_session' => 'nullable|in:first_half,second_half,full_day',
+            'from_session' => 'required|in:first_half,second_half,full_day',
+            'to_session' => 'required|in:first_half,second_half,full_day',
             'reason' => 'required|string|max:1000',
             'contact_during_leave' => 'nullable|string|max:20',
             'handover_to' => 'nullable|exists:hr_employees,id',
@@ -147,9 +171,23 @@ class HrLeaveApplicationController extends Controller
             $days -= 0.5;
         }
 
-        $validated['total_days'] = $days;
+        $isHalfDay = $days === 0.5 && $fromDate->isSameDay($toDate);
 
-        $leaveApplication->update($validated);
+        $leaveApplication->update([
+            'hr_employee_id' => $validated['hr_employee_id'],
+            'hr_leave_type_id' => $validated['hr_leave_type_id'],
+            'from_date' => $validated['from_date'],
+            'to_date' => $validated['to_date'],
+            'total_days' => $days,
+            'is_half_day' => $isHalfDay,
+            'half_day_type' => $isHalfDay
+                ? ($validated['from_session'] !== 'full_day' ? $validated['from_session'] : $validated['to_session'])
+                : null,
+            'half_day_date' => $isHalfDay ? $validated['from_date'] : null,
+            'reason' => $validated['reason'],
+            'contact_during_leave' => $validated['contact_during_leave'] ?? null,
+            'handover_to' => $validated['handover_to'] ?? null,
+        ]);
 
         return redirect()->route('hr.leave-applications.index')
                          ->with('success', 'Leave application updated successfully.');
@@ -177,7 +215,7 @@ class HrLeaveApplicationController extends Controller
             'status' => 'approved',
             'approved_by' => Auth::id(),
             'approved_at' => now(),
-            'approval_remarks' => $request->get('remarks'),
+            'approval_remarks' => $request->get('remarks', $request->get('approver_remarks')),
         ]);
 
         return back()->with('success', 'Leave application approved successfully.');
@@ -190,14 +228,15 @@ class HrLeaveApplicationController extends Controller
         }
 
         $request->validate([
-            'remarks' => 'required|string|max:500',
+            'remarks' => 'nullable|string|max:500',
+            'approver_remarks' => 'nullable|string|max:500',
         ]);
 
         $leaveApplication->update([
             'status' => 'rejected',
             'approved_by' => Auth::id(),
             'approved_at' => now(),
-            'approval_remarks' => $request->get('remarks'),
+            'approval_remarks' => $request->get('remarks', $request->get('approver_remarks')),
         ]);
 
         return back()->with('success', 'Leave application rejected.');

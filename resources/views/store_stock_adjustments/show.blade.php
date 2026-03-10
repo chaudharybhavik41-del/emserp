@@ -97,13 +97,18 @@
                 <tbody>
                 @forelse($adjustment->lines as $i => $line)
                     @php
-                        $rate = $line->opening_unit_rate ?? $line->unit_rate ?? null;
-                        $qty  = $line->quantity ?? 0;
-                        $amt  = ($rate !== null) ? ((float)$rate * (float)$qty) : null;
+                        $qty = (float) ($line->quantity ?? 0);
+                        $rate = $isOpening ? $line->stockItem?->opening_unit_rate : null;
+                        $amt = ($rate !== null && $qty > 0) ? ((float) $rate * $qty) : null;
+                        $itemLabel = $line->item
+                            ? (($line->item->code ? ($line->item->code . ' - ') : '') . $line->item->name)
+                            : ($line->stockItem?->item
+                                ? (($line->stockItem->item->code ? ($line->stockItem->item->code . ' - ') : '') . $line->stockItem->item->name)
+                                : $line->item_id);
                     @endphp
                     <tr>
                         <td>{{ $i+1 }}</td>
-                        <td>{{ $line->item->name ?? $line->item_id }}</td>
+                        <td>{{ $itemLabel }}</td>
                         <td>{{ $line->brand ?? '-' }}</td>
                         <td class="text-end">{{ number_format((float)$qty, 3) }}</td>
                         <td>{{ $line->uom->name ?? '-' }}</td>

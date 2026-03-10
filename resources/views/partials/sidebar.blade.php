@@ -35,6 +35,7 @@
     $sidebarId = $sidebarId ?? 'desktop';
     $sidebarKey = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $sidebarId) ?: 'sidebar';
     $secId = fn (string $key) => 'erp-sb-' . $sidebarKey . '-' . $key;
+    $isTopbar = ($navigationMode ?? 'sidebar') === 'topbar';
 
     // Which section should be expanded by default based on current route
     $openCore       = $isRoute(['access.*','users.*','uoms.*','departments.*','companies.*','settings.*','mail-profiles.*','mail-templates.*','standard-terms.*','notifications.*']);
@@ -43,13 +44,16 @@
     $openCrm        = $isRoute(['crm.*']);
     $openHr         = request()->is('hr*') || $isRoute(['hr.*']);
     $openPurchase   = $isRoute(['purchase-indents.*','purchase-rfqs.*','purchase-orders.*','purchase.bills.*']);
-    $openStore      = $isRoute(['store.*','material-receipts.*','store-stock.*','store-stock-items.*','store-stock-summary.*','store-stock-register.*','store-low-stock.*','store-remnants.*','store-requisitions.*','store-issues.*','store-returns.*','store-stock-adjustments.*','gate-passes.*','machines.*','machine-assignments.*','maintenance.plans.*','maintenance.logs.*','maintenance.breakdowns.*','machine-calibrations.*','maintenance.reports.*']);
+    $openStore      = $isRoute(['store.*','material-receipts.*','store-stock.*','store-stock-items.*','store-stock-summary.*','store-stock-register.*','store-low-stock.*','store-remnants.*','store-requisitions.*','store-issues.*','fuel-issues.*','store-returns.*','store-stock-adjustments.*','gate-passes.*','machines.*','machine-assignments.*','maintenance.plans.*','maintenance.logs.*','maintenance.breakdowns.*','machine-calibrations.*','maintenance.reports.*']);
     $openAccounting = $isRoute(['accounting.*','reports.*','payments.*','receipts.*']);
     $openProduction = $isRoute(['production.*']);
     $openProjects   = $isRoute(['projects.*','bom-templates.*']);
     $openTasks      = $isRoute(['tasks.*','task-board.*','task-lists.*','task-settings.*']);
 	$openSupport    = $isRoute(['support.*']);
 	$openStorage    = $isRoute(['storage.*']);
+    if ($isTopbar) {
+        $openCore = $openSecurity = $openMasters = $openCrm = $openHr = $openPurchase = $openStore = $openAccounting = $openProduction = $openProjects = $openTasks = $openSupport = $openStorage = false;
+    }
 
     // Core section is not wrapped in @canany in the original file, so avoid showing an empty collapsible.
     $showCore = false;
@@ -70,47 +74,60 @@
     $showCore = $showCore || \Illuminate\Support\Facades\Route::has('notifications.index');
 @endphp
 
-<nav class="border-end bg-white d-flex flex-column erp-sidebar" id="erp-sidebar-{{ $sidebarKey }}">
+<nav class="{{ $isTopbar ? 'bg-white erp-sidebar erp-module-topbar' : 'border-end bg-white d-flex flex-column erp-sidebar' }}" id="erp-sidebar-{{ $sidebarKey }}">
     
 
-    <div class="flex-grow-1 overflow-auto erp-sidebar-nav">
+    <div class="{{ $isTopbar ? 'erp-sidebar-nav' : 'flex-grow-1 overflow-auto erp-sidebar-nav' }}">
         <div class="p-2">
 
-            {{-- Sticky search (optional but recommended) --}}
-            <div class="erp-sidebar-search-wrap mb-2 rounded-3">
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text bg-body">
-                        <i class="bi bi-search"></i>
-                    </span>
-                    <input type="text" class="form-control erp-sidebar-search" placeholder="Search menu..." aria-label="Search menu">
-                    <button class="btn btn-outline-secondary erp-sidebar-search-clear" type="button" aria-label="Clear search">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
+            @unless($isTopbar)
+                {{-- Sticky search (optional but recommended) --}}
+                <div class="erp-sidebar-search-wrap mb-2 rounded-3">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-body">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="text" class="form-control erp-sidebar-search" placeholder="Search menu..." aria-label="Search menu">
+                        <button class="btn btn-outline-secondary erp-sidebar-search-clear" type="button" aria-label="Clear search">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
                 </div>
-            </div>
 
-            {{-- Dashboard (always visible) --}}
-            <div class="mb-2">
-                <a href="{{ $safeRoute('dashboard') }}"
-                   class="btn btn-sm w-100 text-start d-flex align-items-center gap-2 erp-transition
-                          {{ $isRoute('dashboard') ? 'btn-primary text-white' : 'btn-outline-light text-body-secondary border-0' }}">
-                    <i class="bi bi-speedometer2"></i>
-                    <span>Dashboard</span>
-                </a>
-            </div>
+                {{-- Dashboard (always visible) --}}
+                <div class="mb-2">
+                    <a href="{{ $safeRoute('dashboard') }}"
+                       class="btn btn-sm w-100 text-start d-flex align-items-center gap-2 erp-transition
+                              {{ $isRoute('dashboard') ? 'btn-primary text-white' : 'btn-outline-light text-body-secondary border-0' }}">
+                        <i class="bi bi-speedometer2"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </div>
 
-            <div class="small text-uppercase text-muted px-1 mb-1">
-                Navigation
-            </div>
+                <div class="small text-uppercase text-muted px-1 mb-1">
+                    Navigation
+                </div>
+            @endunless
 
-            <ul class="nav flex-column small">
+            {{-- <ul class="nav small {{ $isTopbar ? 'erp-module-topbar-list' : 'flex-column' }}" > --}}
+<ul class="nav small {{ $isTopbar ? 'erp-module-topbar-list justify-content-center text-center' : 'flex-column align-items-center text-center' }} px-3">
 
+
+    <li class="nav-item erp-sidebar-section mb-1">
+    <a data-erp-menu-item href="{{ $safeRoute('dashboard') }}"
+       class="nav-link erp-nav-link d-flex align-items-center px-3 py-2
+       {{ $isRoute('dashboard') ? 'active' : 'text-body-secondary' }}">
+       
+        <i class="bi bi-speedometer2 fs-3"></i>
+        <span>Dashboard</span>
+    </a>
+</li>
                @if(\Illuminate\Support\Facades\Route::has('reports-hub.index'))
-			<li class="nav-item erp-sidebar-section mb-1">
+			<li class="nav-item erp-sidebar-section mb-1 is-open">
   			  <a data-erp-menu-item href="{{ $safeRoute('reports-hub.index') }}"
     		   class="nav-link erp-nav-link d-flex align-items-center px-3 py-2
               {{ $isRoute('reports-hub.*') ? 'active' : 'text-body-secondary' }}">
-    	    <i class="bi bi-bar-chart-line me-2"></i>
+    	    <i class="bi bi-bar-chart-line fs-3"></i>
   	      <span>Reports Hub</span>
   		  </a>
 			</li>
@@ -126,7 +143,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="core">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-gear"></i>
+                            <i class="bi bi-gear fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Core &amp; Settings</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -220,7 +237,7 @@
                             <a data-erp-menu-item href="{{ route('settings.security') }}"
                                class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
                                       {{ $isRoute('settings.security') ? 'active' : 'text-body-secondary' }}">
-                                <i class="bi bi-shield-check me-2"></i>
+                                <i class="bi bi-shield-check fs-3"></i>
                                 <span>Security Settings</span>
                             </a>
                         </li>
@@ -272,6 +289,16 @@
                                   {{ $isRoute('notifications.*') ? 'active' : 'text-body-secondary' }}">
                             <i class="bi bi-bell me-2"></i>
                             <span>Notifications</span>
+                        </a>
+                    </li>
+                @endif
+                @if(\Illuminate\Support\Facades\Route::has('notifications.push-report'))
+                    <li class="nav-item">
+                        <a data-erp-menu-item href="{{ route('notifications.push-report') }}"
+                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                  {{ $isRoute('notifications.push-report') ? 'active' : 'text-body-secondary' }}">
+                            <i class="bi bi-broadcast-pin me-2"></i>
+                            <span>Push Report</span>
                         </a>
                     </li>
                 @endif
@@ -351,7 +378,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="support">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-life-preserver"></i> {{-- Main Section Icon --}}
+                            <i class="bi bi-life-preserver fs-3"></i> {{-- Main Section Icon --}}
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Support</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -401,7 +428,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="masters">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-box-seam"></i>
+                            <i class="bi bi-box-seam fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Material Masters</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -486,7 +513,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="crm">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-person-lines-fill"></i>
+                            <i class="bi bi-person-lines-fill fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">CRM</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -584,10 +611,10 @@
                             data-erp-section-toggle
                             data-erp-section-key="hr">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-people-fill"></i>
+                            <i class="bi bi-people-fill fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">HR</span>
                         </span>
-                        <i class="bi bi-chevron-down erp-chevron"></i>
+                        <i class="bi bi-chevron-down erp-chevron "></i>
                     </button>
                     <div id="{{ $secId('hr') }}" class="collapse {{ $openHr ? 'show' : '' }}">
                         <ul class="nav flex-column small mt-1">
@@ -1073,7 +1100,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="purchase">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-cart-check"></i>
+                            <i class="bi bi-cart-check fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Purchase</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -1163,7 +1190,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="store">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-boxes"></i>
+                            <i class="bi bi-boxes fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Store</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -1241,7 +1268,7 @@
                                 <a data-erp-menu-item href="{{ route('store-stock-register.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
                                           {{ $isRoute('store-stock-register.index') ? 'active' : 'text-body-secondary' }}">
-                                    <i class="bi bi-journal-text me-2"></i>
+                                    <i class="bi bi-journal-text fs-3"></i>
                                     <span>Stock Register</span>
                                 </a>
                             </li>
@@ -1300,6 +1327,19 @@
                         @endif
                     @endcan
 
+                    @can('store.issue.view')
+                        @if(\Illuminate\Support\Facades\Route::has('fuel-issues.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('fuel-issues.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('fuel-issues.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-fuel-pump me-2"></i>
+                                    <span>Fuel Issues</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
                     @can('store.return.view')
                         @if(\Illuminate\Support\Facades\Route::has('store-returns.index'))
                             <li class="nav-item">
@@ -1340,119 +1380,131 @@
                     @endcan
 
                  @canany([
-    'machinery.machine.view',
-    'machinery.assignment.view',
-    'machinery.maintenance_plan.view',
-    'machinery.maintenance_log.view',
-    'machinery.breakdown.view',
-    'machinery.calibration.view',
-    'machinery.maintenance.reports'
-	])
-	<li data-erp-menu-item class="nav-item">
-    <div class="nav-link disabled fw-bold text-uppercase pb-1" style="font-size: 0.75rem; opacity: 0.6;">
-        <i class="bi bi-gear-fill me-1"></i>
-        <span>Machinery Management</span>
-    </div>
+                    'machinery.machine.view',
+                    'machinery.assignment.view',
+                    'machinery.maintenance_plan.view',
+                    'machinery.maintenance_log.view',
+                    'machinery.breakdown.view',
+                    'machinery.calibration.view',
+                    'machinery.maintenance.reports'
+                 ])
+                    <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
+                        Machinery Management
+                    </li>
 
-    <ul class="nav flex-column ms-2">
-        @can('machinery.machine.view')
-            @if(\Illuminate\Support\Facades\Route::has('machines.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('machines.*') ? 'active' : '' }}"
-                       href="{{ route('machines.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Machines
-                    </a>
-                </li>
-            @endif
+                    @can('machinery.machine.view')
+                        @if(\Illuminate\Support\Facades\Route::has('machines.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('machines.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('machines.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-cpu me-2"></i>
+                                    <span>Machines</span>
+                                </a>
+                            </li>
+                        @endif
 
-            @if(\Illuminate\Support\Facades\Route::has('machinery-bills.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('machinery-bills.*') ? 'active' : '' }}"
-                       href="{{ route('machinery-bills.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Machinery Bills
-                    </a>
-                </li>
-            @endif
-        @endcan
+                        @if(\Illuminate\Support\Facades\Route::has('machinery-bills.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('machinery-bills.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('machinery-bills.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-receipt me-2"></i>
+                                    <span>Machinery Bills</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.assignment.view')
-            @if(\Illuminate\Support\Facades\Route::has('machine-assignments.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('machine-assignments.*') ? 'active' : '' }}"
-                       href="{{ route('machine-assignments.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Issued Machines
-                    </a>
-                </li>
-            @endif
-        @endcan
+                    @can('machinery.assignment.view')
+                        @if(\Illuminate\Support\Facades\Route::has('machine-assignments.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('machine-assignments.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('machine-assignments.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-person-workspace me-2"></i>
+                                    <span>Issued Machines</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.maintenance_plan.view')
-            @if(\Illuminate\Support\Facades\Route::has('maintenance.plans.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('maintenance.plans.*') ? 'active' : '' }}"
-                       href="{{ route('maintenance.plans.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Maintenance Plans
-                    </a>
-                </li>
-            @endif
-        @endcan
+                    @can('machinery.maintenance_plan.view')
+                        @if(\Illuminate\Support\Facades\Route::has('maintenance.plans.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('maintenance.plans.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('maintenance.plans.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-clipboard-check me-2"></i>
+                                    <span>Maintenance Plans</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.maintenance_log.view')
-            @if(\Illuminate\Support\Facades\Route::has('maintenance.logs.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('maintenance.logs.*') ? 'active' : '' }}"
-                       href="{{ route('maintenance.logs.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Maintenance Logs
-                    </a>
-                </li>
-            @endif
-        @endcan
+                    @can('machinery.maintenance_log.view')
+                        @if(\Illuminate\Support\Facades\Route::has('maintenance.logs.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('maintenance.logs.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('maintenance.logs.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-journal-text me-2"></i>
+                                    <span>Maintenance Logs</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.breakdown.view')
-            @if(\Illuminate\Support\Facades\Route::has('maintenance.breakdowns.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('maintenance.breakdowns.*') ? 'active' : '' }}"
-                       href="{{ route('maintenance.breakdowns.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Breakdown Register
-                    </a>
-                </li>
-            @endif
-        @endcan
+                    @can('machinery.breakdown.view')
+                        @if(\Illuminate\Support\Facades\Route::has('maintenance.breakdowns.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('maintenance.breakdowns.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('maintenance.breakdowns.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-tools me-2"></i>
+                                    <span>Breakdown Register</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.calibration.view')
-            @if(\Illuminate\Support\Facades\Route::has('machine-calibrations.index'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('machine-calibrations.*') ? 'active' : '' }}"
-                       href="{{ route('machine-calibrations.index') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Calibrations
-                    </a>
-                </li>
-            @endif
-        @endcan
+                    @can('machinery.calibration.view')
+                        @if(\Illuminate\Support\Facades\Route::has('machine-calibrations.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('machine-calibrations.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('machine-calibrations.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-clipboard2-pulse me-2"></i>
+                                    <span>Calibrations</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
 
-        @can('machinery.maintenance.reports')
-            {{-- Show either report link if routes exist --}}
-            @if(\Illuminate\Support\Facades\Route::has('maintenance.reports.issued-register'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('maintenance.reports.*') ? 'active' : '' }}"
-                       href="{{ route('maintenance.reports.issued-register') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Issued Register
-                    </a>
-                </li>
-            @endif
+                    @can('machinery.maintenance.reports')
+                        @if(\Illuminate\Support\Facades\Route::has('maintenance.reports.issued-register'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('maintenance.reports.issued-register') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('maintenance.reports.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-file-earmark-text me-2"></i>
+                                    <span>Issued Register</span>
+                                </a>
+                            </li>
+                        @endif
 
-            @if(\Illuminate\Support\Facades\Route::has('maintenance.reports.cost-analysis'))
-                <li class="nav-item">
-                    <a data-erp-menu-item class="nav-link {{ $isRoute('maintenance.reports.*') ? 'active' : '' }}"
-                       href="{{ route('maintenance.reports.cost-analysis') }}">
-                        <i class="bi bi-circle me-2" style="font-size: 0.5rem;"></i> Cost Analysis
-                    </a>
-                </li>
-            @endif
-        @endcan
-    </ul>
-	</li>
-	@endcanany
+                        @if(\Illuminate\Support\Facades\Route::has('maintenance.reports.cost-analysis'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('maintenance.reports.cost-analysis') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute('maintenance.reports.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-cash-coin me-2"></i>
+                                    <span>Cost Analysis</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+                 @endcanany
                         </ul>
                     </div>
                 </li>
@@ -1467,7 +1519,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="accounting">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-journal-text"></i>
+                            <i class="bi bi-journal-text fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Accounting</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -1492,7 +1544,7 @@
                                 <a data-erp-menu-item href="{{ route('accounting.account-groups.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                           {{ $isRoute('accounting.account-groups.*') ? 'active' : 'text-body-secondary' }}">
-                                    <i class="bi bi-diagram-3 me-2"></i>
+                                    <i class="bi bi-diagram-3 fs-3"></i>
                                     <span>Account Groups</span>
                                 </a>
                             </li>
@@ -1558,6 +1610,19 @@
                     @endcan
 
                         {{-- Billing / RA Bills --}}
+                        @if(\Illuminate\Support\Facades\Route::has('accounting.subcontractor-work-orders.index'))
+                            @can('subcontractor_ra.view')
+                                <li class="nav-item">
+                                    <a data-erp-menu-item href="{{ route('accounting.subcontractor-work-orders.index') }}"
+                                       class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                              {{ $isRoute('accounting.subcontractor-work-orders.*') ? 'active' : 'text-body-secondary' }}">
+                                        <i class="bi bi-file-earmark-text me-2"></i>
+                                        <span>Subcontractor Work Orders</span>
+                                    </a>
+                                </li>
+                            @endcan
+                        @endif
+
                         @if(\Illuminate\Support\Facades\Route::has('accounting.subcontractor-ra.index'))
                             @can('subcontractor_ra.view')
                                 <li class="nav-item">
@@ -1611,36 +1676,36 @@
               
                     {{-- Bank/Cash Vouchers (Payment/Receipt) --}}
                     @php
-                        $paymentCreateRoute = $pickRoute(['accounting.payments.create', 'payments.create']);
-                        $receiptCreateRoute = $pickRoute(['accounting.receipts.create', 'receipts.create']);
+                        $paymentIndexRoute = $pickRoute(['accounting.payments.index', 'accounting.payments.create', 'payments.create']);
+                        $receiptIndexRoute = $pickRoute(['accounting.receipts.index', 'accounting.receipts.create', 'receipts.create']);
                         $onAccountRoute     = $pickRoute(['accounting.receipts.on-account.index', 'receipts.on-account.index']);
                     @endphp
 
-                    @can('accounting.vouchers.create')
-                        @if($paymentCreateRoute || $receiptCreateRoute || $onAccountRoute)
+                    @canany(['accounting.vouchers.view', 'accounting.vouchers.create'])
+                        @if($paymentIndexRoute || $receiptIndexRoute || $onAccountRoute)
                             <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
                                 Bank &amp; Cash
                             </li>
                         @endif
 
-                        @if($paymentCreateRoute)
+                        @if($paymentIndexRoute)
                             <li class="nav-item">
-                                <a data-erp-menu-item href="{{ route($paymentCreateRoute) }}"
+                                <a data-erp-menu-item href="{{ route($paymentIndexRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                           {{ $isRoute(['accounting.payments.*', 'payments.*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-arrow-up-right-circle me-2"></i>
-                                    <span>New Payment</span>
+                                    <span>Payments</span>
                                 </a>
                             </li>
                         @endif
 
-                        @if($receiptCreateRoute)
+                        @if($receiptIndexRoute)
                             <li class="nav-item">
-                                <a data-erp-menu-item href="{{ route($receiptCreateRoute) }}"
+                                <a data-erp-menu-item href="{{ route($receiptIndexRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                           {{ $isRoute(['accounting.receipts.*', 'receipts.*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-arrow-down-left-circle me-2"></i>
-                                    <span>New Receipt</span>
+                                    <span>Receipts</span>
                                 </a>
                             </li>
                         @endif
@@ -1655,7 +1720,7 @@
                                 </a>
                             </li>
                         @endif
-                    @endcan
+                    @endcanany
 
                     {{-- Reports --}}
                     @php
@@ -1665,6 +1730,8 @@
                         $rProfitLoss          = $pickRoute(['accounting.reports.profit-loss', 'reports.profit-loss']);
                         $rBalanceSheet        = $pickRoute(['accounting.reports.balance-sheet', 'reports.balance-sheet']);
                         $rInventoryValuation  = $pickRoute(['accounting.reports.inventory-valuation', 'reports.inventory-valuation']);
+                        $rMachineExpense      = $pickRoute(['accounting.reports.machine-expense', 'reports.machine-expense']);
+                        $rMachineCostRegister = $pickRoute(['accounting.reports.machine-cost-register', 'reports.machine-cost-register']);
                         $rProjectCostSheet    = $pickRoute(['accounting.reports.project-cost-sheet', 'reports.project-cost-sheet']);
                         $rGstSummary          = $pickRoute(['accounting.reports.gst-summary', 'reports.gst-summary']);
                         $rGstPurchaseRegister = $pickRoute(['accounting.reports.gst-purchase-register', 'reports.gst-purchase-register']);
@@ -1685,7 +1752,7 @@
                     @can('accounting.reports.view')
                         @if(
                             $rTrialBalance || $rLedger || $rDayBook || $rProfitLoss || $rBalanceSheet ||
-                            $rInventoryValuation || $rProjectCostSheet ||
+                            $rInventoryValuation || $rMachineExpense || $rMachineCostRegister || $rProjectCostSheet ||
                             $rSupplierOutstanding || $rClientOutstanding || $rSupplierAgeing || $rClientAgeing ||
                             $rCashFlow || $rFundFlow || $rUnbalancedVouchers || $rTdsCertificates || $rGstSummary ||
                             $rGstPurchaseRegister || $rGstSalesRegister || $rGstVoucherRegister ||
@@ -1769,6 +1836,28 @@
                                           {{ $isRoute(['accounting.reports.project-cost-sheet*', 'reports.project-cost-sheet*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-kanban me-2"></i>
                                     <span>Project Cost Sheet</span>
+                                </a>
+                            </li>
+                        @endif
+
+                        @if($rMachineExpense)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rMachineExpense) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.reports.machine-expense', 'reports.machine-expense']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-gear-wide-connected me-2"></i>
+                                    <span>Machine Expense</span>
+                                </a>
+                            </li>
+                        @endif
+
+                        @if($rMachineCostRegister)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rMachineCostRegister) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.reports.machine-cost-register', 'reports.machine-cost-register']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-collection me-2"></i>
+                                    <span>Machine Cost Register</span>
                                 </a>
                             </li>
                         @endif
@@ -1941,7 +2030,11 @@
                     </div>
                 </li>
                 @endcanany
-                @canany(['production.activity.view', 'production.activity.create', 'production.activity.update', 'production.activity.delete'])
+                @canany([
+                    'production.activity.view', 'production.activity.create', 'production.activity.update', 'production.activity.delete',
+                    'production.report.view', 'production.plan.view', 'production.dpr.view', 'production.qc.perform',
+                    'production.billing.view', 'production.dispatch.view', 'production.traceability.view'
+                ])
                 <li class="nav-item erp-sidebar-section mb-1">
                     <button type="button" class="btn btn-sm w-100 text-start d-flex align-items-center justify-content-between border-0 rounded-3 px-3 py-2 erp-accordion-header"
                             data-bs-toggle="collapse"
@@ -1951,13 +2044,35 @@
                             data-erp-section-toggle
                             data-erp-section-key="production">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-diagram-3"></i>
+                            <i class="bi bi-diagram-3 fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Production</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
                     </button>
                     <div id="{{ $secId('production') }}" class="collapse {{ $openProduction ? 'show' : '' }}">
                         <ul class="nav flex-column small mt-1">
+                    @php
+                        $rProdWorkbench  = $pickRoute(['production.workbench']);
+                        $rProdDash       = $pickRoute(['production.production-dashboard.index']);
+                        $rProdPlans      = $pickRoute(['production.production-plans.index']);
+                        $rProdDprs       = $pickRoute(['production.production-dprs.index']);
+                        $rProdQc         = $pickRoute(['production.production-qc.index']);
+                        $rProdBill       = $pickRoute(['production.production-billing.index']);
+                        $rProdDispatch   = $pickRoute(['production.production-dispatches.index']);
+                        $rProdTrace      = $pickRoute(['production.production-traceability.index']);
+                    @endphp
+
+                    @if($rProdWorkbench)
+                        <li class="nav-item">
+                            <a data-erp-menu-item href="{{ route($rProdWorkbench) }}"
+                               class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                      {{ $isRoute('production.workbench*') ? 'active' : 'text-body-secondary' }}">
+                                <i class="bi bi-speedometer2 me-2"></i>
+                                <span>Production Workbench</span>
+                            </a>
+                        </li>
+                    @endif
+
                     @can('production.activity.view')
                         @if(\Illuminate\Support\Facades\Route::has('production.activities.index'))
                             <li class="nav-item">
@@ -1966,6 +2081,97 @@
                                           {{ $isRoute('production.activities.*') ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-diagram-3 me-2"></i>
                                     <span>Activity Master</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.report.view')
+                        @if($rProdDash)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdDash) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-dashboard.*', 'production-dashboard.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-graph-up-arrow me-2"></i>
+                                    <span>Production Dashboard</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.plan.view')
+                        @if($rProdPlans)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdPlans) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-plans.*', 'production-plans.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-clipboard2-check me-2"></i>
+                                    <span>Production Plans</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.dpr.view')
+                        @if($rProdDprs)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdDprs) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-dprs.*', 'production-dprs.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-journal-check me-2"></i>
+                                    <span>Production DPR</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.qc.perform')
+                        @if($rProdQc)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdQc) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-qc.*', 'production-qc.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-shield-check me-2"></i>
+                                    <span>QC Pending</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.billing.view')
+                        @if($rProdBill)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdBill) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-billing.*', 'production-billing.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-receipt me-2"></i>
+                                    <span>Production Billing</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.dispatch.view')
+                        @if($rProdDispatch)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdDispatch) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-dispatches.*', 'production-dispatches.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-truck me-2"></i>
+                                    <span>Production Dispatch</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('production.traceability.view')
+                        @if($rProdTrace)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rProdTrace) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['production.production-traceability.*', 'production-traceability.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-search me-2"></i>
+                                    <span>Traceability Search</span>
                                 </a>
                             </li>
                         @endif
@@ -1984,7 +2190,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="projects">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-kanban"></i>
+                            <i class="bi bi-kanban fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Projects</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
@@ -2013,116 +2219,6 @@
                         </li>
                     @endif
 
-                    {{-- Project Production (Phase B–G) - Only show when inside a project --}}
-                    @if($currentProject)
-                        @php
-                            $rProdDash   = $pickRoute(['projects.production-dashboard.index']);
-                            $rProdPlans  = $pickRoute(['projects.production-plans.index']);
-                            $rProdDprs   = $pickRoute(['projects.production-dprs.index']);
-                            $rProdQc     = $pickRoute(['projects.production-qc.index']);
-                            $rProdBill   = $pickRoute(['projects.production-billing.index']);
-                          	$rProdDispatch = $pickRoute(['projects.production-dispatches.index']);
-                                $rProdTrace  = $pickRoute(['projects.production-traceability.index']);
-                        @endphp
-
-                        @canany(['production.report.view','production.plan.view','production.dpr.view','production.qc.perform','production.billing.view','production.traceability.view'])
-                            <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
-                                Project Production
-                            </li>
-
-                            @can('production.report.view')
-                                @if($rProdDash)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdDash, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-dashboard.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-speedometer2 me-2"></i>
-                                            <span>Production Dashboard</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                            @can('production.plan.view')
-                                @if($rProdPlans)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdPlans, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-plans.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-clipboard2-check me-2"></i>
-                                            <span>Production Plans</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                            @can('production.dpr.view')
-                                @if($rProdDprs)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdDprs, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-dprs.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-journal-check me-2"></i>
-                                            <span>Production DPR</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                            @can('production.qc.perform')
-                                @if($rProdQc)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdQc, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-qc.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-shield-check me-2"></i>
-                                            <span>QC Pending</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                            @can('production.billing.view')
-                                @if($rProdBill)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdBill, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-billing.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-receipt me-2"></i>
-                                            <span>Production Billing</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-                          
-                          	@can('production.dispatch.view')
-                                @if($rProdDispatch)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdDispatch, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-dispatches.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-truck me-2"></i>
-                                            <span>Production Dispatch</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                            @can('production.traceability.view')
-                                @if($rProdTrace)
-                                    <li class="nav-item">
-                                        <a data-erp-menu-item href="{{ route($rProdTrace, $currentProject) }}"
-                                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
-                                                  {{ $isRoute('projects.production-traceability.*') ? 'active' : 'text-body-secondary' }}">
-                                            <i class="bi bi-search me-2"></i>
-                                            <span>Traceability Search</span>
-                                        </a>
-                                    </li>
-                                @endif
-                            @endcan
-
-                        @endcanany
-                    @endif
                         </ul>
                     </div>
                 </li>
@@ -2190,7 +2286,7 @@
                             data-erp-section-toggle
                             data-erp-section-key="tasks">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi bi-list-task"></i>
+                            <i class="bi bi-list-task fs-3"></i>
                             <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Task Management</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>

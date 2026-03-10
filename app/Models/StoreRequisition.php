@@ -32,6 +32,11 @@ class StoreRequisition extends Model
         return $this->belongsTo(User::class, 'requested_by_user_id');
     }
 
+    public function machine(): BelongsTo
+    {
+        return $this->belongsTo(Machine::class, 'machine_id');
+    }
+
     public function lines(): HasMany
     {
         return $this->hasMany(StoreRequisitionLine::class);
@@ -67,5 +72,4 @@ class StoreRequisition extends Model
         return $this->isFullyIssued();
     }
 }
-
 

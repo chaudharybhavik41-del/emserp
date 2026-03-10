@@ -57,6 +57,15 @@ class PaymentReceiptPostingService
         if (! $bankAccount) {
             throw new RuntimeException('Bank / cash account not found.');
         }
+        if ((int) $bankAccount->company_id !== $companyId) {
+            throw new RuntimeException('Selected bank / cash account does not belong to the active company.');
+        }
+        if (! (bool) $bankAccount->is_active) {
+            throw new RuntimeException('Selected bank / cash account is inactive.');
+        }
+        if (! in_array((string) $bankAccount->type, ['bank', 'cash'], true)) {
+            throw new RuntimeException('Selected account is not a bank / cash ledger.');
+        }
 
         $rawLines = $data['lines'] ?? [];
         $lines    = [];
@@ -70,8 +79,20 @@ class PaymentReceiptPostingService
                 continue;
             }
 
+            /** @var Account|null $lineAccount */
+            $lineAccount = Account::find($accountId);
+            if (! $lineAccount) {
+                throw new RuntimeException('Voucher line account not found.');
+            }
+            if ((int) $lineAccount->company_id !== $companyId) {
+                throw new RuntimeException('Voucher line account does not belong to the active company.');
+            }
+            if (! (bool) $lineAccount->is_active) {
+                throw new RuntimeException('Voucher line account is inactive.');
+            }
+
             $lines[] = [
-                'account_id'     => $accountId,
+                'account_id'     => $lineAccount->id,
                 'amount'         => round($amount, 2),
                 'description'    => $row['description'] ?? null,
                 'cost_center_id' => $row['cost_center_id'] ?? null,

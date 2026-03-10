@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Item;
 use App\Models\Party;
 use App\Models\Project;
+use App\Models\Machine;
 use App\Models\StoreIssueLine;
 use App\Models\StoreRequisition;
 use App\Models\StoreRequisitionLine;
@@ -37,7 +38,7 @@ class StoreRequisitionController extends Controller
      */
     public function index(): View
     {
-        $requisitions = StoreRequisition::with(['project', 'contractor', 'requestedBy'])
+        $requisitions = StoreRequisition::with(['project', 'contractor', 'requestedBy', 'machine'])
             ->orderByDesc('requisition_date')
             ->orderByDesc('id')
             ->paginate(25);
@@ -52,11 +53,13 @@ class StoreRequisitionController extends Controller
     {
         $projects    = Project::orderBy('code')->get();
         $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
+        $machines    = Machine::orderBy('code')->orderBy('name')->get(['id', 'code', 'name', 'current_project_id']);
         $uoms        = Uom::orderBy('name')->get();
 
         return view('store_requisitions.create', compact(
             'projects',
             'contractors',
+            'machines',
             'uoms'
         ));
     }
@@ -128,7 +131,9 @@ class StoreRequisitionController extends Controller
     {
         $data = $request->validate([
             'requisition_date'        => ['required', 'date'],
-            'project_id'              => ['required', 'integer', 'exists:projects,id'],
+            'issue_purpose'           => ['required', 'string', 'in:general,machine_spare'],
+            'project_id'              => ['nullable', 'integer', 'exists:projects,id'],
+            'machine_id'              => ['nullable', 'integer', 'exists:machines,id'],
             'contractor_party_id'     => ['nullable', 'integer', 'exists:parties,id'],
             'contractor_person_name'  => ['nullable', 'string', 'max:100'],
             'remarks'                 => ['nullable', 'string'],
@@ -144,6 +149,23 @@ class StoreRequisitionController extends Controller
             'lines.*.remarks'                 => ['nullable', 'string', 'max:255'],
         ]);
 
+        $issuePurpose = (string) ($data['issue_purpose'] ?? 'general');
+        if ($issuePurpose === 'machine_spare' && empty($data['machine_id'])) {
+            return back()
+                ->withInput()
+                ->withErrors(['machine_id' => 'Machine is required for machine spare requisition.']);
+        }
+
+        if ($issuePurpose === 'general' && empty($data['project_id'])) {
+            return back()
+                ->withInput()
+                ->withErrors(['project_id' => 'Project is required for general requisition.']);
+        }
+
+        if ($issuePurpose === 'machine_spare' && empty($data['project_id']) && ! empty($data['machine_id'])) {
+            $data['project_id'] = Machine::query()->whereKey((int) $data['machine_id'])->value('current_project_id');
+        }
+
         // Safety: Store Requisitions are for NON-RAW items only.
         // (Raw material is handled via GRN / Production / Remnant flows.)
         $itemIds = collect($data['lines'] ?? [])
@@ -153,7 +175,7 @@ class StoreRequisitionController extends Controller
             ->values();
 
         if ($itemIds->isNotEmpty()) {
-            $itemsById = Item::with('type')
+            $itemsById = Item::with(['type', 'category'])
                 ->whereIn('id', $itemIds->all())
                 ->get()
                 ->keyBy('id');
@@ -169,6 +191,33 @@ class StoreRequisitionController extends Controller
                         ]);
                 }
             }
+
+            if ($issuePurpose === 'machine_spare') {
+                $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
+                $excludedCategoryCodes = $this->machineSpareExcludedCategoryCodes();
+
+                foreach ($itemIds as $itemId) {
+                    $item = $itemsById->get($itemId);
+                    $typeCode = strtoupper(trim((string) ($item?->type?->code ?? '')));
+                    $categoryCode = strtoupper(trim((string) ($item?->category?->code ?? '')));
+
+                    if (! in_array($typeCode, $allowedTypeCodes, true)) {
+                        return back()
+                            ->withInput()
+                            ->withErrors([
+                                'general' => 'Selected item is not allowed for machine spare requisition.',
+                            ]);
+                    }
+
+                    if ($categoryCode !== '' && in_array($categoryCode, $excludedCategoryCodes, true)) {
+                        return back()
+                            ->withInput()
+                            ->withErrors([
+                                'general' => 'Selected item category is not allowed in machine spare requisition.',
+                            ]);
+                    }
+                }
+            }
         }
 
         DB::beginTransaction();
@@ -176,7 +225,11 @@ class StoreRequisitionController extends Controller
         try {
             $req = new StoreRequisition();
             $req->requisition_date       = $data['requisition_date'];
+            $req->issue_purpose          = $issuePurpose;
             $req->project_id             = $data['project_id'];
+            $req->machine_id             = $issuePurpose === 'machine_spare'
+                ? (int) ($data['machine_id'] ?? 0) ?: null
+                : null;
             $req->contractor_party_id    = $data['contractor_party_id'] ?? null;
             $req->contractor_person_name = $data['contractor_person_name'] ?? null;
             $req->requested_by_user_id   = $request->user()?->id;
@@ -226,7 +279,7 @@ class StoreRequisitionController extends Controller
      */
     public function edit(StoreRequisition $storeRequisition): RedirectResponse|View
     {
-        $storeRequisition->load(['project', 'contractor', 'requestedBy', 'lines.item.uom']);
+        $storeRequisition->load(['project', 'contractor', 'requestedBy', 'machine', 'lines.item.uom']);
 
         // Guard: allow editing only when requested and no issues exist
         if ($storeRequisition->status !== 'requested') {
@@ -248,12 +301,14 @@ class StoreRequisitionController extends Controller
 
         $projects    = Project::orderBy('code')->get();
         $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
+        $machines    = Machine::orderBy('code')->orderBy('name')->get(['id', 'code', 'name', 'current_project_id']);
         $uoms        = Uom::orderBy('name')->get();
 
         return view('store_requisitions.edit', [
             'requisition' => $storeRequisition,
             'projects'    => $projects,
             'contractors' => $contractors,
+            'machines'    => $machines,
             'uoms'        => $uoms,
         ]);
     }
@@ -295,7 +350,9 @@ class StoreRequisitionController extends Controller
         // Validate incoming data
         $data = $request->validate([
             'requisition_date'        => ['required', 'date'],
-            'project_id'              => ['required', 'integer', 'exists:projects,id'],
+            'issue_purpose'           => ['required', 'string', 'in:general,machine_spare'],
+            'project_id'              => ['nullable', 'integer', 'exists:projects,id'],
+            'machine_id'              => ['nullable', 'integer', 'exists:machines,id'],
             'contractor_party_id'     => ['nullable', 'integer', 'exists:parties,id'],
             'contractor_person_name'  => ['nullable', 'string', 'max:100'],
             'remarks'                 => ['nullable', 'string'],
@@ -309,10 +366,71 @@ class StoreRequisitionController extends Controller
             'lines.*.remarks'           => ['nullable', 'string', 'max:255'],
         ]);
 
+        $issuePurpose = (string) ($data['issue_purpose'] ?? 'general');
+        if ($issuePurpose === 'machine_spare' && empty($data['machine_id'])) {
+            return back()
+                ->withInput()
+                ->withErrors(['machine_id' => 'Machine is required for machine spare requisition.']);
+        }
+
+        if ($issuePurpose === 'general' && empty($data['project_id'])) {
+            return back()
+                ->withInput()
+                ->withErrors(['project_id' => 'Project is required for general requisition.']);
+        }
+
+        if ($issuePurpose === 'machine_spare' && empty($data['project_id']) && ! empty($data['machine_id'])) {
+            $data['project_id'] = Machine::query()->whereKey((int) $data['machine_id'])->value('current_project_id');
+        }
+
+        if ($issuePurpose === 'machine_spare') {
+            $lineItemIds = $storeRequisition->lines
+                ->pluck('item_id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            if ($lineItemIds->isNotEmpty()) {
+                $itemsById = Item::with(['type', 'category'])
+                    ->whereIn('id', $lineItemIds->all())
+                    ->get()
+                    ->keyBy('id');
+
+                $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
+                $excludedCategoryCodes = $this->machineSpareExcludedCategoryCodes();
+
+                foreach ($lineItemIds as $itemId) {
+                    $item = $itemsById->get($itemId);
+                    $typeCode = strtoupper(trim((string) ($item?->type?->code ?? '')));
+                    $categoryCode = strtoupper(trim((string) ($item?->category?->code ?? '')));
+
+                    if (! in_array($typeCode, $allowedTypeCodes, true)) {
+                        return back()
+                            ->withInput()
+                            ->withErrors([
+                                'general' => 'Selected item is not allowed for machine spare requisition.',
+                            ]);
+                    }
+
+                    if ($categoryCode !== '' && in_array($categoryCode, $excludedCategoryCodes, true)) {
+                        return back()
+                            ->withInput()
+                            ->withErrors([
+                                'general' => 'Selected item category is not allowed in machine spare requisition.',
+                            ]);
+                    }
+                }
+            }
+        }
+
         DB::transaction(function () use ($storeRequisition, $data) {
             // --- Update header ---
             $storeRequisition->requisition_date       = $data['requisition_date'];
+            $storeRequisition->issue_purpose          = $data['issue_purpose'];
             $storeRequisition->project_id             = $data['project_id'];
+            $storeRequisition->machine_id             = $data['issue_purpose'] === 'machine_spare'
+                ? ((int) ($data['machine_id'] ?? 0) ?: null)
+                : null;
             $storeRequisition->contractor_party_id    = $data['contractor_party_id'] ?? null;
             $storeRequisition->contractor_person_name = $data['contractor_person_name'] ?? null;
             $storeRequisition->remarks                = $data['remarks'] ?? null;
@@ -355,13 +473,44 @@ class StoreRequisitionController extends Controller
      */
     public function show(StoreRequisition $storeRequisition): View
     {
-        $storeRequisition->load(['project', 'contractor', 'requestedBy', 'lines.item.uom']);
+        $storeRequisition->load(['project', 'contractor', 'requestedBy', 'machine', 'lines.item.uom']);
 
         return view('store_requisitions.show', [
             'requisition' => $storeRequisition,
         ]);
     }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareAllowedTypeCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['CONSUMABLE']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        $normalized = array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
+
+        return $normalized ?: ['CONSUMABLE'];
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function machineSpareExcludedCategoryCodes(): array
+    {
+        $codes = config('accounting.store.machine_spare_excluded_material_category_codes', ['FUEL', 'FUELS']);
+        if (! is_array($codes)) {
+            $codes = [$codes];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        ))));
+    }
 }
-
-
-

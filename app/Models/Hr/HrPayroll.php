@@ -191,17 +191,17 @@ class HrPayroll extends Model
 
     public function scopeByStatus($query, PayrollStatus $status)
     {
-        return $query->where('status', $status);
+        return $query->where('status', $status->value);
     }
 
     public function scopePending($query)
     {
-        return $query->whereIn('status', [PayrollStatus::DRAFT, PayrollStatus::PROCESSED]);
+        return $query->whereIn('status', [PayrollStatus::DRAFT->value, PayrollStatus::PROCESSED->value]);
     }
 
     public function scopePaid($query)
     {
-        return $query->where('status', PayrollStatus::PAID);
+        return $query->where('status', PayrollStatus::PAID->value);
     }
 
     public function scopeOnHold($query)
