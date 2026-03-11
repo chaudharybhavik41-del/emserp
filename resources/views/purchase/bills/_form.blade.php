@@ -500,20 +500,12 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
 
         <div class="col-md-3">
             <label class="form-label">Due Date</label>
-            <input type="date"
-                   name="due_date"
-                   id="due_date"
-                   class="form-control form-control-sm @error('due_date') is-invalid @enderror"
-                   value="{{ old('due_date', optional($bill->due_date)->format('Y-m-d')) }}">
+            <input type="date" name="due_date" class="form-control form-control-sm">
         </div>
 
         <div class="col-md-3">
             <label class="form-label">Bill No <span class="text-danger">*</span></label>
-            <input type="text"
-                   name="bill_number"
-                   class="form-control form-control-sm @error('bill_number') is-invalid @enderror"
-                   value="{{ old('bill_number', $bill->bill_number) }}"
-                   readonly>
+            <input type="text" name="bill_number" class="form-control form-control-sm">
         </div>
 
         <div class="col-md-4">
@@ -560,14 +552,8 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
     <div class="row g-3">
 
         <div class="col-md-4">
-            <label class="form-label">Linked Purchase Order(s)</label>
-            <input type="text"
-                   id="purchase_order_display"
-                   class="form-control form-control-sm"
-                   value="{{ $linkedPurchaseOrderDisplay }}"
-                   placeholder="(Fetch GRN/PO to link)"
-                   readonly>
-            <div class="form-text">One PO keeps the header linked. Multiple PO selection stays line-linked through GRNs.</div>
+            <label class="form-label">Linked Purchase Order</label>
+            <input type="text" class="form-control form-control-sm" placeholder="(Fetch GRN/PO to link)" readonly>
         </div>
 
         <div class="col-md-2">
@@ -589,12 +575,11 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
 
         <div class="col-md-2">
             <label class="form-label">Status</label>
-            @php $st = old('status', $bill->status ?? 'draft'); @endphp
-            <input type="text"
-                   class="form-control form-control-sm"
-                   value="{{ ucfirst($st) }}"
-                   readonly>
-            <div class="form-text">Status changes only through posting and reversal actions.</div>
+            <select name="status" class="form-select form-select-sm">
+                <option value="draft">Draft</option>
+                <option value="posted">Posted</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
         </div>
 
         <div class="col-md-12">

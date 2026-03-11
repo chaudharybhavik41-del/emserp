@@ -249,7 +249,7 @@ class HrAttendanceController extends Controller
     $attendance = null;
    if ($selectedEmployeeId && $request->query('date')) {
     $attendance = HrAttendance::where('hr_employee_id', $selectedEmployeeId)
-                                ->whereDate('attendance_date', $request->query('date'))
+                                ->where('attendance_date', $request->query('date'))
                               ->first();
 }
 

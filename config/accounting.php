@@ -76,8 +76,18 @@ return [
   	'store' => [
     'project_wip_material_account_code'        => 'WIP-MATERIAL',       // Dr when project issue
     'factory_consumable_expense_account_code'  => 'FACTORY-CONS-EXP',   // Dr when no project
+    'machine_maintenance_spare_expense_account_code' => 'WIP-MACHINE',   // Dr for machine spare issues
     'inventory_consumables_account_code'       => 'INV-CONSUMABLES',    // fallback Cr if item has no inventory_account_id
+    // Machine spare filtering preset (used in requisition lookup + store issue validation)
+    'machine_spare_allowed_material_type_codes' => ['CONSUMABLE'],
+    'machine_spare_excluded_material_category_codes' => ['FUEL', 'FUELS'],
 	],
+
+    'fuel' => [
+        'project_fuel_expense_account_code' => 'WIP-MACHINE',
+        'factory_fuel_expense_account_code' => 'FACTORY-CONS-EXP',
+        'inventory_account_code' => 'INV-CONSUMABLES',
+    ],
 
 
 'subcontractor' => [
@@ -161,6 +171,7 @@ return [
         'journal'            => 'JV',      // Journal voucher
         'tools_transfer'     => 'TT',      // Tools custody transfer
         'store_issue'        => 'ISS',     // Store issue
+        'fuel_issue'         => 'FUEL',    // Fuel issue
         'contra'             => 'CTR',     // Contra voucher
     ],
 
@@ -185,6 +196,7 @@ return [
 
   
   	'enable_store_issue_posting' => true,
+    'enable_fuel_issue_posting'  => true,
 
 	/*
 	|--------------------------------------------------------------------------

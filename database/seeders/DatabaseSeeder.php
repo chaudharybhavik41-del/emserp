@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
            TaskManagementSeeder::class,
           ProductionPermissionSeeder::class,
           ProductionActivitySeeder::class,
+          FixedAssetPermissionSeeder::class,
         ]);
     }
 }

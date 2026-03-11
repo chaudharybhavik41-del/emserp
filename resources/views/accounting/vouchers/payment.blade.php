@@ -31,7 +31,8 @@
                         <label class="form-label form-label-sm">Date</label>
                         <input type="date" name="voucher_date" id="voucher_date"
                                class="form-control form-control-sm @error('voucher_date') is-invalid @enderror"
-                               value="{{ old('voucher_date', now()->toDateString()) }}">
+                               value="{{ old('voucher_date', now()->toDateString()) }}"
+                               autofocus>
                         @error('voucher_date')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
@@ -47,7 +48,7 @@
                             @foreach($bankCashAccounts as $acc)
                                 <option value="{{ $acc->id }}"
                                     @selected(old('bank_account_id') == $acc->id)>
-                                    {{ $acc->code }} - {{ $acc->name }}
+                                    {{ $acc->name }}
                                 </option>
                             @endforeach
                         </select>
@@ -68,7 +69,7 @@
                                     data-is-supplier="{{ !empty($acc->party_is_supplier) ? '1' : '0' }}"
                                     data-is-contractor="{{ !empty($acc->party_is_contractor) ? '1' : '0' }}"
                                     @selected(old('party_account_id') == $acc->id)>
-                                    {{ $acc->code }} - {{ $acc->name }}
+                                     {{ $acc->name }}
                                 </option>
                             @endforeach
                         </select>
@@ -97,7 +98,7 @@
                     <div class="col-md-4">
                         <label class="form-label form-label-sm">Amount</label>
                         <input type="number" step="0.01" name="amount" id="voucher_amount"
-                               class="form-control form-control-sm @error('amount') is-invalid @enderror"
+                               class="form-control form-control-sm amount-input @error('amount') is-invalid @enderror"
                                value="{{ old('amount') }}">
                         @error('amount')
                             <div class="invalid-feedback">{{ $message }}</div>
@@ -182,19 +183,19 @@
 
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light-subtle">
+                        <div class="summary-box" id="summary-payment-box">
                             <div class="text-muted small">Total Payment</div>
                             <div class="fw-semibold" id="summary-total-payment">0.00</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light-subtle">
+                        <div class="summary-box" id="summary-allocated-box">
                             <div class="text-muted small">Total Allocated</div>
                             <div class="fw-semibold" id="summary-total-allocated">0.00</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light-subtle">
+                        <div class="summary-box" id="summary-balance-box">
                             <div class="text-muted small" id="summary-balance-label">On Account</div>
                             <div class="fw-semibold" id="summary-balance-amount">0.00</div>
                         </div>
@@ -446,6 +447,29 @@ document.addEventListener('DOMContentLoaded', function () {
             warningBox.textContent = '';
             warningBox.classList.add('d-none');
         }
+
+        // Update summary box border styling
+        const summaryPaymentBox = document.getElementById('summary-payment-box');
+        const summaryAllocatedBox = document.getElementById('summary-allocated-box');
+        const summaryBalanceBox = document.getElementById('summary-balance-box');
+
+        if (paymentAmount > 0) {
+            summaryPaymentBox && summaryPaymentBox.classList.add('has-data');
+        } else {
+            summaryPaymentBox && summaryPaymentBox.classList.remove('has-data');
+        }
+
+        if (allocated > 0) {
+            summaryAllocatedBox && summaryAllocatedBox.classList.add('has-data');
+        } else {
+            summaryAllocatedBox && summaryAllocatedBox.classList.remove('has-data');
+        }
+
+        if (balance > 0) {
+            summaryBalanceBox && summaryBalanceBox.classList.add('has-data');
+        } else {
+            summaryBalanceBox && summaryBalanceBox.classList.remove('has-data');
+        }
     }
 
     function updatePaymentTypeState() {
@@ -649,6 +673,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 updateSummary();
+                // Update Amount field with Total Allocated
+                const totalAllocated = currentAllocatedTotal();
+                if (totalAllocated > 0) {
+                    amountInput.value = money(totalAllocated);
+                    updateAmountInputColor();
+                }
             });
 
             amountField.addEventListener('input', function () {
@@ -670,6 +700,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 updateSummary();
+                // Update Amount field with Total Allocated
+                const totalAllocated = currentAllocatedTotal();
+                if (totalAllocated > 0) {
+                    amountInput.value = money(totalAllocated);
+                    updateAmountInputColor();
+                }
             });
         });
     }
@@ -835,7 +871,19 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (amountInput) {
-        amountInput.addEventListener('input', updateSummary);
+        amountInput.addEventListener('input', function() {
+            updateSummary();
+            updateAmountInputColor();
+        });
+        
+        amountInput.addEventListener('change', function() {
+            updateAmountInputColor();
+        });
+        
+        // Initial check with delay to ensure DOM is ready
+        setTimeout(function() {
+            updateAmountInputColor();
+        }, 50);
     }
 
     rebuildPartyOptions();
@@ -843,8 +891,50 @@ document.addEventListener('DOMContentLoaded', function () {
     rebuildPartyOptions();
     updatePaymentTypeState();
     updateSummary();
+    
+    // Final color update after all initialization
+    setTimeout(function() {
+        updateAmountInputColor();
+    }, 100);
 });
+
+function updateAmountInputColor() {
+    const amountInput = document.getElementById('voucher_amount');
+    if (!amountInput) return;
+    
+    const value = parseFloat(amountInput.value) || 0;
+    if (value > 0) {
+        amountInput.style.color = '#6c757d';
+        amountInput.style.fontWeight = 'normal';
+    } else {
+        amountInput.style.color = '#6c757d';
+        amountInput.style.fontWeight = 'normal';
+    }
+}
 </script>
+
+<style>
+.summary-box {
+    padding: 0.5rem;
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    border: 2px solid transparent;
+    transition: border-color 0.3s ease;
+}
+
+#summary-payment-box.has-data {
+    border-color: #0d6efd;
+}
+
+#summary-allocated-box.has-data {
+    border-color: #28a745;
+}
+
+#summary-balance-box.has-data {
+    border-color: #6c757d;
+}
+</style>
+
 @endpush
 
 @include('accounting.vouchers._prevent_enter_submit')

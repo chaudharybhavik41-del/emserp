@@ -227,14 +227,7 @@ public function index(Request $request)
         ->get();
     $items      = Item::orderBy('code')->get();
     $uoms       = Uom::orderBy('code')->get();
-    $accounts   = Account::query()
-        ->where('is_active', true)
-        ->whereHas('group', function ($query) {
-            $query->where('nature', 'expense');
-        })
-        ->orderBy('name')
-        ->get();
-    $machines   = Machine::orderBy('name')->get();
+    $accounts   = Account::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -248,7 +241,7 @@ public function index(Request $request)
     $emptyLines = 5;
     $submissionToken = $this->makeCreateSubmissionToken();
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects', 'submissionToken'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
 	}
 
     protected function supplierPurchaseOrderQuery(int $supplierId)
@@ -821,14 +814,7 @@ public function index(Request $request)
             ->get();
         $items      = Item::orderBy('code')->get();
         $uoms       = Uom::orderBy('code')->get();
-        $accounts   = Account::query()
-            ->where('is_active', true)
-            ->whereHas('group', function ($query) {
-                $query->where('nature', 'expense');
-            })
-            ->orderBy('name')
-            ->get();
-        $machines   = Machine::orderBy('name')->get();
+        $accounts   = Account::orderBy('name')->get();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 

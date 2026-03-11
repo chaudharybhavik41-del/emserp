@@ -204,8 +204,6 @@ class MachineCostRegisterReportController extends Controller
         $query = DB::table('fuel_issues as fi')
             ->leftJoin('machines as m', 'm.id', '=', 'fi.machine_id')
             ->leftJoin('projects as p', 'p.id', '=', 'fi.project_id')
-            ->where('fi.status', 'posted')
-            ->whereIn('fi.accounting_status', ['posted', 'not_required'])
             ->whereDate('fi.issue_date', '>=', $fromDate->toDateString())
             ->whereDate('fi.issue_date', '<=', $toDate->toDateString())
             ->orderBy('fi.issue_date')
@@ -273,8 +271,6 @@ class MachineCostRegisterReportController extends Controller
             ->leftJoin('machines as m', 'm.id', '=', 'si.machine_id')
             ->leftJoin('projects as p', 'p.id', '=', 'si.project_id')
             ->where('si.issue_purpose', 'machine_spare')
-            ->where('si.status', 'posted')
-            ->whereIn('si.accounting_status', ['posted', 'not_required'])
             ->whereDate('si.issue_date', '>=', $fromDate->toDateString())
             ->whereDate('si.issue_date', '<=', $toDate->toDateString())
             ->orderBy('si.issue_date')
@@ -325,23 +321,17 @@ class MachineCostRegisterReportController extends Controller
             ->unique()
             ->values();
 
-        $purchaseLinesByMrLineId = [];
+        $purchaseBasicByMrLineId = [];
         $mrBaseQtyById = [];
 
         if ($mrLineIds->isNotEmpty() && Schema::hasTable('material_receipt_lines') && Schema::hasTable('purchase_bill_lines')) {
-            $purchaseLinesByMrLineId = DB::table('purchase_bill_lines')
-                ->join('purchase_bills as pb', 'pb.id', '=', 'purchase_bill_lines.purchase_bill_id')
-                ->where('pb.status', 'posted')
-                ->whereDate('pb.bill_date', '<=', $toDate->toDateString())
-                ->whereIn('purchase_bill_lines.material_receipt_line_id', $mrLineIds->all())
-                ->orderBy('pb.bill_date')
-                ->orderBy('pb.id')
-                ->get([
-                    'purchase_bill_lines.material_receipt_line_id',
-                    'purchase_bill_lines.basic_amount',
-                    'pb.bill_date',
-                ])
-                ->groupBy('material_receipt_line_id');
+            $purchaseBasicByMrLineId = DB::table('purchase_bill_lines')
+                ->whereIn('material_receipt_line_id', $mrLineIds->all())
+                ->groupBy('material_receipt_line_id')
+                ->selectRaw('material_receipt_line_id, SUM(basic_amount) as total_basic')
+                ->pluck('total_basic', 'material_receipt_line_id')
+                ->map(fn ($v) => (float) $v)
+                ->all();
 
             $mrBaseQtyById = DB::table('material_receipt_lines')
                 ->whereIn('id', $mrLineIds->all())
@@ -375,17 +365,7 @@ class MachineCostRegisterReportController extends Controller
             $rate = 0.0;
             $mrLineId = (int) ($line->material_receipt_line_id ?? 0);
             if ($mrLineId > 0) {
-                $issueDate = $issues->firstWhere('id', $issueId)?->issue_date;
-                $effectiveDate = $issueDate ? Carbon::parse((string) $issueDate)->toDateString() : null;
-                $totalBasic = (float) collect($purchaseLinesByMrLineId[$mrLineId] ?? [])
-                    ->filter(function ($purchaseLine) use ($effectiveDate) {
-                        if (! $effectiveDate) {
-                            return true;
-                        }
-
-                        return (string) $purchaseLine->bill_date <= $effectiveDate;
-                    })
-                    ->sum(fn ($purchaseLine) => (float) ($purchaseLine->basic_amount ?? 0));
+                $totalBasic = (float) ($purchaseBasicByMrLineId[$mrLineId] ?? 0);
                 $baseQty = (float) ($mrBaseQtyById[$mrLineId] ?? 0);
                 if ($totalBasic > 0 && $baseQty > 0) {
                     $rate = $totalBasic / $baseQty;

@@ -23,15 +23,42 @@ return new class extends Migration
             return;
         }
 
-        // MySQL update-join to copy client_party_id from the GRN header.
+        $driver = DB::getDriverName();
+
+        if ($driver === 'mysql') {
+            DB::statement(
+                "UPDATE store_stock_items s\n" .
+                "JOIN material_receipt_lines l ON s.material_receipt_line_id = l.id\n" .
+                "JOIN material_receipts r ON l.material_receipt_id = r.id\n" .
+                "SET s.client_party_id = r.client_party_id\n" .
+                "WHERE s.is_client_material = 1\n" .
+                "  AND s.client_party_id IS NULL\n" .
+                "  AND r.client_party_id IS NOT NULL"
+            );
+
+            return;
+        }
+
+        // SQLite/Postgres-compatible correlated update.
         DB::statement(
-            "UPDATE store_stock_items s\n" .
-            "JOIN material_receipt_lines l ON s.material_receipt_line_id = l.id\n" .
-            "JOIN material_receipts r ON l.material_receipt_id = r.id\n" .
-            "SET s.client_party_id = r.client_party_id\n" .
-            "WHERE s.is_client_material = 1\n" .
-            "  AND s.client_party_id IS NULL\n" .
-            "  AND r.client_party_id IS NOT NULL"
+            "UPDATE store_stock_items\n" .
+            "SET client_party_id = (\n" .
+            "  SELECT r.client_party_id\n" .
+            "  FROM material_receipt_lines l\n" .
+            "  JOIN material_receipts r ON l.material_receipt_id = r.id\n" .
+            "  WHERE l.id = store_stock_items.material_receipt_line_id\n" .
+            "  LIMIT 1\n" .
+            ")\n" .
+            "WHERE is_client_material = 1\n" .
+            "  AND client_party_id IS NULL\n" .
+            "  AND material_receipt_line_id IS NOT NULL\n" .
+            "  AND EXISTS (\n" .
+            "    SELECT 1\n" .
+            "    FROM material_receipt_lines l2\n" .
+            "    JOIN material_receipts r2 ON l2.material_receipt_id = r2.id\n" .
+            "    WHERE l2.id = store_stock_items.material_receipt_line_id\n" .
+            "      AND r2.client_party_id IS NOT NULL\n" .
+            "  )"
         );
     }
 

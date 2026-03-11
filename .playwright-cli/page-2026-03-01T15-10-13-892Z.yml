@@ -1,0 +1,55 @@
+- generic [ref=e7]:
+  - generic [ref=e9]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - img "EMS Infra Project LLP" [ref=e12]
+        - generic [ref=e13]: EMS Infra Project LLP
+      - heading "Welcome back" [level=2] [ref=e14]
+      - paragraph [ref=e15]: Sign in to manage materials, CRM, projects, HR and store operations.
+      - list [ref=e16]:
+        - listitem [ref=e17]:
+          - generic [ref=e18]: 
+          - text: Role-based access
+        - listitem [ref=e19]:
+          - generic [ref=e20]: 
+          - text: Unified dashboards
+        - listitem [ref=e21]:
+          - generic [ref=e22]: 
+          - text: Reports & approvals
+    - generic [ref=e23]:
+      - generic [ref=e24]: 
+      - text: Secure authentication
+  - generic [ref=e26]:
+    - generic [ref=e27]:
+      - generic [ref=e28]: EMS Infra Project LLP
+      - heading "Login" [level=1] [ref=e29]
+      - generic [ref=e30]: Use your work email & password to continue.
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - generic [ref=e33]: Email
+        - generic [ref=e34]:
+          - generic [ref=e36]: 
+          - textbox "Email" [active] [ref=e37]:
+            - /placeholder: name@company.com
+            - text: test@example.com
+        - generic [ref=e38]: Invalid credentials. 4 attempts remaining.
+      - generic [ref=e39]:
+        - generic [ref=e40]: Password
+        - generic [ref=e41]:
+          - generic [ref=e43]: 
+          - textbox "Password" [ref=e44]:
+            - /placeholder: ••••••••
+          - button "Show password" [ref=e45] [cursor=pointer]:
+            - generic [ref=e46]: 
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - checkbox "Remember me" [ref=e49]
+          - generic [ref=e50]: Remember me
+        - link "Forgot password?" [ref=e51] [cursor=pointer]:
+          - /url: https://emsinfra.co.in/forgot-password
+      - button " Log in" [ref=e52] [cursor=pointer]:
+        - generic [ref=e53]: 
+        - text: Log in
+      - generic [ref=e54]: Having trouble? Contact your administrator.
+    - text: 
+    - paragraph [ref=e55]: © 2026 EMS Infra Project LLP

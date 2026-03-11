@@ -402,7 +402,7 @@ class BankCashVoucherController extends Controller
         });
 
         return redirect()
-            ->route('accounting.vouchers.index')
+            ->route('accounting.payments.index')
             ->with('success', 'Payment voucher created successfully.');
     }
 

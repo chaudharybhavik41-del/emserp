@@ -237,7 +237,6 @@ class VoucherController extends Controller
 
         return view('accounting.vouchers.create', compact(
             'accounts',
-            'contraAccountIds',
             'costCenters',
             'projects',
             'voucherTypes',
@@ -476,7 +475,6 @@ class VoucherController extends Controller
         return view('accounting.vouchers.edit', compact(
             'voucher',
             'accounts',
-            'contraAccountIds',
             'costCenters',
             'projects',
             'voucherTypes',

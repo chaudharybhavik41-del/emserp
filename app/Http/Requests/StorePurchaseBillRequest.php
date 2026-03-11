@@ -28,7 +28,6 @@ class StorePurchaseBillRequest extends FormRequest
 
     public function rules(): array
     {
-        $existingBillIdForToken = $this->getExistingBillIdForSubmissionToken();
         $expenseMachineRule = Schema::hasTable('machines')
             ? ['nullable', 'integer', Rule::exists('machines', 'id')]
             : ['nullable'];
