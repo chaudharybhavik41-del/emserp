@@ -3,14 +3,12 @@
 namespace App\Http\Controllers\Accounting;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StorePaymentVoucherRequest;
 use App\Models\Accounting\Account;
 use App\Models\Accounting\CostCenter;
 use App\Models\Project;
 use App\Services\Accounting\PaymentReceiptPostingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
 
 class PaymentReceiptController extends Controller
 {
@@ -48,49 +46,31 @@ class PaymentReceiptController extends Controller
         return Project::orderBy('code')->get();
     }
 
-    public function createPayment(): View
+    public function createPayment(): RedirectResponse
     {
-        return view('accounting.payments.create', [
-            'mode'         => 'payment',
-            'bankAccounts' => $this->bankAccounts(),
-            'accounts'     => $this->lineAccounts(),
-            'costCenters'  => $this->costCenters(),
-            'projects'     => $this->projects(),
-        ]);
-    }
-
-    public function createReceipt(): View
-    {
-        return view('accounting.receipts.create', [
-            'mode'         => 'receipt',
-            'bankAccounts' => $this->bankAccounts(),
-            'accounts'     => $this->lineAccounts(),
-            'costCenters'  => $this->costCenters(),
-            'projects'     => $this->projects(),
-        ]);
-    }
-
-    public function storePayment(StorePaymentVoucherRequest $request): RedirectResponse
-    {
-        $data = $request->validated();
-        $data['created_by'] = $request->user()?->id;
-
-        $voucher = $this->postingService->createPayment($data);
-
         return redirect()
-            ->route('accounting.vouchers.index', ['type' => 'payment'])
-            ->with('success', 'Payment voucher ' . $voucher->voucher_no . ' created successfully.');
+            ->route('accounting.payments.index')
+            ->with('info', 'Legacy payment route retired. Use the active payment voucher list.');
     }
 
-    public function storeReceipt(StorePaymentVoucherRequest $request): RedirectResponse
+    public function createReceipt(): RedirectResponse
     {
-        $data = $request->validated();
-        $data['created_by'] = $request->user()?->id;
-
-        $voucher = $this->postingService->createReceipt($data);
-
         return redirect()
-            ->route('accounting.vouchers.index', ['type' => 'receipt'])
-            ->with('success', 'Receipt voucher ' . $voucher->voucher_no . ' created successfully.');
+            ->route('accounting.receipts.index')
+            ->with('info', 'Legacy receipt route retired. Use the active receipt voucher list.');
+    }
+
+    public function storePayment(Request $request): RedirectResponse
+    {
+        return redirect()
+            ->route('accounting.payments.index')
+            ->with('error', 'Legacy payment posting route retired. Re-enter the voucher from the active payment voucher list.');
+    }
+
+    public function storeReceipt(Request $request): RedirectResponse
+    {
+        return redirect()
+            ->route('accounting.receipts.index')
+            ->with('error', 'Legacy receipt posting route retired. Re-enter the voucher from the active receipt voucher list.');
     }
 }

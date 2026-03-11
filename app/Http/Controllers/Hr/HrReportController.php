@@ -47,13 +47,15 @@ class HrReportController extends Controller
 
         $rows = HrEmployee::query()
             ->whereYear('date_of_leaving', $year)
-            ->selectRaw('MONTH(date_of_leaving) as month_no, COUNT(*) as exits')
-            ->groupBy('month_no')
-            ->orderBy('month_no')
-            ->get()
-            ->map(function ($r) {
-                return [now()->startOfYear()->month($r->month_no)->format('F'), (int) $r->exits];
-            })->toArray();
+            ->whereNotNull('date_of_leaving')
+            ->get(['date_of_leaving'])
+            ->groupBy(fn ($employee) => $employee->date_of_leaving?->month)
+            ->sortKeys()
+            ->map(function ($employees, $monthNo) {
+                return [now()->startOfYear()->month((int) $monthNo)->format('F'), $employees->count()];
+            })
+            ->values()
+            ->toArray();
 
         return $this->listView("Attrition Report ({$year})", ['Month', 'Exits'], $rows);
     }

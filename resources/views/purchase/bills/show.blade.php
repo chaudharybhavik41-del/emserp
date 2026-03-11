@@ -31,13 +31,22 @@
         </div>
 
         <div>
-            <a href="{{ route('purchase.bills.edit', $bill) }}"
-               class="btn btn-outline-primary btn-sm">Edit</a>
+            @if(($bill->status ?? null) === 'posted' && $bill->voucher)
+                @canany(['purchase.bill.update', 'purchase.bill.change_posting_date'])
+                    <button type="button"
+                            class="btn btn-outline-warning btn-sm ms-1"
+                            data-bs-toggle="modal"
+                            data-bs-target="#changePostingDateModal">
+                        Change Posting Date
+                    </button>
+                @endcanany
+            @endif
             <a href="{{ route('purchase.bills.index') }}"
                class="btn btn-outline-secondary btn-sm ms-1">Back</a>
         </div>
     </div>
 		@include('purchase.bills._reverse_modal', ['bill' => $bill])
+        @include('purchase.bills._change_posting_date_modal', ['bill' => $bill])
     {{-- Header details --}}
     <div class="card mb-3">
         <div class="card-body">

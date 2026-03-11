@@ -26,15 +26,15 @@
     <div class="row g-3 mb-3">
         <div class="col-md-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
             <div class="text-muted small">Taxable</div>
-            <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</div>
+            <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</div>
         </div></div></div>
         <div class="col-md-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
             <div class="text-muted small">GST Total</div>
-            <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['gst_total'] ?? 0) }}</div>
+            <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['gst_total'] ?? 0) }}</div>
         </div></div></div>
         <div class="col-md-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
             <div class="text-muted small">Gross Total</div>
-            <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['gross_total'] ?? 0) }}</div>
+            <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['gross_total'] ?? 0) }}</div>
         </div></div></div>
         <div class="col-md-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
             <div class="text-muted small">Rows</div>
@@ -112,23 +112,23 @@
                             <tbody>
                             <tr>
                                 <th class="text-muted" style="width: 180px;">Taxable Value</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">CGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['cgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['cgst'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">SGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['sgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['sgst'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">IGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['igst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['igst'] ?? 0) }}</td>
                             </tr>
                             <tr>
                                 <th class="text-muted">Total GST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['gst_total'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['gst_total'] ?? 0) }}</td>
 
                                 <th class="text-muted">Gross Total</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['gross_total'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['gross_total'] ?? 0) }}</td>
 
                                 <th class="text-muted">Rows</th>
                                 <td class="text-end" colspan="5">{{ $totals['rows'] ?? 0 }}</td>
@@ -160,10 +160,10 @@
                             @if($hasRows)
                                 @foreach($rows as $r)
                                     @php
-                                        $taxablePaise = \\App\\Support\\MoneyHelper::toPaise($r->taxable ?? 0);
-                                        $cgstPaise    = \\App\\Support\\MoneyHelper::toPaise($r->cgst ?? 0);
-                                        $sgstPaise    = \\App\\Support\\MoneyHelper::toPaise($r->sgst ?? 0);
-                                        $igstPaise    = \\App\\Support\\MoneyHelper::toPaise($r->igst ?? 0);
+                                        $taxablePaise = \App\Support\MoneyHelper::toPaise($r->taxable ?? 0);
+                                        $cgstPaise    = \App\Support\MoneyHelper::toPaise($r->cgst ?? 0);
+                                        $sgstPaise    = \App\Support\MoneyHelper::toPaise($r->sgst ?? 0);
+                                        $igstPaise    = \App\Support\MoneyHelper::toPaise($r->igst ?? 0);
                                         $gstPaise     = $cgstPaise + $sgstPaise + $igstPaise;
                                         $grossPaise   = $taxablePaise + $gstPaise;
                                         $searchText = strtolower(trim(($r->hsn_sac ?? '') . ' ' . ($r->gst_rate ?? '')));
@@ -171,12 +171,12 @@
                                     <tr class="ghs-row" data-row-text="{{ $searchText }}">
                                         <td>{{ $r->hsn_sac }}</td>
                                         <td class="text-end">{{ $r->gst_rate }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($taxablePaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($cgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($sgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($igstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($gstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($grossPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($taxablePaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($cgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($sgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($igstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($gstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($grossPaise) }}</td>
                                     </tr>
                                 @endforeach
                             @else

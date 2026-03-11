@@ -9,6 +9,7 @@
      * - $prefillLines (array|null) // when copying previous RA lines
      * - $nextRaNumber (string)
      * - $tdsSections (collection)
+     * - $availableWorkOrders (collection)
      *
      * When editing, pass $subcontractorRa (SubcontractorRaBill model).
      */
@@ -51,6 +52,42 @@
     } else {
         $lines = old('lines', $prefillLines ?? [$defaultLine]);
     }
+
+    $billDateValue = old('bill_date', optional($subcontractorRa->bill_date ?? null)->format('Y-m-d') ?? now()->format('Y-m-d'));
+    $postingDateValue = old('posting_date', optional($subcontractorRa->posting_date ?? null)->format('Y-m-d') ?? $billDateValue);
+    $selectedWorkOrderId = old('work_order_id', $subcontractorRa->work_order_id ?? '');
+    $paymentTermsValue = old('payment_terms_days', $subcontractorRa->payment_terms_days ?? '');
+    $workOrderNumberValue = old('work_order_number', $subcontractorRa->work_order_number ?? '');
+    $otherTermsValue = old('other_terms', $subcontractorRa->other_terms ?? '');
+    $initialWorkOrders = collect($availableWorkOrders ?? collect())->map(function ($workOrder) {
+        return [
+            'id' => (int) $workOrder->id,
+            'subcontractor_id' => (int) $workOrder->subcontractor_id,
+            'project_id' => (int) $workOrder->project_id,
+            'work_order_number' => (string) $workOrder->work_order_number,
+            'work_order_date' => optional($workOrder->work_order_date)->format('Y-m-d'),
+            'payment_terms_days' => $workOrder->payment_terms_days,
+            'retention_percent' => (float) ($workOrder->retention_percent ?? 0),
+            'security_deposit_percent' => (float) ($workOrder->security_deposit_percent ?? 0),
+            'other_terms' => (string) ($workOrder->other_terms ?? ''),
+        ];
+    })->values()->all();
+    $calculatedPreviewTotal = round(
+        (float) ($subcontractorRa->net_amount ?? 0)
+        + (float) ($subcontractorRa->total_gst ?? 0)
+        - (float) ($subcontractorRa->tds_amount ?? 0),
+        2
+    );
+    $invoiceTotalValue = old(
+        'invoice_total',
+        $editing
+            ? number_format((float) ($subcontractorRa->total_amount ?? 0), 2, '.', '')
+            : number_format(round($calculatedPreviewTotal, 0), 2, '.', '')
+    );
+    $roundOffValue = old(
+        'round_off_preview',
+        number_format((float) ($subcontractorRa->round_off ?? 0), 2, '.', '')
+    );
 @endphp
 
 <form method="POST" action="{{ $action }}">
@@ -82,16 +119,27 @@
 
         <div class="col-md-3">
             <label class="form-label">Bill Date <span class="text-danger">*</span></label>
-            <input type="date" name="bill_date" class="form-control form-control-sm" value="{{ old('bill_date', optional($subcontractorRa->bill_date ?? null)->format('Y-m-d')) }}" required>
+            <input type="date" name="bill_date" class="form-control form-control-sm @error('bill_date') is-invalid @enderror" value="{{ $billDateValue }}" required>
+            @error('bill_date')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
         </div>
 
         <div class="col-md-3">
-            <label class="form-label">Due Date</label>
-            <input type="date" name="due_date" class="form-control form-control-sm" value="{{ old('due_date', optional($subcontractorRa->due_date ?? null)->format('Y-m-d')) }}">
+            <label class="form-label">Posting Date <span class="text-danger">*</span></label>
+            <input type="date" name="posting_date" class="form-control form-control-sm @error('posting_date') is-invalid @enderror" value="{{ $postingDateValue }}" required>
+            @error('posting_date')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
         </div>
     </div>
 
     <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <label class="form-label">Due Date</label>
+            <input type="date" name="due_date" id="due_date" class="form-control form-control-sm" value="{{ old('due_date', optional($subcontractorRa->due_date ?? null)->format('Y-m-d')) }}">
+        </div>
+
         <div class="col-md-4">
             <label class="form-label">Subcontractor <span class="text-danger">*</span></label>
 
@@ -111,7 +159,7 @@
             @endif
         </div>
 
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label">Project <span class="text-danger">*</span></label>
 
             @if($editing)
@@ -129,22 +177,53 @@
             @endif
         </div>
 
-        <div class="col-md-4">
-            <label class="form-label">Work Order Number</label>
-            <input type="text" name="work_order_number" class="form-control form-control-sm" value="{{ old('work_order_number', $subcontractorRa->work_order_number ?? '') }}">
+        <div class="col-md-3">
+            <label class="form-label">Work Order</label>
+            <select name="work_order_id" id="work_order_id" class="form-select form-select-sm @error('work_order_id') is-invalid @enderror">
+                <option value="">-- Select --</option>
+                @foreach(($availableWorkOrders ?? collect()) as $workOrder)
+                    <option value="{{ $workOrder->id }}"
+                            data-subcontractor-id="{{ $workOrder->subcontractor_id }}"
+                            data-project-id="{{ $workOrder->project_id }}"
+                            data-work-order-number="{{ $workOrder->work_order_number }}"
+                            data-payment-terms-days="{{ $workOrder->payment_terms_days ?? '' }}"
+                            data-retention-percent="{{ number_format((float) ($workOrder->retention_percent ?? 0), 4, '.', '') }}"
+                            data-security-deposit-percent="{{ number_format((float) ($workOrder->security_deposit_percent ?? 0), 4, '.', '') }}"
+                            data-other-terms="{{ $workOrder->other_terms ?? '' }}"
+                            @selected((string) $selectedWorkOrderId === (string) $workOrder->id)>
+                        {{ $workOrder->work_order_number }} | {{ optional($workOrder->work_order_date)->format('d-m-Y') }}
+                        @if($workOrder->project?->name)
+                            | {{ $workOrder->project->name }}
+                        @endif
+                    </option>
+                @endforeach
+            </select>
+            @error('work_order_id')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
         </div>
 
-        <div class="col-md-3">
+        <div class="col-md-2">
+            <label class="form-label">WO Number</label>
+            <input type="text" name="work_order_number" id="work_order_number" class="form-control form-control-sm" value="{{ $workOrderNumberValue }}">
+        </div>
+
+        <div class="col-md-2">
+            <label class="form-label">Payment Terms (Days)</label>
+            <input type="number" name="payment_terms_days" id="payment_terms_days" class="form-control form-control-sm" value="{{ $paymentTermsValue }}" readonly>
+        </div>
+
+        <div class="col-md-2">
             <label class="form-label">Period From</label>
             <input type="date" name="period_from" class="form-control form-control-sm" value="{{ old('period_from', optional($subcontractorRa->period_from ?? null)->format('Y-m-d')) }}">
         </div>
 
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label">Period To</label>
             <input type="date" name="period_to" class="form-control form-control-sm" value="{{ old('period_to', optional($subcontractorRa->period_to ?? null)->format('Y-m-d')) }}">
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-4">
             <label class="form-label">Remarks</label>
             <input type="text" name="remarks" class="form-control form-control-sm" value="{{ old('remarks', $subcontractorRa->remarks ?? '') }}">
         </div>
@@ -153,7 +232,11 @@
     <div class="row g-3 mb-3">
         <div class="col-md-2">
             <label class="form-label">Retention %</label>
-            <input type="number" step="0.0001" name="retention_percent" class="form-control form-control-sm js-calc" value="{{ old('retention_percent', $subcontractorRa->retention_percent ?? 0) }}">
+            <input type="number" step="0.0001" name="retention_percent" id="retention_percent" class="form-control form-control-sm js-calc" value="{{ old('retention_percent', $subcontractorRa->retention_percent ?? 0) }}">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Security Deposit %</label>
+            <input type="number" step="0.0001" name="security_deposit_percent" id="security_deposit_percent" class="form-control form-control-sm js-calc" value="{{ old('security_deposit_percent', $subcontractorRa->security_deposit_percent ?? 0) }}">
         </div>
         <div class="col-md-2">
             <label class="form-label">Advance Recovery</label>
@@ -167,6 +250,13 @@
         <div class="col-md-6">
             <label class="form-label">Deduction Remarks</label>
             <input type="text" name="deduction_remarks" class="form-control form-control-sm" value="{{ old('deduction_remarks', $subcontractorRa->deduction_remarks ?? '') }}">
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-12">
+            <label class="form-label">Other Terms</label>
+            <textarea name="other_terms" id="other_terms" rows="2" class="form-control form-control-sm">{{ $otherTermsValue }}</textarea>
         </div>
     </div>
 
@@ -314,6 +404,10 @@
                     <input type="text" class="form-control form-control-sm" id="sum_retention" value="0.00" readonly>
                 </div>
                 <div class="col-md-2">
+                    <label class="form-label">Security Deposit</label>
+                    <input type="text" class="form-control form-control-sm" id="sum_security_deposit" value="0.00" readonly>
+                </div>
+                <div class="col-md-2">
                     <label class="form-label">Net Amount</label>
                     <input type="text" class="form-control form-control-sm" id="sum_net" value="0.00" readonly>
                 </div>
@@ -326,8 +420,26 @@
                     <input type="text" class="form-control form-control-sm" id="sum_tds" value="0.00" readonly>
                 </div>
                 <div class="col-md-2">
+                    <label class="form-label">Calculated Total</label>
+                    <input type="text" class="form-control form-control-sm" id="sum_calculated_total" value="0.00" readonly>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Round Off</label>
+                    <input type="text" class="form-control form-control-sm" id="sum_round_off" value="{{ $roundOffValue }}" readonly>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Invoice Total</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step="0.01" name="invoice_total" id="invoice_total" class="form-control text-end @error('invoice_total') is-invalid @enderror" value="{{ $invoiceTotalValue }}">
+                        <button type="button" class="btn btn-outline-secondary" id="btn_round_invoice_total">Round</button>
+                        @error('invoice_total')
+                            <div class="invalid-feedback d-block">{{ $message }}</div>
+                        @enderror
+                    </div>
+                </div>
+                <div class="col-md-2">
                     <label class="form-label">Payable</label>
-                    <input type="text" class="form-control form-control-sm fw-semibold" id="sum_total" value="0.00" readonly>
+                    <input type="text" class="form-control form-control-sm fw-semibold" id="sum_total" value="{{ $invoiceTotalValue }}" readonly>
                 </div>
             </div>
         </div>
@@ -394,10 +506,21 @@
     const copyBtn = document.getElementById('btn-copy-prev-lines');
     const subcontractorSelect = document.querySelector('select[name="subcontractor_id"]');
     const projectSelect = document.querySelector('select[name="project_id"]');
+    const workOrderSelect = document.getElementById('work_order_id');
+    const workOrderNumberInput = document.getElementById('work_order_number');
+    const paymentTermsInput = document.getElementById('payment_terms_days');
+    const dueDateInput = document.getElementById('due_date');
+    const retentionPercentInput = document.getElementById('retention_percent');
+    const securityDepositPercentInput = document.getElementById('security_deposit_percent');
+    const otherTermsInput = document.getElementById('other_terms');
 
     const billDateInput = document.querySelector('input[name="bill_date"]');
+    const postingDateInput = document.querySelector('input[name="posting_date"]');
     const advanceTextEl = document.getElementById('subcontractor_advance_balance_text');
     const partySummaryUrl = "{{ route('accounting.subcontractor-ra.party-summary') }}";
+    const workOrderLookupUrl = "{{ route('accounting.subcontractor-work-orders.lookup') }}";
+    const initialWorkOrders = @json($initialWorkOrders);
+    const initialSelectedWorkOrderId = @json((string) $selectedWorkOrderId);
 
     const gstinTextEl = document.getElementById('subcontractor_gstin_text');
     const cgstInput = document.querySelector('input[name="cgst_rate"]');
@@ -406,6 +529,8 @@
 
     const tdsSectionSelect = document.getElementById('tds_section');
     const tdsRateInput     = document.querySelector('input[name="tds_rate"]');
+    const invoiceTotalInput = document.getElementById('invoice_total');
+    const roundInvoiceBtn = document.getElementById('btn_round_invoice_total');
 
     function toNumber(v) {
         const n = parseFloat(v);
@@ -416,10 +541,19 @@
         return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2);
     }
 
+    function roundedInvoiceTotal(calculatedTotal) {
+        return Math.round(toNumber(calculatedTotal));
+    }
+
     function maybeAutofillTdsRate() {
         if (!tdsSectionSelect || !tdsRateInput) return;
         const opt = tdsSectionSelect.options[tdsSectionSelect.selectedIndex];
         if (!opt) return;
+
+        if (!String(tdsSectionSelect.value || '').trim()) {
+            tdsRateInput.value = '0';
+            return;
+        }
 
         const rateFromMaster = toNumber(opt.getAttribute('data-rate'));
         const currentRate = toNumber(tdsRateInput.value);
@@ -498,6 +632,225 @@
 
     function getBillDateValue() {
         return billDateInput ? (billDateInput.value || '') : '';
+    }
+
+    function getPostingDateValue() {
+        return postingDateInput ? (postingDateInput.value || '') : '';
+    }
+
+    function getVisibleWorkOrderOptions() {
+        if (!workOrderSelect) {
+            return [];
+        }
+
+        return Array.from(workOrderSelect.options).filter(function (option) {
+            return option.value && !option.hidden;
+        });
+    }
+
+    function resetWorkOrderOptions() {
+        if (!workOrderSelect) {
+            return;
+        }
+
+        workOrderSelect.innerHTML = '<option value="">-- Select --</option>';
+    }
+
+    function appendWorkOrderOption(order) {
+        if (!workOrderSelect || !order || !order.id) {
+            return;
+        }
+
+        const option = document.createElement('option');
+        option.value = String(order.id);
+        option.dataset.subcontractorId = String(order.subcontractor_id || '');
+        option.dataset.projectId = String(order.project_id || '');
+        option.dataset.workOrderNumber = order.work_order_number || '';
+        option.dataset.paymentTermsDays = order.payment_terms_days ?? '';
+        option.dataset.retentionPercent = parseFloat(order.retention_percent || 0).toFixed(4);
+        option.dataset.securityDepositPercent = parseFloat(order.security_deposit_percent || 0).toFixed(4);
+        option.dataset.otherTerms = order.other_terms || '';
+        option.textContent = (order.work_order_number || '')
+            + (order.work_order_date ? ' | ' + order.work_order_date.split('-').reverse().join('-') : '');
+
+        workOrderSelect.appendChild(option);
+    }
+
+    function replaceWorkOrderOptions(orders) {
+        resetWorkOrderOptions();
+        (orders || []).forEach(function (order) {
+            appendWorkOrderOption(order);
+        });
+    }
+
+    function getSelectedWorkOrderOption() {
+        if (!workOrderSelect || workOrderSelect.selectedIndex < 0) {
+            return null;
+        }
+
+        const option = workOrderSelect.options[workOrderSelect.selectedIndex];
+        return option && option.value ? option : null;
+    }
+
+    function setReadOnly(el, isReadOnly) {
+        if (!el) {
+            return;
+        }
+
+        el.readOnly = isReadOnly;
+        el.classList.toggle('bg-light', isReadOnly);
+    }
+
+    function syncDueDate() {
+        if (!dueDateInput) {
+            return;
+        }
+
+        const postingDate = getPostingDateValue();
+        if (!postingDate) {
+            return;
+        }
+
+        const selectedOption = getSelectedWorkOrderOption();
+        const paymentTermsDays = selectedOption
+            ? parseInt(selectedOption.dataset.paymentTermsDays || '', 10)
+            : parseInt(paymentTermsInput?.value || '', 10);
+
+        let dueDate = postingDate;
+
+        if (getBillDateValue() && Number.isFinite(paymentTermsDays)) {
+            const baseDate = new Date(getBillDateValue() + 'T00:00:00');
+            if (!Number.isNaN(baseDate.getTime())) {
+                baseDate.setDate(baseDate.getDate() + Math.max(0, paymentTermsDays));
+                dueDate = baseDate.toISOString().slice(0, 10);
+            }
+        } else if (dueDateInput.value) {
+            dueDate = dueDateInput.value;
+        }
+
+        if (dueDate < postingDate) {
+            dueDate = postingDate;
+        }
+
+        dueDateInput.value = dueDate;
+    }
+
+    function applyWorkOrderTermsFromSelection() {
+        const selectedOption = getSelectedWorkOrderOption();
+        const hasWorkOrder = !!selectedOption;
+
+        setReadOnly(workOrderNumberInput, hasWorkOrder);
+        setReadOnly(dueDateInput, hasWorkOrder);
+        setReadOnly(retentionPercentInput, hasWorkOrder);
+        setReadOnly(securityDepositPercentInput, hasWorkOrder);
+        setReadOnly(otherTermsInput, hasWorkOrder);
+
+        if (hasWorkOrder) {
+            if (workOrderNumberInput) {
+                workOrderNumberInput.value = selectedOption.dataset.workOrderNumber || '';
+            }
+            if (paymentTermsInput) {
+                paymentTermsInput.value = selectedOption.dataset.paymentTermsDays || '';
+            }
+            if (retentionPercentInput) {
+                retentionPercentInput.value = selectedOption.dataset.retentionPercent || '0';
+            }
+            if (securityDepositPercentInput) {
+                securityDepositPercentInput.value = selectedOption.dataset.securityDepositPercent || '0';
+            }
+            if (otherTermsInput) {
+                otherTermsInput.value = selectedOption.dataset.otherTerms || '';
+            }
+        } else if (paymentTermsInput) {
+            paymentTermsInput.value = '';
+        }
+
+        syncDueDate();
+        recalcAll();
+    }
+
+    function filterWorkOrdersByContext() {
+        if (!workOrderSelect) {
+            return;
+        }
+
+        const subcontractorId = getSelectedPartyId();
+        const projectId = getSelectedProjectId();
+        let hasVisible = false;
+
+        Array.from(workOrderSelect.options).forEach(function (option, index) {
+            if (index === 0) {
+                option.hidden = false;
+                return;
+            }
+
+            const matches = subcontractorId
+                && projectId
+                && option.dataset.subcontractorId === subcontractorId
+                && option.dataset.projectId === projectId;
+
+            option.hidden = !matches;
+            if (matches) {
+                hasVisible = true;
+            }
+        });
+
+        const selectedOption = getSelectedWorkOrderOption();
+        if (selectedOption && selectedOption.hidden) {
+            workOrderSelect.value = '';
+        }
+
+        if (!selectedOption && hasVisible && getVisibleWorkOrderOptions().length === 1) {
+            workOrderSelect.value = getVisibleWorkOrderOptions()[0].value;
+        }
+
+        applyWorkOrderTermsFromSelection();
+    }
+
+    async function loadWorkOrdersForContext() {
+        if (!workOrderSelect) {
+            return;
+        }
+
+        const subcontractorId = getSelectedPartyId();
+        const projectId = getSelectedProjectId();
+
+        if (!subcontractorId || !projectId) {
+            replaceWorkOrderOptions([]);
+            applyWorkOrderTermsFromSelection();
+            return;
+        }
+
+        const currentValue = workOrderSelect.value || initialSelectedWorkOrderId || '';
+
+        try {
+            const params = new URLSearchParams({
+                subcontractor_id: subcontractorId,
+                project_id: projectId,
+            });
+
+            const res = await fetch(`${workOrderLookupUrl}?${params.toString()}`, {
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (!res.ok) {
+                throw new Error('HTTP ' + res.status);
+            }
+
+            const data = await res.json();
+            replaceWorkOrderOptions(data.data || []);
+
+            if (currentValue && Array.from(workOrderSelect.options).some(option => option.value === String(currentValue))) {
+                workOrderSelect.value = String(currentValue);
+            } else if (workOrderSelect.options.length === 2) {
+                workOrderSelect.selectedIndex = 1;
+            }
+
+            applyWorkOrderTermsFromSelection();
+        } catch (e) {
+            replaceWorkOrderOptions(initialWorkOrders || []);
+            filterWorkOrdersByContext();
+        }
     }
 
     async function refreshAdvanceBalance() {
@@ -586,25 +939,42 @@
         });
 
         const retentionPercent = toNumber(document.querySelector('input[name="retention_percent"]')?.value);
+        const securityDepositPercent = toNumber(document.querySelector('input[name="security_deposit_percent"]')?.value);
         const advanceRecovery  = toNumber(document.querySelector('input[name="advance_recovery"]')?.value);
         const otherDeductions  = toNumber(document.querySelector('input[name="other_deductions"]')?.value);
 
         const retentionAmt = (retentionPercent > 0) ? (currentAmount * retentionPercent / 100) : 0;
-        const netAmount = currentAmount - (retentionAmt + advanceRecovery + otherDeductions);
+        const securityDepositAmt = (securityDepositPercent > 0) ? (currentAmount * securityDepositPercent / 100) : 0;
+        const netAmount = currentAmount - (retentionAmt + securityDepositAmt + advanceRecovery + otherDeductions);
 
         const cgstRate = toNumber(document.querySelector('input[name="cgst_rate"]')?.value);
         const sgstRate = toNumber(document.querySelector('input[name="sgst_rate"]')?.value);
         const igstRate = toNumber(document.querySelector('input[name="igst_rate"]')?.value);
 
-        const cgstAmt = netAmount * cgstRate / 100;
-        const sgstAmt = netAmount * sgstRate / 100;
-        const igstAmt = netAmount * igstRate / 100;
+        const cgstAmt = Math.round((netAmount * cgstRate) * 100) / 10000;
+        const sgstAmt = Math.round((netAmount * sgstRate) * 100) / 10000;
+        const igstAmt = Math.round((netAmount * igstRate) * 100) / 10000;
         const gstTotal = cgstAmt + sgstAmt + igstAmt;
 
         const tdsRate = toNumber(document.querySelector('input[name="tds_rate"]')?.value);
-        const tdsAmt  = netAmount * tdsRate / 100;
+        let tdsAmt = 0;
+        if (tdsRate > 0 && netAmount > 0) {
+            tdsAmt = Math.round((netAmount * tdsRate) / 100);
+        }
 
-        const payable = netAmount + gstTotal - tdsAmt;
+        const calculatedTotal = (Math.round(((netAmount + gstTotal - tdsAmt) + Number.EPSILON) * 100) / 100);
+
+        let invoiceTotal = toNumber(invoiceTotalInput?.value);
+        if (!invoiceTotalInput || String(invoiceTotalInput.value || '').trim() === '') {
+            invoiceTotal = roundedInvoiceTotal(calculatedTotal);
+            if (invoiceTotalInput) {
+                invoiceTotalInput.value = format2(invoiceTotal);
+            }
+        } else {
+            invoiceTotal = Math.round((invoiceTotal + Number.EPSILON) * 100) / 100;
+        }
+
+        const roundOff = Math.round(((invoiceTotal - calculatedTotal) + Number.EPSILON) * 100) / 100;
 
         const setVal = (id, val) => {
             const el = document.getElementById(id);
@@ -613,10 +983,13 @@
 
         setVal('sum_current', currentAmount);
         setVal('sum_retention', retentionAmt);
+        setVal('sum_security_deposit', securityDepositAmt);
         setVal('sum_net', netAmount);
         setVal('sum_gst', gstTotal);
         setVal('sum_tds', tdsAmt);
-        setVal('sum_total', payable);
+        setVal('sum_calculated_total', calculatedTotal);
+        setVal('sum_round_off', roundOff);
+        setVal('sum_total', invoiceTotal);
     }
 
     // Copy previous RA lines (reload with query params)
@@ -667,7 +1040,7 @@
 
     // Recalc on input changes
     document.addEventListener('input', function (e) {
-        if (e.target.matches('.js-line') || e.target.matches('.js-calc') || e.target.matches('input[name="tds_rate"]')) {
+        if (e.target.matches('.js-line') || e.target.matches('.js-calc') || e.target.matches('input[name="tds_rate"]') || e.target === invoiceTotalInput) {
             recalcAll();
         }
     });
@@ -675,6 +1048,7 @@
     if (subcontractorSelect) {
         subcontractorSelect.addEventListener('change', function () {
             applyGstDefaultsFromSubcontractor();
+            loadWorkOrdersForContext();
             refreshAdvanceBalance();
             recalcAll();
         });
@@ -682,14 +1056,36 @@
 
     if (projectSelect) {
         projectSelect.addEventListener('change', function () {
+            loadWorkOrdersForContext();
             refreshAdvanceBalance();
         });
     }
 
     if (billDateInput) {
         billDateInput.addEventListener('change', function () {
+            if (postingDateInput && (!postingDateInput.value || postingDateInput.value === postingDateInput.dataset.lastBillDate)) {
+                postingDateInput.value = billDateInput.value || '';
+            }
+            postingDateInput.dataset.lastBillDate = billDateInput.value || '';
+            syncDueDate();
             refreshAdvanceBalance();
         });
+    }
+
+    if (postingDateInput) {
+        postingDateInput.addEventListener('change', function () {
+            syncDueDate();
+        });
+    }
+
+    if (workOrderSelect) {
+        workOrderSelect.addEventListener('change', function () {
+            applyWorkOrderTermsFromSelection();
+        });
+    }
+
+    if (postingDateInput && !postingDateInput.dataset.lastBillDate) {
+        postingDateInput.dataset.lastBillDate = billDateInput ? (billDateInput.value || '') : '';
     }
 
     if (tdsSectionSelect) {
@@ -699,13 +1095,41 @@
         });
     }
 
+    if (invoiceTotalInput) {
+        invoiceTotalInput.addEventListener('blur', function () {
+            if (!String(invoiceTotalInput.value || '').trim()) {
+                invoiceTotalInput.value = format2(roundedInvoiceTotal(toNumber(document.getElementById('sum_calculated_total')?.value)));
+            } else {
+                invoiceTotalInput.value = format2(toNumber(invoiceTotalInput.value));
+            }
+            recalcAll();
+        });
+    }
+
+    if (roundInvoiceBtn) {
+        roundInvoiceBtn.addEventListener('click', function () {
+            const calculatedTotal = toNumber(document.getElementById('sum_calculated_total')?.value);
+            if (invoiceTotalInput) {
+                invoiceTotalInput.value = format2(roundedInvoiceTotal(calculatedTotal));
+            }
+            recalcAll();
+        });
+    }
+
     // Initial
     applyGstDefaultsFromSubcontractor();
+    replaceWorkOrderOptions(initialWorkOrders || []);
+    if (initialSelectedWorkOrderId && Array.from(workOrderSelect?.options || []).some(option => option.value === String(initialSelectedWorkOrderId))) {
+        workOrderSelect.value = String(initialSelectedWorkOrderId);
+    }
+    if (subcontractorSelect || projectSelect) {
+        loadWorkOrdersForContext();
+    } else {
+        filterWorkOrdersByContext();
+    }
     maybeAutofillTdsRate();
     recalcAll();
     refreshAdvanceBalance();
 })();
 </script>
 @endpush
-
-

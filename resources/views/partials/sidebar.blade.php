@@ -1610,6 +1610,19 @@
                     @endcan
 
                         {{-- Billing / RA Bills --}}
+                        @if(\Illuminate\Support\Facades\Route::has('accounting.subcontractor-work-orders.index'))
+                            @can('subcontractor_ra.view')
+                                <li class="nav-item">
+                                    <a data-erp-menu-item href="{{ route('accounting.subcontractor-work-orders.index') }}"
+                                       class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                              {{ $isRoute('accounting.subcontractor-work-orders.*') ? 'active' : 'text-body-secondary' }}">
+                                        <i class="bi bi-file-earmark-text me-2"></i>
+                                        <span>Subcontractor Work Orders</span>
+                                    </a>
+                                </li>
+                            @endcan
+                        @endif
+
                         @if(\Illuminate\Support\Facades\Route::has('accounting.subcontractor-ra.index'))
                             @can('subcontractor_ra.view')
                                 <li class="nav-item">
@@ -1663,36 +1676,36 @@
               
                     {{-- Bank/Cash Vouchers (Payment/Receipt) --}}
                     @php
-                        $paymentCreateRoute = $pickRoute(['accounting.payments.create', 'payments.create']);
-                        $receiptCreateRoute = $pickRoute(['accounting.receipts.create', 'receipts.create']);
+                        $paymentIndexRoute = $pickRoute(['accounting.payments.index', 'accounting.payments.create', 'payments.create']);
+                        $receiptIndexRoute = $pickRoute(['accounting.receipts.index', 'accounting.receipts.create', 'receipts.create']);
                         $onAccountRoute     = $pickRoute(['accounting.receipts.on-account.index', 'receipts.on-account.index']);
                     @endphp
 
-                    @can('accounting.vouchers.create')
-                        @if($paymentCreateRoute || $receiptCreateRoute || $onAccountRoute)
+                    @canany(['accounting.vouchers.view', 'accounting.vouchers.create'])
+                        @if($paymentIndexRoute || $receiptIndexRoute || $onAccountRoute)
                             <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
                                 Bank &amp; Cash
                             </li>
                         @endif
 
-                        @if($paymentCreateRoute)
+                        @if($paymentIndexRoute)
                             <li class="nav-item">
-                                <a data-erp-menu-item href="{{ route($paymentCreateRoute) }}"
+                                <a data-erp-menu-item href="{{ route($paymentIndexRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                           {{ $isRoute(['accounting.payments.*', 'payments.*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-arrow-up-right-circle me-2"></i>
-                                    <span>New Payment</span>
+                                    <span>Payments</span>
                                 </a>
                             </li>
                         @endif
 
-                        @if($receiptCreateRoute)
+                        @if($receiptIndexRoute)
                             <li class="nav-item">
-                                <a data-erp-menu-item href="{{ route($receiptCreateRoute) }}"
+                                <a data-erp-menu-item href="{{ route($receiptIndexRoute) }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                           {{ $isRoute(['accounting.receipts.*', 'receipts.*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-arrow-down-left-circle me-2"></i>
-                                    <span>New Receipt</span>
+                                    <span>Receipts</span>
                                 </a>
                             </li>
                         @endif
@@ -1707,7 +1720,7 @@
                                 </a>
                             </li>
                         @endif
-                    @endcan
+                    @endcanany
 
                     {{-- Reports --}}
                     @php

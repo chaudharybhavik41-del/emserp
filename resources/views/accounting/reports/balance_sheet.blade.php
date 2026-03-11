@@ -3,24 +3,24 @@
 @section('title', 'Balance Sheet')
 
 @section('content')
-    @php
-        // Profit/Loss balancing logic: positive = Profit (credit) goes to Liabilities side
-        // negative = Loss (debit) goes to Assets side
-        $plIsProfit = $plBalance > 0;
-        $plAmount = abs($plBalance);
-        $ledgerTo = optional($asOfDate)->toDateString();
-        $ledgerFrom = optional($asOfDate)->copy()->startOfMonth()->toDateString();
-        $assetsDrCr = $totalAssets >= 0 ? 'Dr' : 'Cr';
-        $liabDrCr = $totalLiabilities >= 0 ? 'Cr' : 'Dr';
-    @endphp
-    <div class="container-fluid">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-            <div>
-                <h1 class="h4 mb-0">Balance Sheet</h1>
-                <div class="small text-muted">As on {{ $ledgerTo }}</div>
-            </div>
-            <div class="small text-muted">Company #{{ $companyId }}</div>
+@php
+    // Profit/Loss balancing logic: positive = Profit (credit) goes to Liabilities side
+    // negative = Loss (debit) goes to Assets side
+    $plIsProfit = $plBalance > 0;
+    $plAmount = abs($plBalance);
+    $ledgerTo = optional($asOfDate)->toDateString();
+    $ledgerFrom = optional($asOfDate)->copy()->startOfMonth()->toDateString();
+    $assetsDrCr = $totalAssets >= 0 ? 'Dr' : 'Cr';
+    $liabDrCr = $totalLiabilities >= 0 ? 'Cr' : 'Dr';
+@endphp
+<div class="container-fluid">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h1 class="h4 mb-0">Balance Sheet</h1>
+            <div class="small text-muted">As on {{ $ledgerTo }}</div>
         </div>
+        <div class="small text-muted">Company #{{ $companyId }}</div>
+    </div>
 
         <div class="card mb-3">
             <div class="card-body">
@@ -59,57 +59,54 @@
             </div>
         </div>
 
-        <div class="row g-3 mb-3">
-            <div class="col-sm-6 col-xl-3">
-                <div class="card h-100 bs-stat-card">
-                    <div class="card-body py-3">
-                        <div class="small text-muted text-uppercase">Total Assets</div>
-                        <div class="h5 mb-0">{{ number_format(abs($totalAssets), 2) }} <span
-                                class="fs-6">{{ $assetsDrCr }}</span></div>
-                    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100 bs-stat-card">
+                <div class="card-body py-3">
+                    <div class="small text-muted text-uppercase">Total Assets</div>
+                    <div class="h5 mb-0">{{ number_format(abs($totalAssets), 2) }} <span class="fs-6">{{ $assetsDrCr }}</span></div>
                 </div>
             </div>
-            <div class="col-sm-6 col-xl-3">
-                <div class="card h-100 bs-stat-card">
-                    <div class="card-body py-3">
-                        <div class="small text-muted text-uppercase">Total Liabilities</div>
-                        <div class="h5 mb-0">{{ number_format(abs($totalLiabilities), 2) }} <span
-                                class="fs-6">{{ $liabDrCr }}</span></div>
-                    </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100 bs-stat-card">
+                <div class="card-body py-3">
+                    <div class="small text-muted text-uppercase">Total Liabilities</div>
+                    <div class="h5 mb-0">{{ number_format(abs($totalLiabilities), 2) }} <span class="fs-6">{{ $liabDrCr }}</span></div>
                 </div>
             </div>
-            <div class="col-sm-6 col-xl-3">
-                <div class="card h-100 bs-stat-card">
-                    <div class="card-body py-3">
-                        <div class="small text-muted text-uppercase">Balancing P/L</div>
-                        <div class="h5 mb-0">{{ number_format($plAmount, 2) }}
-                            <span class="badge {{ $plIsProfit ? 'text-bg-success' : 'text-bg-warning text-dark' }}">
-                                {{ $plIsProfit ? 'Profit (Cr)' : 'Loss (Dr)' }}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-6 col-xl-3">
-                <div class="card h-100 bs-stat-card">
-                    <div class="card-body py-3">
-                        <div class="small text-muted text-uppercase">Report Period</div>
-                        <div class="h6 mb-0">{{ $ledgerFrom }} to {{ $ledgerTo }}</div>
-                        <div class="small text-muted">Drill-down defaults to this period</div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100 bs-stat-card">
+                <div class="card-body py-3">
+                    <div class="small text-muted text-uppercase">Balancing P/L</div>
+                    <div class="h5 mb-0">{{ number_format($plAmount, 2) }}
+                        <span class="badge {{ $plIsProfit ? 'text-bg-success' : 'text-bg-warning text-dark' }}">
+                            {{ $plIsProfit ? 'Profit (Cr)' : 'Loss (Dr)' }}
+                        </span>
                     </div>
                 </div>
             </div>
         </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100 bs-stat-card">
+                <div class="card-body py-3">
+                    <div class="small text-muted text-uppercase">Report Period</div>
+                    <div class="h6 mb-0">{{ $ledgerFrom }} to {{ $ledgerTo }}</div>
+                    <div class="small text-muted">Drill-down defaults to this period</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        <div class="alert alert-info">
-            <div class="small">
-                This Balance Sheet is generated from <strong>Opening Balances</strong> + <strong>Posted Vouchers</strong> up
-                to the selected date.
-                Income &amp; Expense ledgers are excluded and a Profit/Loss balancing line is shown.
-                Amounts show <strong>Dr/Cr</strong> to make contra balances visible.
-                Click any ledger to open the detailed ledger statement.
-            </div>
+    <div class="alert alert-info">
+        <div class="small">
+            This Balance Sheet is generated from <strong>Opening Balances</strong> + <strong>Posted Vouchers</strong> up to the selected date.
+            Income &amp; Expense ledgers are excluded and a Profit/Loss balancing line is shown.
+            Amounts show <strong>Dr/Cr</strong> to make contra balances visible.
+            Click any ledger to open the detailed ledger statement.
         </div>
+    </div>
 
         <div id="bsNoMatchAlert" class="alert alert-warning d-none py-2">
             No ledgers match the search text. Clear search to see all rows again.
@@ -236,25 +233,24 @@
                                         </tr>
                                     @endif
 
-                                    @if(!empty($assetGroups) && !$plIsProfit && $plAmount > 0.005)
-                                        <tr class="table-warning fw-semibold bs-static-row">
-                                            <td class="small">Loss (Balancing)</td>
-                                            <td class="small text-end">{{ number_format($plAmount, 2) }} Dr</td>
-                                        </tr>
-                                    @endif
-                                </tbody>
-                                <tfoot>
-                                    <tr class="table-dark text-white fw-semibold bs-static-row">
-                                        <td class="small text-end">Total Assets</td>
-                                        <td class="small text-end">{{ number_format(abs($totalAssets), 2) }}
-                                            {{ $assetsDrCr }}</td>
+                                @if(!empty($assetGroups) && !$plIsProfit && $plAmount > 0.005)
+                                    <tr class="table-warning fw-semibold bs-static-row">
+                                        <td class="small">Loss (Balancing)</td>
+                                        <td class="small text-end">{{ number_format($plAmount, 2) }} Dr</td>
                                     </tr>
-                                </tfoot>
-                            </table>
-                        </div>
+                                @endif
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-dark text-white fw-semibold bs-static-row">
+                                    <td class="small text-end">Total Assets</td>
+                                    <td class="small text-end">{{ number_format(abs($totalAssets), 2) }} {{ $assetsDrCr }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
                     </div>
                 </div>
             </div>
+        </div>
 
             <div class="col-md-6">
                 <div class="card">
@@ -359,27 +355,26 @@
                                         </tr>
                                     @endif
 
-                                    @if(!empty($liabilityGroups) && $plIsProfit && $plAmount > 0.005)
-                                        <tr class="table-warning fw-semibold bs-static-row">
-                                            <td class="small">Profit (Balancing)</td>
-                                            <td class="small text-end">{{ number_format($plAmount, 2) }} Cr</td>
-                                        </tr>
-                                    @endif
-                                </tbody>
-                                <tfoot>
-                                    <tr class="table-dark text-white fw-semibold bs-static-row">
-                                        <td class="small text-end">Total Liabilities</td>
-                                        <td class="small text-end">{{ number_format(abs($totalLiabilities), 2) }}
-                                            {{ $liabDrCr }}</td>
+                                @if(!empty($liabilityGroups) && $plIsProfit && $plAmount > 0.005)
+                                    <tr class="table-warning fw-semibold bs-static-row">
+                                        <td class="small">Profit (Balancing)</td>
+                                        <td class="small text-end">{{ number_format($plAmount, 2) }} Cr</td>
                                     </tr>
-                                </tfoot>
-                            </table>
-                        </div>
+                                @endif
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-dark text-white fw-semibold bs-static-row">
+                                    <td class="small text-end">Total Liabilities</td>
+                                    <td class="small text-end">{{ number_format(abs($totalLiabilities), 2) }} {{ $liabDrCr }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
 @endsection
 
 @push('styles')

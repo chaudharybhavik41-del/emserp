@@ -3,6 +3,7 @@
 @section('title', 'Edit Voucher')
 
 @section('content')
+                    @php $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? [])); @endphp
                     <div class="container-fluid">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h1 class="h4 mb-0">Edit Voucher</h1>
@@ -28,7 +29,7 @@
                                         </div>
                                         <div class="col-md-3">
                                             <label class="form-label form-label-sm">Type</label>
-                                            <select name="voucher_type" class="form-select form-select-sm">
+                                            <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
                                                 @foreach($voucherTypes as $key => $label)
                                                     <option value="{{ $key }}" @selected(old('voucher_type', $voucher->voucher_type) === $key)>
                                                         {{ $label }}
@@ -112,10 +113,14 @@
                                         <tr>
                                             <td class="row-number">{{ $i + 1 }}</td>
                                             <td>
-                                                <select name="lines[{{ $i }}][account_id]" class="form-select form-select-sm">
+                                                <select name="lines[{{ $i }}][account_id]" class="form-select form-select-sm voucher-account-select">
                                                     <option value="">-- select --</option>
                                                     @foreach($accounts as $account)
-                                                        <option value="{{ $account->id }}" @selected((string) old("lines.$i.account_id", $ln?->account_id) === (string) $account->id)>
+                                                        <option
+                                                            value="{{ $account->id }}"
+                                                            data-contra-allowed="{{ isset($contraAccountLookup[(int) $account->id]) ? '1' : '0' }}"
+                                                            @selected((string) old("lines.$i.account_id", $ln?->account_id) === (string) $account->id)
+                                                        >
                                                             {{ $account->name }}
                                                         </option>
                                                     @endforeach
@@ -195,6 +200,7 @@
                                 const saveDraftBtn = document.getElementById('save-draft');
                                 const savePostBtn = document.getElementById('save-post');
                                 const balanceStatus = document.getElementById('balance-status');
+                                const voucherTypeSelect = document.getElementById('voucher_type');
 
                                 // Hide any blank rows initially
                                 tbody.querySelectorAll('tr').forEach(row => {
@@ -214,6 +220,7 @@
                                         });
                                         row.style.display = 'table-row'; // show rows
                                     });
+                                    syncContraAccountOptions();
                                     calculateTotals();
                                 }
 
@@ -223,10 +230,10 @@
                                     newRow.innerHTML = `
                                     <td class="row-number"></td>
                                     <td>
-                                        <select name="lines[${lineIndex}][account_id]" class="form-select form-select-sm">
+                                        <select name="lines[${lineIndex}][account_id]" class="form-select form-select-sm voucher-account-select">
                                             <option value="">-- select --</option>
                                             @foreach($accounts as $account)
-                                                <option value="{{ $account->id }}">{{ $account->name }}</option>
+                                                <option value="{{ $account->id }}" data-contra-allowed="{{ isset($contraAccountLookup[(int) $account->id]) ? '1' : '0' }}">{{ $account->name }}</option>
                                             @endforeach
                                         </select>
                                     </td>
@@ -257,6 +264,31 @@
                                     lineIndex++;
                                     updateRows();
                                 });
+
+                                function syncContraAccountOptions() {
+                                    const isContra = voucherTypeSelect?.value === 'contra';
+
+                                    tbody.querySelectorAll('.voucher-account-select').forEach(select => {
+                                        Array.from(select.options).forEach((option, index) => {
+                                            if (index === 0) {
+                                                option.hidden = false;
+                                                option.disabled = false;
+                                                return;
+                                            }
+
+                                            const isAllowed = option.dataset.contraAllowed === '1';
+                                            const shouldRestrict = isContra && !isAllowed;
+
+                                            option.hidden = shouldRestrict;
+                                            option.disabled = shouldRestrict;
+                                        });
+
+                                        const selectedOption = select.options[select.selectedIndex];
+                                        if (isContra && selectedOption && selectedOption.value && selectedOption.dataset.contraAllowed !== '1') {
+                                            select.value = '';
+                                        }
+                                    });
+                                }
 
                                 // Remove row
                                 tbody.addEventListener('click', e => {
@@ -327,7 +359,10 @@
                                     balanceStatus.classList.toggle('text-danger', !enable);
                                 }
 
+                                voucherTypeSelect?.addEventListener('change', syncContraAccountOptions);
+
                                 // Initial calculation
+                                syncContraAccountOptions();
                                 calculateTotals();
                             });
                         </script>

@@ -52,6 +52,16 @@
                     </select>
                 </div>
 
+                @if($supportsAnalyticalView ?? false)
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm">View mode</label>
+                        <select name="view_mode" class="form-select form-select-sm">
+                            <option value="analytical" @selected(($viewMode ?? 'standard') === 'analytical')>Analytical Party Ledger</option>
+                            <option value="standard" @selected(($viewMode ?? 'standard') === 'standard')>Standard Ledger</option>
+                        </select>
+                    </div>
+                @endif
+
                 <div class="col-md-7 d-flex gap-2 flex-wrap">
                     <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-filter"></i> Apply</button>
                     <a href="{{ route('accounting.reports.ledger') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
@@ -59,12 +69,16 @@
                     @if($account)
                         <a href="{{ route('accounting.reports.ledger', array_merge(request()->all(), ['export' => 'csv'])) }}"
                            class="btn btn-outline-success btn-sm"><i class="bi bi-download"></i> Export CSV</a>
+                        <a href="{{ route('accounting.reports.ledger', array_merge(request()->all(), ['export' => 'pdf'])) }}"
+                           class="btn btn-outline-danger btn-sm"><i class="bi bi-file-earmark-pdf"></i> Export PDF</a>
                     @endif
 
-                    <div class="form-check form-check-inline ms-2 mt-1">
-                        <input class="form-check-input" type="checkbox" id="show_breakdown" name="show_breakdown" value="1" @checked(request()->boolean('show_breakdown'))>
-                        <label class="form-check-label small" for="show_breakdown">Show voucher break-up (TDS / GST / Retention etc.)</label>
-                    </div>
+                    @if(($viewMode ?? 'standard') === 'standard')
+                        <div class="form-check form-check-inline ms-2 mt-1">
+                            <input class="form-check-input" type="checkbox" id="show_breakdown" name="show_breakdown" value="1" @checked(request()->boolean('show_breakdown'))>
+                            <label class="form-check-label small" for="show_breakdown">Show voucher break-up (TDS / GST / Retention etc.)</label>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="col-md-5">
@@ -112,7 +126,7 @@
             </div>
         </div>
 
-        @if(($showBreakdown ?? false) && count($ledgerEntries))
+        @if(($viewMode ?? 'standard') === 'standard' && ($showBreakdown ?? false) && count($ledgerEntries))
             <div class="mb-2 d-flex gap-2">
                 <button type="button" class="btn btn-outline-primary btn-sm" id="ledgerExpandBreakdown">Expand all break-ups</button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="ledgerCollapseBreakdown">Collapse all break-ups</button>
@@ -121,7 +135,12 @@
 
         <div class="card">
             <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                <div class="fw-semibold small">Period: {{ $periodFrom }} to {{ $periodTo }}</div>
+                <div class="fw-semibold small">
+                    Period: {{ $periodFrom }} to {{ $periodTo }}
+                    @if(($viewMode ?? 'standard') === 'analytical')
+                        <span class="text-muted">· Analytical supplier ledger</span>
+                    @endif
+                </div>
                 <div class="small text-muted">
                     @if($projectId)
                         Project filter applied
@@ -130,112 +149,167 @@
             </div>
 
             <div class="table-responsive">
-                <table class="table table-sm table-bordered mb-0 align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width: 10%">Date</th>
-                            <th style="width: 12%">Voucher No</th>
-                            <th style="width: 10%">Type</th>
-                            <th>Description</th>
-                            <th style="width: 10%" class="text-end">Debit</th>
-                            <th style="width: 10%" class="text-end">Credit</th>
-                            <th style="width: 12%" class="text-end">Running</th>
-                            <th style="width: 6%" class="text-center">Dr/Cr</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @php $running = $openingBalance; @endphp
-
-                        <tr class="table-light">
-                            <td colspan="4" class="small fw-semibold">Opening Balance</td>
-                            <td class="text-end small">&nbsp;</td>
-                            <td class="text-end small">&nbsp;</td>
-                            <td class="text-end small fw-semibold">{{ number_format(abs($running), 2) }}</td>
-                            <td class="text-center small fw-semibold">{{ $running >= 0 ? 'Dr' : 'Cr' }}</td>
-                        </tr>
-
-                        <tr id="ledgerNoMatch" class="d-none">
-                            <td colspan="8" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
-                        </tr>
-
-                        @if(count($ledgerEntries))
-                            @foreach($ledgerEntries as $entry)
-                                @php
-                                    $running += ((float) $entry->debit - (float) $entry->credit);
-                                    $searchText = strtolower(trim(
-                                        (optional($entry->voucher->voucher_date)->toDateString() ?? '') . ' ' .
-                                        ($entry->voucher->voucher_no ?? '') . ' ' .
-                                        ($entry->voucher->voucher_type ?? '') . ' ' .
-                                        ($entry->description ?: ($entry->voucher->narration ?: '-')) . ' ' .
-                                        ($entry->voucher->reference ?? '')
-                                    ));
-                                @endphp
-                                <tr class="ledger-entry-row" data-voucher-id="{{ $entry->voucher_id }}" data-row-text="{{ $searchText }}">
-                                    <td class="small">{{ optional($entry->voucher->voucher_date)->toDateString() }}</td>
-                                    <td class="small">
-                                        <a href="{{ route('accounting.vouchers.show', $entry->voucher) }}" class="text-decoration-none">{{ $entry->voucher->voucher_no }}</a>
-                                    </td>
-                                    <td class="small text-uppercase">{{ $entry->voucher->voucher_type }}</td>
-                                    <td class="small">
-                                        <div class="fw-semibold">{{ $entry->description ?: ($entry->voucher->narration ?: '-') }}</div>
-                                        @if($entry->costCenter)
-                                            <div class="text-muted">Cost Center: {{ $entry->costCenter->name }}</div>
-                                        @endif
-                                        @if($entry->voucher->reference)
-                                            <div class="text-muted">Ref: {{ $entry->voucher->reference }}</div>
-                                        @endif
-                                    </td>
-                                    <td class="small text-end">{{ number_format($entry->debit, 2) }}</td>
-                                    <td class="small text-end">{{ number_format($entry->credit, 2) }}</td>
-                                    <td class="small text-end fw-semibold">{{ number_format(abs($running), 2) }}</td>
-                                    <td class="small text-center fw-semibold">{{ $running >= 0 ? 'Dr' : 'Cr' }}</td>
-                                </tr>
-
-                                @if(($showBreakdown ?? false) && isset($voucherLinesByVoucher))
-                                    @php $vLines = $voucherLinesByVoucher->get($entry->voucher_id, collect()); @endphp
-
-                                    @if($vLines->count() > 1)
-                                        <tr class="table-light ledger-breakdown-row" data-voucher-id="{{ $entry->voucher_id }}" data-expanded="true">
-                                            <td colspan="8" class="p-2">
-                                                <div class="small text-muted mb-1">Voucher break-up</div>
-                                                <table class="table table-sm table-bordered mb-0 align-middle">
-                                                    <thead class="table-light">
-                                                        <tr>
-                                                            <th class="small">Account</th>
-                                                            <th class="small">Line Description</th>
-                                                            <th class="small text-end" style="width: 12%">Debit</th>
-                                                            <th class="small text-end" style="width: 12%">Credit</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        @foreach($vLines as $vl)
-                                                            <tr @class(['table-primary' => (int) $vl->id === (int) $entry->id])>
-                                                                <td class="small">{{ $vl->account?->code }} - {{ $vl->account?->name }}</td>
-                                                                <td class="small">{{ $vl->description }}</td>
-                                                                <td class="small text-end">{{ number_format($vl->debit, 2) }}</td>
-                                                                <td class="small text-end">{{ number_format($vl->credit, 2) }}</td>
-                                                            </tr>
-                                                        @endforeach
-                                                    </tbody>
-                                                </table>
-                                            </td>
-                                        </tr>
-                                    @endif
-                                @endif
-                            @endforeach
-                        @else
+                @if(($viewMode ?? 'standard') === 'analytical')
+                    <table class="table table-sm table-bordered mb-0 align-middle">
+                        <thead class="table-light">
                             <tr>
-                                <td colspan="8" class="text-center small text-muted py-2">No ledger entries for the selected filters.</td>
+                                <th style="width: 9%">Date</th>
+                                <th style="width: 10%">Entry</th>
+                                <th style="width: 12%">Document</th>
+                                <th style="width: 12%">Voucher No</th>
+                                <th>Particulars</th>
+                                <th style="width: 10%" class="text-end">Bill Amt</th>
+                                <th style="width: 8%" class="text-end">TDS</th>
+                                <th style="width: 10%" class="text-end">Payment / Adj</th>
+                                <th style="width: 10%" class="text-end">Balance</th>
+                                <th style="width: 6%" class="text-center">Dr/Cr</th>
                             </tr>
-                        @endif
+                        </thead>
+                        <tbody>
+                            <tr class="table-light">
+                                <td colspan="8" class="small fw-semibold">Opening Balance</td>
+                                <td class="text-end small fw-semibold">{{ number_format(abs($openingBalance), 2) }}</td>
+                                <td class="text-center small fw-semibold">{{ $openingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
+                            </tr>
 
-                        <tr class="table-dark text-white fw-semibold">
-                            <td colspan="6" class="text-end small">Closing Balance</td>
-                            <td class="text-end small">{{ number_format(abs($closingBalance), 2) }}</td>
-                            <td class="text-center small">{{ $closingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+                            <tr id="ledgerNoMatch" class="d-none">
+                                <td colspan="10" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
+                            </tr>
+
+                            @forelse(($analyticalRows ?? collect()) as $row)
+                                <tr class="ledger-entry-row" data-row-text="{{ $row['search_text'] ?? '' }}">
+                                    <td class="small">{{ $row['date'] ?: '-' }}</td>
+                                    <td class="small fw-semibold">{{ $row['entry_type'] }}</td>
+                                    <td class="small">{{ $row['document_no'] ?: '-' }}</td>
+                                    <td class="small">{{ $row['voucher_no'] ?: '-' }}</td>
+                                    <td class="small">{{ $row['particulars'] ?: '-' }}</td>
+                                    <td class="small text-end">{{ $row['bill_amount'] > 0 ? number_format($row['bill_amount'], 2) : '' }}</td>
+                                    <td class="small text-end">{{ $row['tds_amount'] > 0 ? number_format($row['tds_amount'], 2) : '' }}</td>
+                                    <td class="small text-end">{{ $row['payment_amount'] > 0 ? number_format($row['payment_amount'], 2) : '' }}</td>
+                                    <td class="small text-end fw-semibold">{{ number_format(abs($row['balance']), 2) }}</td>
+                                    <td class="small text-center fw-semibold">{{ $row['balance_type'] }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="10" class="text-center small text-muted py-2">No ledger entries for the selected filters.</td>
+                                </tr>
+                            @endforelse
+
+                            <tr class="table-dark text-white fw-semibold">
+                                <td colspan="8" class="text-end small">Closing Balance</td>
+                                <td class="text-end small">{{ number_format(abs($closingBalance), 2) }}</td>
+                                <td class="text-center small">{{ $closingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                @else
+                    <table class="table table-sm table-bordered mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 10%">Date</th>
+                                <th style="width: 12%">Voucher No</th>
+                                <th style="width: 10%">Type</th>
+                                <th>Description</th>
+                                <th style="width: 10%" class="text-end">Debit</th>
+                                <th style="width: 10%" class="text-end">Credit</th>
+                                <th style="width: 12%" class="text-end">Running</th>
+                                <th style="width: 6%" class="text-center">Dr/Cr</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @php $running = $openingBalance; @endphp
+
+                            <tr class="table-light">
+                                <td colspan="4" class="small fw-semibold">Opening Balance</td>
+                                <td class="text-end small">&nbsp;</td>
+                                <td class="text-end small">&nbsp;</td>
+                                <td class="text-end small fw-semibold">{{ number_format(abs($running), 2) }}</td>
+                                <td class="text-center small fw-semibold">{{ $running >= 0 ? 'Dr' : 'Cr' }}</td>
+                            </tr>
+
+                            <tr id="ledgerNoMatch" class="d-none">
+                                <td colspan="8" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
+                            </tr>
+
+                            @if(count($ledgerEntries))
+                                @foreach($ledgerEntries as $entry)
+                                    @php
+                                        $running += ((float) $entry->debit - (float) $entry->credit);
+                                        $searchText = strtolower(trim(
+                                            (optional($entry->voucher->voucher_date)->toDateString() ?? '') . ' ' .
+                                            ($entry->voucher->voucher_no ?? '') . ' ' .
+                                            ($entry->voucher->voucher_type ?? '') . ' ' .
+                                            ($entry->description ?: ($entry->voucher->narration ?: '-')) . ' ' .
+                                            ($entry->voucher->reference ?? '')
+                                        ));
+                                    @endphp
+                                    <tr class="ledger-entry-row" data-voucher-id="{{ $entry->voucher_id }}" data-row-text="{{ $searchText }}">
+                                        <td class="small">{{ optional($entry->voucher->voucher_date)->toDateString() }}</td>
+                                        <td class="small">
+                                            <a href="{{ route('accounting.vouchers.show', $entry->voucher) }}" class="text-decoration-none">{{ $entry->voucher->voucher_no }}</a>
+                                        </td>
+                                        <td class="small text-uppercase">{{ $entry->voucher->voucher_type }}</td>
+                                        <td class="small">
+                                            <div class="fw-semibold">{{ $entry->description ?: ($entry->voucher->narration ?: '-') }}</div>
+                                            @if($entry->costCenter)
+                                                <div class="text-muted">Cost Center: {{ $entry->costCenter->name }}</div>
+                                            @endif
+                                            @if($entry->voucher->reference)
+                                                <div class="text-muted">Ref: {{ $entry->voucher->reference }}</div>
+                                            @endif
+                                        </td>
+                                        <td class="small text-end">{{ number_format($entry->debit, 2) }}</td>
+                                        <td class="small text-end">{{ number_format($entry->credit, 2) }}</td>
+                                        <td class="small text-end fw-semibold">{{ number_format(abs($running), 2) }}</td>
+                                        <td class="small text-center fw-semibold">{{ $running >= 0 ? 'Dr' : 'Cr' }}</td>
+                                    </tr>
+
+                                    @if(($showBreakdown ?? false) && isset($voucherLinesByVoucher))
+                                        @php $vLines = $voucherLinesByVoucher->get($entry->voucher_id, collect()); @endphp
+
+                                        @if($vLines->count() > 1)
+                                            <tr class="table-light ledger-breakdown-row" data-voucher-id="{{ $entry->voucher_id }}" data-expanded="true">
+                                                <td colspan="8" class="p-2">
+                                                    <div class="small text-muted mb-1">Voucher break-up</div>
+                                                    <table class="table table-sm table-bordered mb-0 align-middle">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th class="small">Account</th>
+                                                                <th class="small">Line Description</th>
+                                                                <th class="small text-end" style="width: 12%">Debit</th>
+                                                                <th class="small text-end" style="width: 12%">Credit</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            @foreach($vLines as $vl)
+                                                                <tr @class(['table-primary' => (int) $vl->id === (int) $entry->id])>
+                                                                    <td class="small">{{ $vl->account?->code }} - {{ $vl->account?->name }}</td>
+                                                                    <td class="small">{{ $vl->description }}</td>
+                                                                    <td class="small text-end">{{ number_format($vl->debit, 2) }}</td>
+                                                                    <td class="small text-end">{{ number_format($vl->credit, 2) }}</td>
+                                                                </tr>
+                                                            @endforeach
+                                                        </tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        @endif
+                                    @endif
+                                @endforeach
+                            @else
+                                <tr>
+                                    <td colspan="8" class="text-center small text-muted py-2">No ledger entries for the selected filters.</td>
+                                </tr>
+                            @endif
+
+                            <tr class="table-dark text-white fw-semibold">
+                                <td colspan="6" class="text-end small">Closing Balance</td>
+                                <td class="text-end small">{{ number_format(abs($closingBalance), 2) }}</td>
+                                <td class="text-center small">{{ $closingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                @endif
             </div>
         </div>
     @endif

@@ -76,7 +76,7 @@
         <div class="small">
             <div class="fw-semibold mb-1">How this report works</div>
             <ul class="mb-0">
-                <li><strong>Stock snapshot</strong> is taken from <code>store_stock_items</code> current availability (live quantities).</li>
+                <li><strong>Stock snapshot</strong> is reconstructed from dated stock movements up to the selected “As on date”.</li>
                 <li><strong>Ledger balance</strong> is computed from <strong>posted vouchers</strong> up to the selected “As on date”.</li>
                 <li><strong>Client-supplied material</strong> is treated as <strong>quantity-only</strong> (value = 0).</li>
                 <li><strong>Unvalued lines</strong> usually mean GRN exists but no posted Purchase Bill (or no PO rate). These will show stock value = 0 and create a difference.</li>
@@ -218,7 +218,7 @@
     @if($details)
         <div class="card">
             <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                <div class="fw-semibold small">Stock Detail (live)</div>
+                <div class="fw-semibold small">Stock Detail as on {{ optional($asOfDate)->toDateString() }}</div>
                 <div class="small text-muted">{{ count($detailRows) }} line(s)</div>
             </div>
 

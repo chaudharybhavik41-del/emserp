@@ -250,9 +250,13 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
                 $gross = $qty * $rate;
                 $discAmt = $discPct > 0 ? ($gross * $discPct / 100) : 0;
                 $amount = round($gross - $discAmt, 2); // basic / amount
-                $taxAmt = round($amount * $taxPct / 100, 2);
-
-                [$gstAmounts, $gstPercents] = $this->gstSplit($taxAmt, $taxPct, $gstType);
+                [$gstAmounts, $gstPercents] = $this->gstSplit($amount, $taxPct, $gstType);
+                $taxAmt = round(
+                    (float) ($gstAmounts['cgst'] ?? 0)
+                    + (float) ($gstAmounts['sgst'] ?? 0)
+                    + (float) ($gstAmounts['igst'] ?? 0),
+                    2
+                );
 
                 $net = round($amount + $taxAmt, 2);
 
@@ -477,9 +481,13 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
                     $gross = $qty * $rate;
                     $discAmt = $discPct > 0 ? ($gross * $discPct / 100) : 0;
                     $amount = round($gross - $discAmt, 2);
-                    $taxAmount = round($amount * $taxPct / 100, 2);
-
-                    [$gstAmounts, $gstPercents] = $this->gstSplit($taxAmount, $taxPct, $gstType);
+                    [$gstAmounts, $gstPercents] = $this->gstSplit($amount, $taxPct, $gstType);
+                    $taxAmount = round(
+                        (float) ($gstAmounts['cgst'] ?? 0)
+                        + (float) ($gstAmounts['sgst'] ?? 0)
+                        + (float) ($gstAmounts['igst'] ?? 0),
+                        2
+                    );
 
                     $lineTotal = round($amount + $taxAmount, 2);
 
@@ -1090,12 +1098,12 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
      * Split GST amount into cgst/sgst/igst based on gstType.
      * Returns: [amounts, percents]
      */
-    protected function gstSplit(float $taxAmount, float $taxPercent, string $gstType): array
+    protected function gstSplit(float $taxableAmount, float $taxPercent, string $gstType): array
     {
-        $taxAmount = round($taxAmount, 2);
+        $taxableAmount = round($taxableAmount, 2);
         $taxPercent = (float) $taxPercent;
 
-        if ($taxAmount <= 0 || $taxPercent <= 0) {
+        if ($taxableAmount <= 0 || $taxPercent <= 0) {
             return [
                 ['cgst' => 0.0, 'sgst' => 0.0, 'igst' => 0.0],
                 ['cgst' => 0.0, 'sgst' => 0.0, 'igst' => 0.0],
@@ -1103,36 +1111,21 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
         }
 
         if ($gstType === 'igst') {
+            $taxAmount = round($taxableAmount * $taxPercent / 100, 2);
             return [
                 ['cgst' => 0.0, 'sgst' => 0.0, 'igst' => $taxAmount],
                 ['cgst' => 0.0, 'sgst' => 0.0, 'igst' => round($taxPercent, 2)],
             ];
         }
 
-        // Intra-state: prefer helper for rounding consistency
-        try {
-            $gst = GstHelper::split($taxAmount);
-            $cgst = (float) ($gst['cgst'] ?? 0);
-            $sgst = (float) ($gst['sgst'] ?? 0);
+        $half = round($taxPercent / 2, 2);
+        $cgst = round($taxableAmount * $half / 100, 2);
+        $sgst = round($taxableAmount * $half / 100, 2);
 
-            // Percent split as half
-            $half = round($taxPercent / 2, 2);
-
-            return [
-                ['cgst' => $cgst, 'sgst' => $sgst, 'igst' => 0.0],
-                ['cgst' => $half, 'sgst' => $half, 'igst' => 0.0],
-            ];
-        } catch (\Throwable $e) {
-            // Fallback split
-            $cgst = round($taxAmount / 2, 2);
-            $sgst = round($taxAmount - $cgst, 2);
-            $half = round($taxPercent / 2, 2);
-
-            return [
-                ['cgst' => $cgst, 'sgst' => $sgst, 'igst' => 0.0],
-                ['cgst' => $half, 'sgst' => $half, 'igst' => 0.0],
-            ];
-        }
+        return [
+            ['cgst' => $cgst, 'sgst' => $sgst, 'igst' => 0.0],
+            ['cgst' => $half, 'sgst' => $half, 'igst' => 0.0],
+        ];
     }
 
     /**

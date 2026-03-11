@@ -171,7 +171,10 @@ class HrEmployee extends Model
             return false;
         }
         
-        $probationEnd = $this->date_of_joining->addMonths($this->probation_period_months);
+        $probationEnd = $this->date_of_joining?->copy()?->addMonths($this->probation_period_months ?? 0);
+        if (!$probationEnd) {
+            return false;
+        }
         return now()->lt($probationEnd);
     }
 
@@ -180,7 +183,7 @@ class HrEmployee extends Model
         if ($this->confirmation_date) {
             return null;
         }
-        return $this->date_of_joining->addMonths($this->probation_period_months);
+        return $this->date_of_joining?->copy()?->addMonths($this->probation_period_months ?? 0);
     }
 
     // Relationships
@@ -380,8 +383,20 @@ class HrEmployee extends Model
 
     public function scopeOnProbation($query)
     {
-        return $query->whereNull('confirmation_date')
-            ->whereRaw('DATE_ADD(date_of_joining, INTERVAL probation_period_months MONTH) > NOW()');
+        $query = $query->whereNull('confirmation_date')
+            ->whereNotNull('date_of_joining')
+            ->whereNotNull('probation_period_months');
+
+        return match ($query->getConnection()->getDriverName()) {
+            'sqlite' => $query->whereRaw(
+                "date(date_of_joining, '+' || probation_period_months || ' months') > ?",
+                [now()->toDateString()]
+            ),
+            default => $query->whereRaw(
+                'DATE_ADD(date_of_joining, INTERVAL probation_period_months MONTH) > ?',
+                [now()->toDateString()]
+            ),
+        };
     }
 
     public function scopeConfirmed($query)

@@ -185,7 +185,7 @@ class StoreIssuePostingService
                             '; please configure accounting.store.inventory_consumables_account_code or set inventory_account_id on item.'
                         );
                     }
-                    $inventoryAccount = Account::where('code', $invCode)->first();
+                    $inventoryAccount = Account::where('company_id', $companyId)->where('code', $invCode)->first();
                     if (! $inventoryAccount) {
                         throw new RuntimeException('Inventory account not found for code: ' . $invCode);
                     }

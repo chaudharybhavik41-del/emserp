@@ -4,6 +4,7 @@ namespace App\Services\Accounting;
 
 use App\Models\Accounting\AccountCodeSequence;
 use App\Models\Accounting\AccountGroup;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -49,13 +50,25 @@ class AccountCodeGeneratorService
                     nature: (string) $group->nature
                 );
 
-                $seq = AccountCodeSequence::create([
-                    'company_id'   => $companyId,
-                    'series_key'   => $seriesKey,
-                    'prefix'       => $default['prefix'],
-                    'next_number'  => (int) ($default['start'] ?? 1),
-                    'pad_width'    => (int) ($default['pad'] ?? 3),
-                ]);
+                try {
+                    $seq = AccountCodeSequence::create([
+                        'company_id'   => $companyId,
+                        'series_key'   => $seriesKey,
+                        'prefix'       => $default['prefix'],
+                        'next_number'  => (int) ($default['start'] ?? 1),
+                        'pad_width'    => (int) ($default['pad'] ?? 3),
+                    ]);
+                } catch (QueryException $e) {
+                    if (! $this->isDuplicateKeyException($e)) {
+                        throw $e;
+                    }
+
+                    $seq = AccountCodeSequence::query()
+                        ->where('company_id', $companyId)
+                        ->where('series_key', $seriesKey)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                }
             }
 
             $number = (int) $seq->next_number;
@@ -204,8 +217,8 @@ class AccountCodeGeneratorService
             // No parent: used = all prefixes in the same nature block (1000-1999 etc.)
             $used = AccountCodeSequence::query()
                 ->where('company_id', $companyId)
-                ->whereRaw('prefix REGEXP "^[0-9]+$"')
                 ->pluck('prefix')
+                ->filter(fn ($prefix) => ctype_digit((string) $prefix))
                 ->map(fn ($p) => (int) $p)
                 ->filter()
                 ->all();
@@ -281,5 +294,13 @@ class AccountCodeGeneratorService
             default     => 9,
         };
     }
-}
 
+    protected function isDuplicateKeyException(QueryException $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'duplicate')
+            || str_contains($message, 'unique constraint')
+            || str_contains($message, 'integrity constraint');
+    }
+}

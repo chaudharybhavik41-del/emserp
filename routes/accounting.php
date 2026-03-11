@@ -34,6 +34,7 @@ use App\Http\Controllers\Accounting\VoucherSeriesController;
 use App\Http\Controllers\Accounting\TdsSectionController;
 use App\Http\Controllers\Accounting\TdsCertificateReportController;
 use App\Http\Controllers\ClientRaBillController;
+use App\Http\Controllers\SubcontractorWorkOrderController;
 use App\Http\Controllers\SubcontractorRaBillController;
 use Illuminate\Support\Facades\Route;
 
@@ -83,9 +84,11 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::resource('tds-sections', TdsSectionController::class)->except(['show']);
 
     // Payments / Receipts (Bank & Cash)
+    Route::get('payments', [BankCashVoucherController::class, 'indexPayment'])->name('payments.index');
     Route::get('payments/create', [BankCashVoucherController::class, 'createPayment'])->name('payments.create');
     Route::post('payments', [BankCashVoucherController::class, 'storePayment'])->name('payments.store');
 
+    Route::get('receipts', [BankCashVoucherController::class, 'indexReceipt'])->name('receipts.index');
     Route::get('receipts/create', [BankCashVoucherController::class, 'createReceipt'])->name('receipts.create');
     Route::post('receipts', [BankCashVoucherController::class, 'storeReceipt'])->name('receipts.store');
 
@@ -96,6 +99,9 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
 
     // API helpers
     Route::get('api/open-purchase-bills', [BankCashVoucherController::class, 'openPurchaseBills'])->name('api.open-purchase-bills');
+    Route::get('api/account-summary', [BankCashVoucherController::class, 'accountSummary'])->name('api.account-summary');
+    Route::get('api/supplier-purchase-orders', [BankCashVoucherController::class, 'openSupplierPurchaseOrders'])->name('api.supplier-purchase-orders');
+    Route::get('api/subcontractor-work-orders', [BankCashVoucherController::class, 'openSubcontractorWorkOrders'])->name('api.subcontractor-work-orders');
     Route::get('api/open-client-bills', [BankCashVoucherController::class, 'openClientBills'])->name('api.open-client-bills');
 
     /*
@@ -178,6 +184,22 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
 
     /*
     |--------------------------------------------------------------------------
+    | Subcontractor Work Orders
+    |--------------------------------------------------------------------------
+    */
+    Route::prefix('subcontractor-work-orders')->name('subcontractor-work-orders.')->group(function () {
+        Route::get('/', [SubcontractorWorkOrderController::class, 'index'])->name('index');
+        Route::get('/create', [SubcontractorWorkOrderController::class, 'create'])->name('create');
+        Route::post('/', [SubcontractorWorkOrderController::class, 'store'])->name('store');
+        Route::get('/lookup', [SubcontractorWorkOrderController::class, 'lookup'])->name('lookup');
+        Route::get('/{subcontractorWorkOrder}', [SubcontractorWorkOrderController::class, 'show'])->name('show');
+        Route::get('/{subcontractorWorkOrder}/edit', [SubcontractorWorkOrderController::class, 'edit'])->name('edit');
+        Route::put('/{subcontractorWorkOrder}', [SubcontractorWorkOrderController::class, 'update'])->name('update');
+        Route::delete('/{subcontractorWorkOrder}', [SubcontractorWorkOrderController::class, 'destroy'])->name('destroy');
+    });
+
+    /*
+    |--------------------------------------------------------------------------
     | DEV-3: Subcontractor RA Bills
     |--------------------------------------------------------------------------
     */
@@ -197,6 +219,7 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
         Route::post('/{subcontractorRa}/reject', [SubcontractorRaBillController::class, 'reject'])->name('reject');
         Route::post('/{subcontractorRa}/post', [SubcontractorRaBillController::class, 'post'])->name('post');
         Route::post('/{subcontractorRa}/reverse', [SubcontractorRaBillController::class, 'reverse'])->name('reverse');
+        Route::post('/{subcontractorRa}/change-posting-date', [SubcontractorRaBillController::class, 'changePostingDate'])->name('change-posting-date');
     });
 
     /*

@@ -29,7 +29,7 @@
             </div>
 
             <a href="{{ route('accounting.subcontractor-ra.index') }}" class="btn btn-outline-secondary btn-sm">← Back</a>
-            @if($subcontractorRa->status !== 'posted')
+            @if(in_array($subcontractorRa->status, ['draft', 'rejected'], true))
                 <a href="{{ route('accounting.subcontractor-ra.edit', $subcontractorRa) }}" class="btn btn-outline-primary btn-sm ms-1">Edit</a>
             @endif
         </div>
@@ -43,12 +43,15 @@
                     <div class="row g-2">
                         <div class="col-md-4"><div class="small text-muted">Bill No</div><div class="fw-semibold">{{ $subcontractorRa->bill_number ?? '-' }}</div></div>
                         <div class="col-md-4"><div class="small text-muted">Bill Date</div><div class="fw-semibold">{{ $subcontractorRa->bill_date?->format('d-m-Y') }}</div></div>
+                        <div class="col-md-4"><div class="small text-muted">Posting Date</div><div class="fw-semibold">{{ ($subcontractorRa->posting_date ?: $subcontractorRa->bill_date)?->format('d-m-Y') }}</div></div>
                         <div class="col-md-4"><div class="small text-muted">Due Date</div><div class="fw-semibold">{{ $subcontractorRa->due_date?->format('d-m-Y') ?? '-' }}</div></div>
 
                         <div class="col-md-4"><div class="small text-muted">Period</div><div class="fw-semibold">{{ $subcontractorRa->period_from?->format('d-m-Y') ?? '-' }} to {{ $subcontractorRa->period_to?->format('d-m-Y') ?? '-' }}</div></div>
                         <div class="col-md-4"><div class="small text-muted">Work Order</div><div class="fw-semibold">{{ $subcontractorRa->work_order_number ?? '-' }}</div></div>
+                        <div class="col-md-4"><div class="small text-muted">Payment Terms</div><div class="fw-semibold">{{ $subcontractorRa->payment_terms_days !== null ? ($subcontractorRa->payment_terms_days . ' days') : '-' }}</div></div>
                         <div class="col-md-4"><div class="small text-muted">Voucher</div><div class="fw-semibold">{{ $subcontractorRa->voucher?->voucher_no ?? '-' }}</div></div>
 
+                        <div class="col-12"><div class="small text-muted">Other Terms</div><div>{{ $subcontractorRa->other_terms ?: '-' }}</div></div>
                         <div class="col-12"><div class="small text-muted">Remarks</div><div>{{ $subcontractorRa->remarks ?? '-' }}</div></div>
                     </div>
                 </div>
@@ -96,6 +99,7 @@
                     <div class="row g-2">
                         <div class="col-6"><div class="small text-muted">Current Amount</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->current_amount, 2) }}</div></div>
                         <div class="col-6"><div class="small text-muted">Retention</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->retention_amount, 2) }}</div></div>
+                        <div class="col-6"><div class="small text-muted">Security Deposit</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->security_deposit_amount, 2) }}</div></div>
                         <div class="col-6"><div class="small text-muted">Advance Recovery</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->advance_recovery, 2) }}</div></div>
                         <div class="col-6"><div class="small text-muted">Other Deductions</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->other_deductions, 2) }}</div></div>
 
@@ -111,6 +115,7 @@
                                 @endif
                             </div>
                         </div>
+                        <div class="col-6"><div class="small text-muted">Round Off</div><div class="fw-semibold">{{ number_format((float) $subcontractorRa->round_off, 2) }}</div></div>
                         <div class="col-6"><div class="small text-muted">Payable</div><div class="fw-bold fs-5">{{ number_format((float) $subcontractorRa->total_amount, 2) }}</div></div>
                     </div>
                 </div>
@@ -121,7 +126,7 @@
                 <div class="card-body">
                     <div class="d-flex flex-wrap gap-2">
                         @can('subcontractor_ra.submit')
-                            @if($subcontractorRa->status === 'draft')
+                            @if(in_array($subcontractorRa->status, ['draft', 'rejected'], true))
                                 <form method="POST" action="{{ route('accounting.subcontractor-ra.submit', $subcontractorRa) }}">
                                     @csrf
                                     <button type="submit" class="btn btn-warning">Submit for Approval</button>
@@ -162,6 +167,11 @@
 
                         @can('subcontractor_ra.post')
                             @if($subcontractorRa->status === 'posted')
+                                @can('subcontractor_ra.change_posting_date')
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#changePostingDateModal">
+                                        Change Posting Date
+                                    </button>
+                                @endcan
                                 <form method="POST" action="{{ route('accounting.subcontractor-ra.reverse', $subcontractorRa) }}" class="d-flex gap-2 align-items-end">
                                     @csrf
                                     <div>
@@ -174,7 +184,7 @@
                         @endcan
 
                         @can('subcontractor_ra.delete')
-                            @if($subcontractorRa->status !== 'posted')
+                            @if(in_array($subcontractorRa->status, ['draft', 'rejected'], true))
                                 <form method="POST" action="{{ route('accounting.subcontractor-ra.destroy', $subcontractorRa) }}" onsubmit="return confirm('Delete this RA Bill?')">
                                     @csrf
                                     @method('DELETE')
@@ -188,4 +198,6 @@
         </div>
     </div>
 </div>
+
+@include('subcontractor_ra._change_posting_date_modal', ['subcontractorRa' => $subcontractorRa])
 @endsection

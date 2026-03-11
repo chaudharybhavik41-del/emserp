@@ -251,12 +251,18 @@ class MigrationToolsController extends Controller
                 continue;
             }
 
-            $party = Party::where('code', $supplierCode)->first();
-            if (! $party) {
+            $partyMatches = Party::where('code', $supplierCode)->get();
+            if ($partyMatches->isEmpty()) {
                 $result['errors'][] = "Row {$rowNo}: supplier party not found for code '{$supplierCode}'.";
                 $result['skipped']++;
                 continue;
             }
+            if ($partyMatches->count() > 1) {
+                $result['errors'][] = "Row {$rowNo}: supplier_code '{$supplierCode}' is ambiguous. Keep Party codes unique before import.";
+                $result['skipped']++;
+                continue;
+            }
+            $party = $partyMatches->first();
 
             if (!($party->is_supplier || $party->is_contractor)) {
                 $result['errors'][] = "Row {$rowNo}: party '{$supplierCode}' is not marked as Supplier/Contractor.";
@@ -431,12 +437,18 @@ class MigrationToolsController extends Controller
                 continue;
             }
 
-            $party = Party::where('code', $clientCode)->first();
-            if (! $party) {
+            $partyMatches = Party::where('code', $clientCode)->get();
+            if ($partyMatches->isEmpty()) {
                 $result['errors'][] = "Row {$rowNo}: client party not found for code '{$clientCode}'.";
                 $result['skipped']++;
                 continue;
             }
+            if ($partyMatches->count() > 1) {
+                $result['errors'][] = "Row {$rowNo}: client_code '{$clientCode}' is ambiguous. Keep Party codes unique before import.";
+                $result['skipped']++;
+                continue;
+            }
+            $party = $partyMatches->first();
 
             if (! $party->is_client) {
                 $result['errors'][] = "Row {$rowNo}: party '{$clientCode}' is not marked as Client.";
@@ -457,25 +469,25 @@ class MigrationToolsController extends Controller
                 continue;
             }
 
-            $project = Project::where('code', $projectCode)->first();
-            if (! $project) {
+            $projectMatches = Project::where('code', $projectCode)->get();
+            if ($projectMatches->isEmpty()) {
                 $result['errors'][] = "Row {$rowNo}: project not found for code '{$projectCode}'.";
+                $result['skipped']++;
+                continue;
+            }
+            if ($projectMatches->count() > 1) {
+                $result['errors'][] = "Row {$rowNo}: project_code '{$projectCode}' is ambiguous. Keep Project codes unique before import.";
+                $result['skipped']++;
+                continue;
+            }
+            $project = $projectMatches->first();
+            if ((int) ($project->client_party_id ?? 0) !== (int) $party->id) {
+                $result['errors'][] = "Row {$rowNo}: project '{$projectCode}' does not belong to client '{$clientCode}'.";
                 $result['skipped']++;
                 continue;
             }
 
             $invoiceNumber = trim((string) ($row['invoice_number'] ?? ''));
-            if ($invoiceNumber !== '') {
-                $existing = ClientRaBill::where('company_id', $companyId)
-                    ->where('invoice_number', $invoiceNumber)
-                    ->first();
-                if ($existing) {
-                    $result['warnings'][] = "Row {$rowNo}: Client bill already exists (ID {$existing->id}) for invoice_number '{$invoiceNumber}'. Skipped.";
-                    $result['skipped']++;
-                    continue;
-                }
-            }
-
             $billDate = $this->parseDate($row['bill_date'] ?? null);
             if (! $billDate) {
                 $result['errors'][] = "Row {$rowNo}: bill_date is required (YYYY-MM-DD).";
@@ -493,6 +505,26 @@ class MigrationToolsController extends Controller
             }
 
             $remarks = trim((string) ($row['remarks'] ?? ''));
+            $storedRemarks = $remarks !== '' ? $remarks : 'Opening AR imported via DEV-14';
+
+            $existing = $this->findExistingOutstandingArBill(
+                companyId: $companyId,
+                partyId: (int) $party->id,
+                projectId: (int) $project->id,
+                invoiceNumber: $invoiceNumber,
+                billDate: $billDate,
+                amount: $amount,
+                storedRemarks: $storedRemarks,
+            );
+
+            if ($existing) {
+                $reason = $invoiceNumber !== ''
+                    ? "invoice_number '{$invoiceNumber}'"
+                    : 'client/project/date/amount/remarks fingerprint';
+                $result['warnings'][] = "Row {$rowNo}: Client bill already exists (ID {$existing->id}) for {$reason}. Skipped.";
+                $result['skipped']++;
+                continue;
+            }
 
             try {
                 DB::transaction(function () use (
@@ -506,7 +538,8 @@ class MigrationToolsController extends Controller
                     $billDate,
                     $dueDate,
                     $amount,
-                    $remarks
+                    $remarks,
+                    $storedRemarks
                 ) {
                     $narration = 'Opening AR - ' . $party->name . ($invoiceNumber !== '' ? (' - Inv ' . $invoiceNumber) : '');
                     $reference = 'OB-AR/' . $party->code . '/' . ($invoiceNumber !== '' ? Str::limit($invoiceNumber, 50, '') : 'NA');
@@ -538,7 +571,7 @@ class MigrationToolsController extends Controller
                         'receivable_amount'  => $amount,
                         'voucher_id'         => $voucher->id,
                         'status'             => 'posted',
-                        'remarks'            => $remarks !== '' ? $remarks : 'Opening AR imported via DEV-14',
+                        'remarks'            => $storedRemarks,
                         'created_by'         => Auth::id(),
                         'updated_by'         => Auth::id(),
                     ]);
@@ -688,6 +721,36 @@ class MigrationToolsController extends Controller
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    protected function findExistingOutstandingArBill(
+        int $companyId,
+        int $partyId,
+        int $projectId,
+        string $invoiceNumber,
+        string $billDate,
+        float $amount,
+        string $storedRemarks,
+    ): ?ClientRaBill {
+        if ($invoiceNumber !== '') {
+            return ClientRaBill::query()
+                ->where('company_id', $companyId)
+                ->where('invoice_number', $invoiceNumber)
+                ->first();
+        }
+
+        return ClientRaBill::query()
+            ->where('company_id', $companyId)
+            ->where('client_id', $partyId)
+            ->where('project_id', $projectId)
+            ->whereDate('bill_date', $billDate)
+            ->where('remarks', $storedRemarks)
+            ->where(function ($query) use ($amount) {
+                $query->where('receivable_amount', $amount)
+                    ->orWhere('total_amount', $amount)
+                    ->orWhere('current_amount', $amount);
+            })
+            ->first();
     }
 
     protected function getOrCreateOpeningAdjustmentAccount(int $companyId): Account

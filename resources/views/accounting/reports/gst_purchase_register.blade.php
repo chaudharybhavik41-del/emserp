@@ -24,25 +24,25 @@
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Taxable Value</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">GST Total</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($gstTotalPaise) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($gstTotalPaise) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Invoice Total</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['invoice'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['invoice'] ?? 0) }}</div>
             </div></div>
         </div>
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
                 <div class="text-muted small">Net Payable</div>
-                <div class="h6 mb-0">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['net_payable'] ?? 0) }}</div>
+                <div class="h6 mb-0">{{ \App\Support\MoneyHelper::fromPaise($totals['net_payable'] ?? 0) }}</div>
             </div></div>
         </div>
     </div>
@@ -118,45 +118,45 @@
                             <tbody>
                             <tr>
                                 <th class="text-muted" style="width: 180px;">Taxable Value</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['taxable'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">CGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['cgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['cgst'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">SGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['sgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['sgst'] ?? 0) }}</td>
 
                                 <th class="text-muted" style="width: 120px;">IGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['igst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['igst'] ?? 0) }}</td>
                             </tr>
                             <tr>
                                 <th class="text-muted">RCM CGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['rcm_cgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['rcm_cgst'] ?? 0) }}</td>
 
                                 <th class="text-muted">RCM SGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['rcm_sgst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['rcm_sgst'] ?? 0) }}</td>
 
                                 <th class="text-muted">RCM IGST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['rcm_igst'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['rcm_igst'] ?? 0) }}</td>
 
                                 @php
                                     $rcmTotalPaise = ($totals['rcm_cgst'] ?? 0) + ($totals['rcm_sgst'] ?? 0) + ($totals['rcm_igst'] ?? 0);
                                 @endphp
                                 <th class="text-muted">RCM Total GST</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($rcmTotalPaise) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($rcmTotalPaise) }}</td>
                             </tr>
                             <tr>
                                 <th class="text-muted">Invoice Total</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['invoice'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['invoice'] ?? 0) }}</td>
 
                                 <th class="text-muted">TCS</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['tcs_amount'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['tcs_amount'] ?? 0) }}</td>
 
                                 <th class="text-muted">TDS</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['tds_amount'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['tds_amount'] ?? 0) }}</td>
 
                                 <th class="text-muted">Net Payable</th>
-                                <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($totals['net_payable'] ?? 0) }}</td>
+                                <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($totals['net_payable'] ?? 0) }}</td>
                             </tr>
                             <tr>
                                 <th class="text-muted">Bills</th>
@@ -196,18 +196,18 @@
                             @if(count($bills))
                                 @foreach($bills as $bill)
                                     @php
-                                        $taxablePaise = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? 0);
-                                        $cgstPaise    = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? 0);
-                                        $sgstPaise    = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? 0);
-                                        $igstPaise    = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? 0);
+                                        $taxablePaise = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? 0);
+                                        $cgstPaise    = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? 0);
+                                        $sgstPaise    = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? 0);
+                                        $igstPaise    = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? 0);
                                         $gstPaise     = $cgstPaise + $sgstPaise + $igstPaise;
-                                        $rcmCgstPaise = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? 0);
-                                        $rcmSgstPaise = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? 0);
-                                        $rcmIgstPaise = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? 0);
+                                        $rcmCgstPaise = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? 0);
+                                        $rcmSgstPaise = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? 0);
+                                        $rcmIgstPaise = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? 0);
                                         $rcmGstPaise  = $rcmCgstPaise + $rcmSgstPaise + $rcmIgstPaise;
-                                        $invoicePaise = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? 0);
-                                        $tcsPaise     = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('tcs_amount') ?? $bill->tcs_amount ?? 0);
-                                        $tdsPaise     = \\App\\Support\\MoneyHelper::toPaise($bill->getRawOriginal('tds_amount') ?? $bill->tds_amount ?? 0);
+                                        $invoicePaise = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? 0);
+                                        $tcsPaise     = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('tcs_amount') ?? $bill->tcs_amount ?? 0);
+                                        $tdsPaise     = \App\Support\MoneyHelper::toPaise($bill->getRawOriginal('tds_amount') ?? $bill->tds_amount ?? 0);
                                         $netPaise     = ($invoicePaise + $tcsPaise) - $tdsPaise;
                                         $postingDate  = optional($bill->getAttribute('posting_date') ?: optional($bill->voucher)->voucher_date ?: $bill->bill_date)->toDateString();
                                         $searchText = strtolower(trim(
@@ -244,16 +244,16 @@
                                         </td>
                                         <td>{{ $bill->supplier?->gstin }}</td>
 
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($taxablePaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($cgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($sgstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($igstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($gstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($rcmGstPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($invoicePaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($tcsPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($tdsPaise) }}</td>
-                                        <td class="text-end">{{ \\App\\Support\\MoneyHelper::fromPaise($netPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($taxablePaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($cgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($sgstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($igstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($gstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($rcmGstPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($invoicePaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($tcsPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($tdsPaise) }}</td>
+                                        <td class="text-end">{{ \App\Support\MoneyHelper::fromPaise($netPaise) }}</td>
 
                                         <td>
                                             <span class="badge bg-{{ $bill->status === 'posted' ? 'success' : ($bill->status === 'draft' ? 'secondary' : 'danger') }}">

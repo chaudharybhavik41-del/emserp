@@ -498,6 +498,9 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
     // Purchase Bills (Supplier Invoices)
     Route::prefix('purchase')->name('purchase.')->group(function () {
         Route::post('bills/{bill}/post', [PurchaseBillController::class, 'post'])->name('bills.post');
+        Route::post('bills/{bill}/change-posting-date', [PurchaseBillController::class, 'changePostingDate'])
+            ->name('bills.change-posting-date')
+            ->middleware('permission:purchase.bill.update|purchase.bill.change_posting_date');
         Route::resource('bills', PurchaseBillController::class);
     Route::post('bills/{bill}/reverse', [PurchaseBillController::class, 'reverse'])
         ->name('bills.reverse');

@@ -101,7 +101,7 @@ class HrPayrollController extends Controller
         $summary = [
             'current_period' => $currentPeriod,
             'total_processed' => $currentPeriod ? HrPayroll::where('hr_payroll_period_id', $currentPeriod->id)->count() : 0,
-            'total_paid' => $currentPeriod ? HrPayroll::where('hr_payroll_period_id', $currentPeriod->id)->where('status', PayrollStatus::PAID)->count() : 0,
+            'total_paid' => $currentPeriod ? HrPayroll::where('hr_payroll_period_id', $currentPeriod->id)->where('status', PayrollStatus::PAID->value)->count() : 0,
             'total_net_pay' => $currentPeriod ? HrPayroll::where('hr_payroll_period_id', $currentPeriod->id)->sum('net_payable') : 0,
         ];
 
@@ -143,6 +143,13 @@ class HrPayrollController extends Controller
             $validated = $request->validate([
                 'year' => 'required|integer|min:2020|max:2099',
                 'month' => 'required|integer|min:1|max:12',
+                'period_start' => 'nullable|date',
+                'period_end' => 'nullable|date|after_or_equal:period_start',
+                'attendance_start' => 'nullable|date',
+                'attendance_end' => 'nullable|date|after_or_equal:attendance_start',
+                'working_days' => 'nullable|integer|min:0|max:31',
+                'payment_date' => 'nullable|date',
+                'remarks' => 'nullable|string|max:1000',
             ]);
 
             // Check if already exists
@@ -154,8 +161,25 @@ class HrPayrollController extends Controller
                 return back()->with('error', 'Payroll period already exists for this month.');
             }
 
-            $startDate = Carbon::createFromDate($validated['year'], $validated['month'], 1);
-            $endDate = $startDate->copy()->endOfMonth();
+            $defaultStartDate = Carbon::createFromDate($validated['year'], $validated['month'], 1)->startOfDay();
+            $defaultEndDate = $defaultStartDate->copy()->endOfMonth()->startOfDay();
+            $startDate = !empty($validated['period_start'])
+                ? Carbon::parse($validated['period_start'])->startOfDay()
+                : $defaultStartDate;
+            $endDate = !empty($validated['period_end'])
+                ? Carbon::parse($validated['period_end'])->startOfDay()
+                : $defaultEndDate;
+            $attendanceStart = !empty($validated['attendance_start'])
+                ? Carbon::parse($validated['attendance_start'])->startOfDay()
+                : $startDate->copy();
+            $attendanceEnd = !empty($validated['attendance_end'])
+                ? Carbon::parse($validated['attendance_end'])->startOfDay()
+                : $endDate->copy();
+            $workingDays = array_key_exists('working_days', $validated) && $validated['working_days'] !== null
+                ? (int) $validated['working_days']
+                : $startDate->diffInWeekdays($endDate) + 1;
+            $totalDays = $startDate->diffInDays($endDate) + 1;
+            $weekOffs = max(0, $totalDays - ($startDate->diffInWeekdays($endDate) + 1));
 
             $period = HrPayrollPeriod::create([
                 'company_id' => 1,
@@ -165,9 +189,14 @@ class HrPayrollController extends Controller
                 'month' => $validated['month'],
                 'period_start' => $startDate,
                 'period_end' => $endDate,
-                'attendance_start' => $startDate,
-                'attendance_end' => $endDate,
-                'total_days' => $startDate->daysInMonth,
+                'attendance_start' => $attendanceStart,
+                'attendance_end' => $attendanceEnd,
+                'payment_date' => $validated['payment_date'] ?? null,
+                'remarks' => $validated['remarks'] ?? null,
+                'total_days' => $totalDays,
+                'working_days' => $workingDays,
+                'week_offs' => $weekOffs,
+                'holidays' => 0,
                 'status' => 'draft',
             ]);
 
@@ -186,6 +215,9 @@ class HrPayrollController extends Controller
         }
 
         $period->lockAttendance();
+        HrAttendance::query()
+            ->whereBetween('attendance_date', [$period->attendance_start, $period->attendance_end])
+            ->update(['is_locked' => true]);
 
         return back()->with('success', 'Attendance locked for this period.');
     }
@@ -247,6 +279,16 @@ class HrPayrollController extends Controller
                 } catch (\Exception $e) {
                     $errors[] = "{$employee->employee_code}: {$e->getMessage()}";
                 }
+            }
+
+            if ($processed === 0) {
+                DB::rollBack();
+
+                if (!empty($errors)) {
+                    return back()->with('error', 'Payroll processing failed. ' . implode(' ', $errors));
+                }
+
+                return back()->with('error', 'No active employees matched the selected payroll filters.');
             }
 
             // Finalize period status
@@ -329,7 +371,7 @@ class HrPayrollController extends Controller
         $periodId = $payroll->hr_payroll_period_id;
         if ($periodId) {
             $allApproved = HrPayroll::where('hr_payroll_period_id', $periodId)
-                ->whereNotIn('status', [PayrollStatus::APPROVED, PayrollStatus::PAID])
+                ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
                 ->doesntExist();
 
             if ($allApproved) {
@@ -350,13 +392,14 @@ class HrPayrollController extends Controller
             'payroll_ids.*' => 'exists:hr_payrolls,id',
         ]);
 
-        $approved = HrPayroll::whereIn('id', $validated['payroll_ids'])
-            ->where('status', PayrollStatus::PROCESSED)
-            ->update(['status' => PayrollStatus::APPROVED]);
+        $approved = HrPayroll::where('hr_payroll_period_id', $period->id)
+            ->whereIn('id', $validated['payroll_ids'])
+            ->where('status', PayrollStatus::PROCESSED->value)
+            ->update(['status' => PayrollStatus::APPROVED->value]);
 
         // If all payrolls in this period are approved (or paid), mark period as approved
         $allApproved = HrPayroll::where('hr_payroll_period_id', $period->id)
-            ->whereNotIn('status', [PayrollStatus::APPROVED, PayrollStatus::PAID])
+            ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
             ->doesntExist();
 
         if ($allApproved && !in_array($period->status, ['paid', 'closed'])) {
@@ -375,7 +418,7 @@ class HrPayrollController extends Controller
         $paymentDate = now();
 
         $payroll->update([
-            'status' => PayrollStatus::PAID,
+            'status' => PayrollStatus::PAID->value,
             'payment_date' => $paymentDate,
         ]);
 
@@ -385,6 +428,8 @@ class HrPayrollController extends Controller
                 'status' => 'paid',
                 'paid_date' => $paymentDate,
             ]);
+
+        $this->applyAdvanceRecoveries($payroll);
 
         // Update period if all payrolls are paid
         $periodId = $payroll->hr_payroll_period_id;
@@ -413,20 +458,31 @@ class HrPayrollController extends Controller
             'payment_reference' => 'nullable|string|max:100',
         ]);
 
-        $paid = HrPayroll::whereIn('id', $validated['payroll_ids'])
-            ->where('status', PayrollStatus::APPROVED)
+        $payrollIds = HrPayroll::where('hr_payroll_period_id', $period->id)
+            ->whereIn('id', $validated['payroll_ids'])
+            ->where('status', PayrollStatus::APPROVED->value)
+            ->pluck('id')
+            ->all();
+
+        $paid = HrPayroll::whereIn('id', $payrollIds)
             ->update([
-                'status' => PayrollStatus::PAID,
+                'status' => PayrollStatus::PAID->value,
                 'payment_date' => $validated['payment_date'],
                 'payment_reference' => $validated['payment_reference'],
             ]);
 
         // Update loan repayments
-        HrLoanRepayment::whereIn('hr_payroll_id', $validated['payroll_ids'])
+        HrLoanRepayment::whereIn('hr_payroll_id', $payrollIds)
             ->update([
                 'status' => 'paid',
                 'paid_date' => $validated['payment_date'],
             ]);
+
+        HrPayroll::whereIn('id', $payrollIds)
+            ->get()
+            ->each(function (HrPayroll $payroll): void {
+                $this->applyAdvanceRecoveries($payroll);
+            });
 
         // Update period
         $allPaid = HrPayroll::where('hr_payroll_period_id', $period->id)
@@ -461,11 +517,15 @@ class HrPayrollController extends Controller
 
     public function bankStatement(HrPayrollPeriod $period): View
     {
-        $payrolls = HrPayroll::with('employee')
-            ->where('hr_payroll_period_id', $period->id)
-            ->where('payment_mode', 'bank_transfer')
-            ->whereIn('status', [PayrollStatus::APPROVED, PayrollStatus::PAID])
-            ->orderBy('employee_name')
+        $payrolls = HrPayroll::query()
+            ->leftJoin('hr_employees', 'hr_employees.id', '=', 'hr_payrolls.hr_employee_id')
+            ->where('hr_payrolls.hr_payroll_period_id', $period->id)
+            ->where('hr_payrolls.payment_mode', 'bank_transfer')
+            ->whereIn('hr_payrolls.status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
+            ->select('hr_payrolls.*')
+            ->selectRaw("COALESCE(NULLIF(hr_payrolls.bank_account, ''), hr_employees.bank_account_number, '-') as resolved_bank_account")
+            ->selectRaw("COALESCE(NULLIF(hr_payrolls.bank_ifsc, ''), hr_employees.bank_ifsc, '-') as resolved_bank_ifsc")
+            ->orderBy('hr_payrolls.employee_name')
             ->get();
 
         $total = $payrolls->sum('net_payable');
@@ -489,7 +549,7 @@ class HrPayrollController extends Controller
             'total_pf_employer' => $payrolls->sum('pf_employer'),
             'total_eps' => $payrolls->sum('eps_employer'),
             'total_edli' => $payrolls->sum('edli_employer'),
-            'total_admin' => $payrolls->sum('pf_admin_charges'),
+            'total_admin_charges' => $payrolls->sum('pf_admin_charges'),
             'total_contribution' => $payrolls->sum('pf_employee') + $payrolls->sum('pf_employer') + 
                 $payrolls->sum('eps_employer') + $payrolls->sum('edli_employer') + $payrolls->sum('pf_admin_charges'),
         ];
@@ -619,40 +679,42 @@ class HrPayrollController extends Controller
         // Calculate per day salary
         $perDaySalary = $salary->monthly_gross / 30;
 
-        // Create/Update payroll record
-        $payroll = HrPayroll::updateOrCreate(
-            [
-                'hr_payroll_period_id' => $period->id,
-                'hr_employee_id' => $employee->id,
-            ],
-            [
-                'payroll_number' => HrPayroll::generateNumber($period->id),
-                'hr_employee_salary_id' => $salary->id,
-                'employee_code' => $employee->employee_code,
-                'employee_name' => $employee->full_name,
-                'department_name' => $employee->department?->name,
-                'designation_name' => $employee->designation?->name,
-                'bank_account' => $employee->bank_account_number,
-                'bank_ifsc' => $employee->bank_ifsc,
-                'payment_mode' => $employee->payment_mode,
-                
-                // Attendance
-                'working_days' => $period->working_days,
-                'present_days' => $attendanceSummary['present'],
-                'paid_days' => $paidDays,
-                'absent_days' => $attendanceSummary['absent'],
-                'leave_days' => $attendanceSummary['leave'],
-                'holidays' => $attendanceSummary['holiday'],
-                'week_offs' => $attendanceSummary['weekly_off'],
-                'half_days' => $attendanceSummary['half_day'],
-                'late_days' => $attendanceSummary['late'],
-                'ot_hours' => $attendanceSummary['ot_hours'],
-                'lop_days' => $lopDays,
-                
-                'status' => PayrollStatus::PROCESSED,
-                'created_by' => auth()->id(),
-            ]
-        );
+        $payroll = HrPayroll::firstOrNew([
+            'hr_payroll_period_id' => $period->id,
+            'hr_employee_id' => $employee->id,
+        ]);
+        $payroll->hr_payroll_period_id ??= $period->id;
+
+        $payroll->fill([
+            'payroll_number' => $payroll->exists
+                ? $payroll->payroll_number
+                : HrPayroll::generateNumber((int) $payroll->hr_payroll_period_id),
+            'hr_employee_salary_id' => $salary->id,
+            'employee_code' => $employee->employee_code,
+            'employee_name' => $employee->full_name,
+            'department_name' => $employee->department?->name,
+            'designation_name' => $employee->designation?->name,
+            'bank_account' => $employee->bank_account_number,
+            'bank_ifsc' => $employee->bank_ifsc,
+            'payment_mode' => $employee->payment_mode,
+            'working_days' => max(0, (int) $period->working_days),
+            'present_days' => $attendanceSummary['present'],
+            'paid_days' => $paidDays,
+            'absent_days' => $attendanceSummary['absent'],
+            'leave_days' => $attendanceSummary['leave'],
+            'holidays' => $attendanceSummary['holiday'],
+            'week_offs' => $attendanceSummary['weekly_off'],
+            'half_days' => $attendanceSummary['half_day'],
+            'late_days' => $attendanceSummary['late'],
+            'ot_hours' => $attendanceSummary['ot_hours'],
+            'lop_days' => max(0, (int) round($lopDays)),
+            'status' => PayrollStatus::PROCESSED,
+            'created_by' => $payroll->created_by ?: auth()->id(),
+        ]);
+        $this->resetCalculatedAmounts($payroll);
+        $payroll->save();
+
+        HrPayrollComponent::where('hr_payroll_id', $payroll->id)->delete();
 
         // Calculate earnings
         $this->calculateEarnings($payroll, $salary, $paidDays, $attendanceSummary);
@@ -738,6 +800,12 @@ class HrPayrollController extends Controller
             $hourlyRate = ($payroll->basic / 30) / 8;
             $payroll->ot_amount = round($hourlyRate * $attendance['ot_hours'] * 1.5, 2);
         }
+
+        $payroll->total_earnings = $payroll->basic + $payroll->hra + $payroll->da +
+            $payroll->special_allowance + $payroll->conveyance + $payroll->medical +
+            $payroll->other_earnings + $payroll->ot_amount + $payroll->incentive +
+            $payroll->bonus + $payroll->arrears + $payroll->reimbursements;
+        $payroll->gross_salary = $payroll->total_earnings;
     }
 
     private function calculateStatutoryDeductions(HrPayroll $payroll, HrEmployee $employee): void
@@ -811,18 +879,97 @@ class HrPayrollController extends Controller
         $advances = HrSalaryAdvance::where('hr_employee_id', $employee->id)
             ->where('status', 'recovering')
             ->where('balance_amount', '>', 0)
+            ->where(function ($query) use ($period) {
+                $query->whereNull('recovery_start_date')
+                    ->orWhere('recovery_start_date', '<=', $period->period_end);
+            })
+            ->orderBy('recovery_start_date')
+            ->orderBy('id')
             ->get();
 
         foreach ($advances as $advance) {
             $deduction = min($advance->monthly_deduction, $advance->balance_amount);
             $payroll->advance_deduction += $deduction;
+        }
+    }
 
-            $newBalance = $advance->balance_amount - $deduction;
+    private function resetCalculatedAmounts(HrPayroll $payroll): void
+    {
+        foreach ([
+            'basic',
+            'hra',
+            'da',
+            'special_allowance',
+            'conveyance',
+            'medical',
+            'other_earnings',
+            'ot_amount',
+            'incentive',
+            'bonus',
+            'arrears',
+            'reimbursements',
+            'total_earnings',
+            'gross_salary',
+            'pf_employee',
+            'esi_employee',
+            'professional_tax',
+            'tds',
+            'lwf_employee',
+            'loan_deduction',
+            'advance_deduction',
+            'other_deductions',
+            'lop_deduction',
+            'total_deductions',
+            'net_pay',
+            'round_off',
+            'net_payable',
+            'pf_employer',
+            'eps_employer',
+            'edli_employer',
+            'pf_admin_charges',
+            'esi_employer',
+            'lwf_employer',
+            'gratuity_provision',
+            'total_employer_cost',
+            'ctc',
+        ] as $field) {
+            $payroll->{$field} = 0;
+        }
+    }
+
+    private function applyAdvanceRecoveries(HrPayroll $payroll): void
+    {
+        if ((float) $payroll->advance_deduction <= 0) {
+            return;
+        }
+
+        $remaining = (float) $payroll->advance_deduction;
+        $advances = HrSalaryAdvance::query()
+            ->where('hr_employee_id', $payroll->hr_employee_id)
+            ->where('status', 'recovering')
+            ->where('balance_amount', '>', 0)
+            ->orderBy('recovery_start_date')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($advances as $advance) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $recovery = min($remaining, (float) $advance->balance_amount);
+            if ($recovery <= 0) {
+                continue;
+            }
+
+            $newBalance = max(0, (float) $advance->balance_amount - $recovery);
             $advance->update([
-                'recovered_amount' => $advance->recovered_amount + $deduction,
+                'recovered_amount' => (float) $advance->recovered_amount + $recovery,
                 'balance_amount' => $newBalance,
                 'status' => $newBalance <= 0 ? 'closed' : 'recovering',
             ]);
+
+            $remaining -= $recovery;
         }
     }
 }

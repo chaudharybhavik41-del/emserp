@@ -72,6 +72,30 @@ class AccountGroupController extends Controller
         return $options;
     }
 
+    /**
+     * @return array<int,int>
+     */
+    protected function descendantIds(int $companyId, int $groupId): array
+    {
+        $childrenByParent = AccountGroup::query()
+            ->where('company_id', $companyId)
+            ->get(['id', 'parent_id'])
+            ->groupBy('parent_id');
+
+        $ids = [];
+        $walk = function (int $parentId) use (&$walk, &$ids, $childrenByParent) {
+            foreach ($childrenByParent->get($parentId, collect()) as $child) {
+                $childId = (int) $child->id;
+                $ids[] = $childId;
+                $walk($childId);
+            }
+        };
+
+        $walk($groupId);
+
+        return array_values(array_unique($ids));
+    }
+
     public function index(Request $request)
     {
         $companyId = $this->defaultCompanyId();
@@ -233,6 +257,10 @@ class AccountGroupController extends Controller
             // Prevent self-parenting.
             if ((int) $data['parent_id'] === (int) $accountGroup->id) {
                 return back()->withErrors(['parent_id' => 'A group cannot be its own parent.'])->withInput();
+            }
+
+            if (in_array((int) $data['parent_id'], $this->descendantIds($companyId, (int) $accountGroup->id), true)) {
+                return back()->withErrors(['parent_id' => 'A group cannot be moved under one of its own descendants.'])->withInput();
             }
 
             $parent = AccountGroup::where('company_id', $companyId)->findOrFail((int) $data['parent_id']);

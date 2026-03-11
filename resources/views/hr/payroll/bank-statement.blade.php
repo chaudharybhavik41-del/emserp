@@ -14,7 +14,7 @@
         </div>
 
         <div class="d-flex gap-2">
-            <a href="{{ route('hr.payroll.period', $period) }}" class="btn btn-outline-secondary">
+            <a href="{{ url('/hr/payroll/period/' . $period->getKey()) }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left"></i> Back to Period
             </a>
             <button type="button" class="btn btn-outline-primary" onclick="window.print()">
@@ -64,8 +64,8 @@
                         <tr>
                             <td>{{ $p->employee_code }}</td>
                             <td>{{ $p->employee_name }}</td>
-                            <td>{{ $p->bank_account ?: ($p->employee?->bank_account ?? '-') }}</td>
-                            <td>{{ $p->bank_ifsc ?: ($p->employee?->bank_ifsc ?? '-') }}</td>
+                            <td>{{ $p->resolved_bank_account ?? ($p->bank_account ?: ($p->employee?->bank_account_number ?? '-')) }}</td>
+                            <td>{{ $p->resolved_bank_ifsc ?? ($p->bank_ifsc ?: ($p->employee?->bank_ifsc ?? '-')) }}</td>
                             <td class="text-end">₹{{ number_format($p->net_payable ?? 0, 2) }}</td>
                         </tr>
                     @empty

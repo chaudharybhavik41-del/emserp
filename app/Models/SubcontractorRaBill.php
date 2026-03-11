@@ -28,15 +28,20 @@ class SubcontractorRaBill extends Model
 
     protected $casts = [
         'bill_date'         => 'date',
+        'posting_date'      => 'date',
         'due_date'          => 'date',
         'period_from'       => 'date',
         'period_to'         => 'date',
         'approved_at'       => 'datetime',
+        'work_order_id'     => 'integer',
+        'payment_terms_days' => 'integer',
         'gross_amount'      => 'float',
         'previous_amount'   => 'float',
         'current_amount'    => 'float',
         'retention_percent' => 'float',
         'retention_amount'  => 'float',
+        'security_deposit_percent' => 'float',
+        'security_deposit_amount' => 'float',
         'advance_recovery'  => 'float',
         'other_deductions'  => 'float',
         'net_amount'        => 'float',
@@ -49,6 +54,7 @@ class SubcontractorRaBill extends Model
         'total_gst'         => 'float',
         'tds_rate'          => 'float',
         'tds_amount'        => 'float',
+        'round_off'         => 'float',
         'total_amount'      => 'float',
     ];
 
@@ -76,6 +82,11 @@ class SubcontractorRaBill extends Model
     public function voucher(): BelongsTo
     {
         return $this->belongsTo(Voucher::class);
+    }
+
+    public function workOrder(): BelongsTo
+    {
+        return $this->belongsTo(SubcontractorWorkOrder::class, 'work_order_id');
     }
 
     public function lines(): HasMany
@@ -110,12 +121,20 @@ class SubcontractorRaBill extends Model
             'subcontractor_id',
             'project_id',
             'bill_date',
+            'posting_date',
+            'due_date',
+            'work_order_id',
+            'work_order_number',
+            'payment_terms_days',
             'ra_number',
             'bill_number',
             'gross_amount',
             'previous_amount',
             'current_amount',
+            'retention_percent',
             'retention_amount',
+            'security_deposit_percent',
+            'security_deposit_amount',
             'advance_recovery',
             'other_deductions',
             'net_amount',
@@ -125,6 +144,7 @@ class SubcontractorRaBill extends Model
             'total_gst',
             'tds_rate',
             'tds_amount',
+            'round_off',
             'total_amount',
         ];
     }
@@ -219,14 +239,15 @@ class SubcontractorRaBill extends Model
         $this->gross_amount = $previousAmount + $currentAmount;
         
         // Net = Current - Deductions
-        $totalDeductions = $this->retention_amount + $this->advance_recovery + $this->other_deductions;
+        $totalDeductions = $this->retention_amount + $this->security_deposit_amount + $this->advance_recovery + $this->other_deductions;
         $this->net_amount = $currentAmount - $totalDeductions;
         
         // GST on net amount
         $this->total_gst = $this->cgst_amount + $this->sgst_amount + $this->igst_amount;
         
-        // Final payable = Net + GST - TDS
-        $this->total_amount = $this->net_amount + $this->total_gst - $this->tds_amount;
+        // Final payable = Calculated total + round off
+        $calculatedTotal = $this->net_amount + $this->total_gst - $this->tds_amount;
+        $this->total_amount = round($calculatedTotal + (float) ($this->round_off ?? 0), 2);
     }
 
     /**

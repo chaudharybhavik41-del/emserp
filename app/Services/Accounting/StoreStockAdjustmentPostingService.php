@@ -68,7 +68,7 @@ class StoreStockAdjustmentPostingService
             throw new RuntimeException('Config accounting.store.factory_consumable_expense_account_code is not set.');
         }
 
-        $factoryExpenseAccount = Account::where('code', $factoryExpCode)->first();
+        $factoryExpenseAccount = Account::where('company_id', $companyId)->where('code', $factoryExpCode)->first();
         if (! $factoryExpenseAccount) {
             throw new RuntimeException('Factory consumable expense account not found for code: ' . $factoryExpCode);
         }
@@ -76,8 +76,12 @@ class StoreStockAdjustmentPostingService
         $gainCode = Config::get('accounting.store.stock_adjustment_gain_account_code');
         $lossCode = Config::get('accounting.store.stock_adjustment_loss_account_code');
 
-        $gainAccount = $gainCode ? Account::where('code', $gainCode)->first() : null;
-        $lossAccount = $lossCode ? Account::where('code', $lossCode)->first() : null;
+        $gainAccount = $gainCode
+            ? Account::where('company_id', $companyId)->where('code', $gainCode)->first()
+            : null;
+        $lossAccount = $lossCode
+            ? Account::where('company_id', $companyId)->where('code', $lossCode)->first()
+            : null;
 
         // Fallbacks (keeps system working even if accounts mapping isn't configured yet)
         $gainAccount = $gainAccount ?: $factoryExpenseAccount;
@@ -169,7 +173,7 @@ class StoreStockAdjustmentPostingService
                             '; please configure accounting.store.inventory_consumables_account_code or set inventory_account_id on item.'
                         );
                     }
-                    $inventoryAccount = Account::where('code', $invCode)->first();
+                    $inventoryAccount = Account::where('company_id', $companyId)->where('code', $invCode)->first();
                     if (! $inventoryAccount) {
                         throw new RuntimeException('Inventory account not found for code: ' . $invCode);
                     }
@@ -430,6 +434,5 @@ class StoreStockAdjustmentPostingService
         return round($amount, 2);
     }
 }
-
 
 

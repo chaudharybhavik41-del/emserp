@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\User;
 use App\Enums\Hr\LeaveStatus;
-use Carbon\Carbon;
 
 class HrLeaveApplication extends Model
 {
@@ -112,6 +111,11 @@ class HrLeaveApplication extends Model
         return $this->createdByUser();
     }
 
+    public function appliedByUser(): BelongsTo
+    {
+        return $this->createdByUser();
+    }
+
     public function approvalLogs(): HasMany
     {
         return $this->hasMany(HrLeaveApprovalLog::class, 'hr_leave_application_id');
@@ -202,6 +206,36 @@ class HrLeaveApplication extends Model
         return false;
     }
 
+    public function getFromSessionAttribute(): string
+    {
+        return $this->resolveSessionForBoundary('from');
+    }
+
+    public function getToSessionAttribute(): string
+    {
+        return $this->resolveSessionForBoundary('to');
+    }
+
+    public function getAppliedOnAttribute()
+    {
+        return $this->created_at;
+    }
+
+    public function getApprovedOnAttribute()
+    {
+        return $this->approved_at;
+    }
+
+    public function getCancelledOnAttribute()
+    {
+        return $this->cancelled_at;
+    }
+
+    public function getApproverRemarksAttribute()
+    {
+        return $this->approval_remarks;
+    }
+
     // ==================== METHODS ====================
 
     /**
@@ -224,6 +258,27 @@ class HrLeaveApplication extends Model
         }
 
         return 'LA' . $year . $month . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function resolveSessionForBoundary(string $boundary): string
+    {
+        if (!$this->is_half_day || $this->half_day_type === null) {
+            return 'full_day';
+        }
+
+        if ($this->from_date && $this->to_date && $this->from_date->equalTo($this->to_date)) {
+            return $this->half_day_type;
+        }
+
+        if ($boundary === 'from' && $this->half_day_date && $this->half_day_date->equalTo($this->from_date)) {
+            return $this->half_day_type;
+        }
+
+        if ($boundary === 'to' && $this->half_day_date && $this->half_day_date->equalTo($this->to_date)) {
+            return $this->half_day_type;
+        }
+
+        return 'full_day';
     }
 
     /**

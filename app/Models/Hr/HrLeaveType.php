@@ -115,6 +115,11 @@ class HrLeaveType extends Model
         return "{$this->name} ({$this->code})";
     }
 
+    public function getColorAttribute(): string
+    {
+        return (string) $this->color_code;
+    }
+
     // ==================== METHODS ====================
 
     /**

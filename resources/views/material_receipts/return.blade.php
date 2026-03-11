@@ -2,6 +2,19 @@
 
 @section('title', 'Vendor Return (GRN)')
 
+<style>
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+</style>
+
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h4 mb-0">Vendor Return - GRN {{ $receipt->receipt_number }}</h1>
@@ -89,9 +102,9 @@
                                 <th style="width: 25%">Item</th>
                                 <th style="width: 10%">Category</th>
                                 <th style="width: 10%" class="text-end">Received Pcs</th>
-                                <th style="width: 12%" class="text-end">Received Wt (kg)</th>
+                                <th style="width: 12%" class="text-end">Received Qty</th>
                                 <th style="width: 10%" class="text-end">Return Pcs</th>
-                                <th style="width: 12%" class="text-end">Return Wt (kg)</th>
+                                <th style="width: 12%" class="text-end">Return Qty</th>
                                 <th style="width: 21%">Select Stock Pieces (Optional)</th>
                             </tr>
                         </thead>

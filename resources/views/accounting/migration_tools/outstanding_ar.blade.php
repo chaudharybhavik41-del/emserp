@@ -55,7 +55,8 @@
                         <ul class="mb-0">
                             <li>This import creates <strong>posted</strong> Client RA Bills and <strong>posted</strong> Journal Vouchers.</li>
                             <li>Project is required (Client RA Bills are project-linked by design).</li>
-                            <li>Duplicate guard checks <code>invoice_number</code> (if provided).</li>
+                            <li>Duplicate guard checks <code>invoice_number</code>, or client + project + bill date + amount + remarks when invoice number is blank.</li>
+                            <li>Project must belong to the selected client before import will post the AR bill.</li>
                             <li>Amount should be the <strong>outstanding</strong> amount as on cut-over date.</li>
                             <li>If you also set opening balances for client ledgers in COA, you may double-count. Prefer bill-wise opening via this tool.</li>
                         </ul>

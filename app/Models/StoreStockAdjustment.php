@@ -13,6 +13,11 @@ class StoreStockAdjustment extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'adjustment_date' => 'date',
+        'accounting_posted_at' => 'datetime',
+    ];
+
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id');

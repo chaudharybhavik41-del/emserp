@@ -22,6 +22,7 @@ class HrPayrollPeriod extends Model
         'attendance_start',
         'attendance_end',
         'payment_date',
+        'remarks',
         'total_days',
         'working_days',
         'holidays',

@@ -14,8 +14,10 @@ use App\Models\StoreStockItem;
 use App\Models\Uom;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
+use App\Models\Accounting\Account;
 use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherLine;
+use App\Services\Accounting\PartyAccountService;
 use App\Services\Accounting\VoucherNumberService;
 use App\Services\DocumentNumberService;
 use Illuminate\Support\Facades\Config;
@@ -25,6 +27,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class MaterialReceiptController extends Controller
@@ -48,9 +51,70 @@ class MaterialReceiptController extends Controller
 
     public function index(): View
     {
-        $receipts = MaterialReceipt::with(['supplier', 'client', 'project'])
+        $receipts = MaterialReceipt::with([
+                'supplier',
+                'client',
+                'project',
+                'purchaseOrder',
+                'lines:id,material_receipt_id,qty_pcs,received_weight_kg',
+            ])
             ->orderByDesc('id')
             ->paginate(20);
+
+        $receiptCollection = $receipts->getCollection();
+        $lineIds = $receiptCollection
+            ->flatMap(function (MaterialReceipt $receipt) {
+                return $receipt->lines;
+            })
+            ->pluck('id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $billedQtyByLineId = collect();
+
+        if (! empty($lineIds)) {
+            $billedQtyByLineId = DB::table('purchase_bill_lines as pbl')
+                ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id')
+                ->whereIn('pbl.material_receipt_line_id', $lineIds)
+                ->groupBy('pbl.material_receipt_line_id')
+                ->selectRaw('pbl.material_receipt_line_id, COALESCE(SUM(CASE WHEN pb.status = "cancelled" THEN 0 ELSE pbl.qty END), 0) as billed_qty')
+                ->pluck('billed_qty', 'pbl.material_receipt_line_id');
+        }
+
+        $receiptCollection->transform(function (MaterialReceipt $receipt) use ($billedQtyByLineId) {
+            if ($receipt->is_client_material) {
+                $receipt->billing_status = null;
+                return $receipt;
+            }
+
+            $hasComparableLines = false;
+            $allBilled = true;
+
+            foreach ($receipt->lines as $line) {
+                $grnQty = (float) ($line->received_weight_kg ?? 0);
+                if ($grnQty <= 0 && $line->qty_pcs !== null) {
+                    $grnQty = (float) $line->qty_pcs;
+                }
+
+                if ($grnQty <= 0) {
+                    continue;
+                }
+
+                $hasComparableLines = true;
+                $billedQty = (float) ($billedQtyByLineId[$line->id] ?? 0);
+
+                if ($billedQty + 0.0001 < $grnQty) {
+                    $allBilled = false;
+                    break;
+                }
+            }
+
+            $receipt->billing_status = ($hasComparableLines && $allBilled) ? 'billed' : 'unbilled';
+
+            return $receipt;
+        });
 
         return view('material_receipts.index', compact('receipts'));
     }
@@ -116,13 +180,17 @@ class MaterialReceiptController extends Controller
             ->values()
             ->all();
 
-        // Map: purchase_order_item_id => sums of already received (QC-PASSED only)
+        // Map: purchase_order_item_id => sums of operationally received quantity.
+        // Raw lines count only after QC pass; non-raw lines count immediately.
         $receivedAgg = collect();
 
         if (! empty($poItemIds)) {
             $receivedAgg = MaterialReceiptLine::query()
                 ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
-                ->where('material_receipts.status', 'qc_passed')
+                ->where(function ($query) {
+                    $query->where('material_receipts.status', 'qc_passed')
+                        ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
+                })
                 ->whereIn('material_receipt_lines.purchase_order_item_id', $poItemIds)
                 ->selectRaw(
                     'material_receipt_lines.purchase_order_item_id as purchase_order_item_id, ' .
@@ -528,6 +596,8 @@ class MaterialReceiptController extends Controller
                 }
                 $totalWeight = ! is_null($totalWeight) ? (float) $totalWeight : null;
 
+                $isRawMaterial = $this->isRawMaterialCategory($line->material_category);
+
                 // Steel Plate -> create one stock row per piece (for Plate No / Heat No traceability)
                 // Steel Section -> create ONE combined stock row (avoid huge record counts; TC can be linked once)
                 if ($line->material_category === 'steel_section') {
@@ -545,12 +615,12 @@ class MaterialReceiptController extends Controller
                         'section_profile'          => $line->section_profile,
                         'grade'                    => $line->grade,
                         'qty_pcs_total'            => $qtyPcs,
-                        'qty_pcs_available'        => 0, // QC hold until qc_passed
+                        'qty_pcs_available'        => $isRawMaterial ? 0 : $qtyPcs,
                         'weight_kg_total'          => $totalWeight,
-                        'weight_kg_available'      => 0, // QC hold until qc_passed
+                        'weight_kg_available'      => $isRawMaterial ? 0 : $totalWeight,
                         'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
                         'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                        'status'                   => 'blocked_qc',
+                        'status'                   => $isRawMaterial ? 'blocked_qc' : 'available',
                     ]);
                 } else {
                     $perPieceWeight = null;
@@ -574,12 +644,12 @@ class MaterialReceiptController extends Controller
                             'section_profile'          => $line->section_profile,
                             'grade'                    => $line->grade,
                             'qty_pcs_total'            => 1,
-                            'qty_pcs_available'        => 0, // QC hold until qc_passed
+                            'qty_pcs_available'        => $isRawMaterial ? 0 : 1,
                             'weight_kg_total'          => $perPieceWeight,
-                            'weight_kg_available'      => 0, // QC hold until qc_passed
+                            'weight_kg_available'      => $isRawMaterial ? 0 : $perPieceWeight,
                             'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
                             'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                            'status'                   => 'blocked_qc',
+                            'status'                   => $isRawMaterial ? 'blocked_qc' : 'available',
                         ]);
                     }
                 }
@@ -688,8 +758,14 @@ class MaterialReceiptController extends Controller
         return back()->with('success', 'Attachment deleted successfully.');
     }
 
-	public function updateStatus(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
+    public function updateStatus(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
     {
+        if (! $this->hasRawMaterialLines($materialReceipt)) {
+            return back()->withErrors([
+                'status' => 'QC status is applicable only when the GRN contains raw material lines.',
+            ]);
+        }
+
         $validated = $request->validate([
             'status' => ['required', 'string', 'in:draft,qc_pending,qc_passed,qc_rejected'],
         ]);
@@ -756,12 +832,13 @@ class MaterialReceiptController extends Controller
      * Keep StoreStockItem availability in sync with GRN QC status.
      *
      * Current policy:
-     * - Stock rows are created at GRN save time, but with available qty/weight = 0 (QC hold).
-     * - When GRN becomes qc_passed -> available = totals.
-     * - When GRN is not qc_passed -> available = 0.
+     * - Raw-material stock rows are created in QC hold.
+     * - Non-raw stock rows are available immediately and are not controlled by QC status.
+     * - When raw-material GRN becomes qc_passed -> available = totals.
+     * - When raw-material GRN is not qc_passed -> available = 0.
      *
      * IMPORTANT: If someone tries to revert a qc_passed GRN back to draft/qc_pending/qc_rejected,
-     * we block it if any stock from that GRN has already been issued/consumed.
+     * we block it if any raw-material stock from that GRN has already been issued/consumed.
      */
     protected function syncStockAvailabilityForReceipt(MaterialReceipt $receipt, string $newStatus, string $oldStatus): void
     {
@@ -773,6 +850,7 @@ class MaterialReceiptController extends Controller
         // Lock stock rows to avoid race with store issue/return
         $stocks = StoreStockItem::query()
             ->whereIn('material_receipt_line_id', $lineIds)
+            ->whereIn('material_category', $this->rawMaterialCategories())
             ->lockForUpdate()
             ->get();
 
@@ -894,8 +972,8 @@ $makeAvailable = ($newStatus === 'qc_passed');
      *   - purchase_order_items.qty_pcs_received
      *   - purchase_order_items.quantity_received
      *
-     * based on material_receipt_lines.qty_pcs and material_receipt_lines.received_weight_kg
-     * across all MaterialReceipt rows for that PO where status = 'qc_passed'.
+     * based on material_receipt_lines.qty_pcs and material_receipt_lines.received_weight_kg.
+     * Raw lines count only after QC pass; non-raw lines count immediately.
      */
     protected function recalculatePurchaseOrderReceivedTotals(int $purchaseOrderId): void
     {
@@ -908,7 +986,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
             return;
         }
 
-        // Aggregate all QC-passed receipt lines for this PO, by PO item id
+        // Aggregate all operationally received receipt lines for this PO, by PO item id.
         $totals = MaterialReceiptLine::query()
             ->selectRaw(
                 'purchase_order_item_id, ' .
@@ -917,7 +995,10 @@ $makeAvailable = ($newStatus === 'qc_passed');
             )
             ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
             ->where('material_receipts.purchase_order_id', $purchaseOrderId)
-            ->where('material_receipts.status', 'qc_passed')
+            ->where(function ($query) {
+                $query->where('material_receipts.status', 'qc_passed')
+                    ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
+            })
             ->whereNotNull('material_receipt_lines.purchase_order_item_id')
             ->groupBy('purchase_order_item_id')
             ->get()
@@ -934,10 +1015,10 @@ $makeAvailable = ($newStatus === 'qc_passed');
     }
 
     /**
-     * Recalculate indent-level received totals + auto-close indent lines based on QC-passed GRNs.
+     * Recalculate indent-level received totals + auto-close indent lines based on operationally received GRNs.
      *
      * Notes:
-     * - Only GRNs with status = 'qc_passed' are counted (same as PO received totals).
+     * - Raw lines are counted only after QC pass; non-raw lines are counted immediately.
      * - Received quantity is taken as:
      *      - SUM(received_weight_kg) if > 0, else SUM(qty_pcs)
      *   because some materials are weight-based, some are piece-based.
@@ -957,7 +1038,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
             return;
         }
 
-        // Aggregate QC-passed GRN lines across ALL GRNs for these indent lines (not just latest GRN),
+        // Aggregate operationally received GRN lines across ALL GRNs for these indent lines (not just latest GRN),
         // so the totals stay correct if multiple receipts happen.
         $rows = \App\Models\MaterialReceiptLine::query()
             ->selectRaw(
@@ -968,7 +1049,10 @@ $makeAvailable = ($newStatus === 'qc_passed');
             ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
             ->join('purchase_order_items as poi', 'poi.id', '=', 'material_receipt_lines.purchase_order_item_id')
             ->whereIn('poi.purchase_indent_item_id', $indentItemIds)
-            ->where('material_receipts.status', 'qc_passed')
+            ->where(function ($query) {
+                $query->where('material_receipts.status', 'qc_passed')
+                    ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
+            })
             ->groupBy('poi.purchase_indent_item_id')
             ->get()
             ->keyBy('indent_item_id');
@@ -1072,10 +1156,10 @@ $makeAvailable = ($newStatus === 'qc_passed');
      * - status set does not include "cancelled" in current schema/workflow
      * - pre-QC GRNs should be reversible without leaving unusable inventory records
      */
-		public function destroy(MaterialReceipt $materialReceipt): RedirectResponse
-		{
-    // Keep your existing rule: QC PASSED cannot be deleted
-    if ($materialReceipt->status === 'qc_passed') {
+    public function destroy(MaterialReceipt $materialReceipt): RedirectResponse
+    {
+    // QC PASSED raw-material GRNs cannot be deleted.
+    if ($this->hasRawMaterialLines($materialReceipt) && $materialReceipt->status === 'qc_passed') {
         return back()->with('error', 'QC PASSED GRN cannot be deleted. Use vendor return process instead.');
     }
 
@@ -1231,8 +1315,8 @@ $makeAvailable = ($newStatus === 'qc_passed');
 
     public function storeReturn(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
     {
-        if ($materialReceipt->status !== 'qc_passed') {
-            return back()->with('error', 'Vendor return is allowed only for QC passed GRN.');
+        if ($this->hasRawMaterialLines($materialReceipt) && $materialReceipt->status !== 'qc_passed') {
+            return back()->with('error', 'Vendor return is allowed only after QC pass for raw-material GRN.');
         }
 
         $data = $request->validate([
@@ -1366,11 +1450,12 @@ $makeAvailable = ($newStatus === 'qc_passed');
 
                     // Update GRN line (reduce net received)
                     $origLineWt = (float) ($line->received_weight_kg ?? 0);
-                    $origLineAmt = (float) ($line->total_amount ?? 0);
-
                     $line->qty_pcs = max(0, $origLinePcs - $returnPcs);
                     $line->received_weight_kg = max(0, $origLineWt - $returnWt);
-                    $line->total_amount = max(0, $origLineAmt - ($origLineAmt * $ratio));
+                    if (Schema::hasColumn('material_receipt_lines', 'total_amount')) {
+                        $origLineAmt = (float) ($line->total_amount ?? 0);
+                        $line->total_amount = max(0, $origLineAmt - ($origLineAmt * $ratio));
+                    }
                     $line->save();
 
                     // Document line
@@ -1447,13 +1532,14 @@ $makeAvailable = ($newStatus === 'qc_passed');
                 // Update GRN line (reduce net received)
                 $origLinePcs = (int) ($line->qty_pcs ?? 0);
                 $origLineWt = (float) ($line->received_weight_kg ?? 0);
-                $origLineAmt = (float) ($line->total_amount ?? 0);
-
                 $ratio = ($origLinePcs > 0) ? ($returnPcs / $origLinePcs) : 0;
 
                 $line->qty_pcs = max(0, $origLinePcs - $returnPcs);
                 $line->received_weight_kg = max(0, $origLineWt - $returnWt);
-                $line->total_amount = max(0, $origLineAmt - ($origLineAmt * $ratio));
+                if (Schema::hasColumn('material_receipt_lines', 'total_amount')) {
+                    $origLineAmt = (float) ($line->total_amount ?? 0);
+                    $line->total_amount = max(0, $origLineAmt - ($origLineAmt * $ratio));
+                }
                 $line->save();
 
                 $returnMetrics[$lineId] = $returnMetrics[$lineId] ?? [
@@ -1474,47 +1560,9 @@ $makeAvailable = ($newStatus === 'qc_passed');
              * Re-sync Purchase Order received totals based on updated GRN lines
              */
             if ($materialReceipt->purchase_order_id) {
-                $poId = $materialReceipt->purchase_order_id;
-
-                $poLines = DB::table('purchase_order_lines')
-                    ->where('purchase_order_id', $poId)
-                    ->get(['id']);
-
-                foreach ($poLines as $poLine) {
-                    $totalReceived = DB::table('material_receipt_lines')
-                        ->join('material_receipts', 'material_receipts.id', '=', 'material_receipt_lines.material_receipt_id')
-                        ->where('material_receipts.purchase_order_id', $poId)
-                        ->where('material_receipt_lines.purchase_order_line_id', $poLine->id)
-                        ->sum('material_receipt_lines.qty_pcs');
-
-                    DB::table('purchase_order_lines')
-                        ->where('id', $poLine->id)
-                        ->update(['received_qty_pcs' => $totalReceived]);
-                }
-            }
-
-            /**
-             * Re-sync Indent received totals (if PO linked to an indent)
-             */
-            if ($materialReceipt->purchaseOrder && $materialReceipt->purchaseOrder->indent_id) {
-                $indentId = $materialReceipt->purchaseOrder->indent_id;
-
-                $indentLines = DB::table('indent_lines')
-                    ->where('indent_id', $indentId)
-                    ->get(['id']);
-
-                foreach ($indentLines as $indentLine) {
-                    $totalReceived = DB::table('material_receipt_lines')
-                        ->join('material_receipts', 'material_receipts.id', '=', 'material_receipt_lines.material_receipt_id')
-                        ->join('purchase_orders', 'purchase_orders.id', '=', 'material_receipts.purchase_order_id')
-                        ->where('purchase_orders.indent_id', $indentId)
-                        ->where('material_receipt_lines.indent_line_id', $indentLine->id)
-                        ->sum('material_receipt_lines.qty_pcs');
-
-                    DB::table('indent_lines')
-                        ->where('id', $indentLine->id)
-                        ->update(['received_qty_pcs' => $totalReceived]);
-                }
+                $poId = (int) $materialReceipt->purchase_order_id;
+                $this->recalculatePurchaseOrderReceivedTotals($poId);
+                $this->recalculateIndentReceivedTotals($poId, $request->user()?->id);
             }
 
             /**
@@ -1523,10 +1571,10 @@ $makeAvailable = ($newStatus === 'qc_passed');
              * - Prevent over-reversal across multiple vendor returns.
              */
             if (! $materialReceipt->is_client_material && !empty($returnMetrics)) {
-                $companyId = auth()->user()->company_id;
-                $supplierId = $materialReceipt->supplier_id;
+                $companyId = (int) (auth()->user()?->company_id ?: Config::get('accounting.default_company_id', 1));
+                $supplierId = (int) ($materialReceipt->supplier_id ?? 0);
 
-                if ($supplierId) {
+                if ($supplierId > 0) {
                     $rawCategories = ['steel_plate', 'steel_section'];
                     $lineIdsForPosting = array_keys($returnMetrics);
 
@@ -1618,95 +1666,103 @@ $makeAvailable = ($newStatus === 'qc_passed');
 
                     if ($totalReturnBasic > 0.0001) {
                         $supplier = Party::findOrFail($supplierId);
-
-                        $supplierAccount = Account::where('accountable_type', Party::class)
-                            ->where('accountable_id', $supplierId)
-                            ->first();
-
-                        if (!$supplierAccount) {
-                            $supplierAccount = Account::create([
-                                'company_id' => $companyId,
-                                'account_name' => $supplier->name,
-                                'account_type' => 'liability',
-                                'accountable_type' => Party::class,
-                                'accountable_id' => $supplierId,
-                                'created_by' => auth()->id(),
-                            ]);
+                        $supplierAccount = app(PartyAccountService::class)->syncAccountForParty($supplier, $companyId);
+                        if (! $supplierAccount) {
+                            throw new \RuntimeException('Unable to resolve supplier ledger for vendor return posting.');
                         }
 
-                        $inventoryRawAccountId = config('accounts.inventory_raw_material_account_id');
-                        $inventoryConsumablesAccountId = config('accounts.inventory_consumables_account_id');
+                        $inventoryRawCode = (string) Config::get('accounting.default_accounts.inventory_raw_material_code', 'INV-RM');
+                        $inventoryConsumablesCode = (string) Config::get('accounting.store.inventory_consumables_account_code', 'INV-CONSUMABLES');
 
-                        $voucher = Voucher::create([
-                            'company_id' => $companyId,
-                            'voucher_date' => $data['return_date'],
-                            'voucher_type' => 'journal',
-                            'status' => 'posted',
-                            'reference' => 'VRET:' . $vendorReturn->vendor_return_number,
-                            'narration' => 'Vendor return ' . $vendorReturn->vendor_return_number . ' against GRN ' . $materialReceipt->receipt_number,
-                            'created_by' => auth()->id(),
-                        ]);
+                        $inventoryRawAccount = Account::query()
+                            ->where('company_id', $companyId)
+                            ->where('code', $inventoryRawCode)
+                            ->first();
 
-                        $voucherNumberService = new VoucherNumberService();
-                        $voucherNo = $voucherNumberService->generateVoucherNumber($voucher);
-                        $voucher->update(['voucher_no' => $voucherNo]);
+                        $inventoryConsumablesAccount = Account::query()
+                            ->where('company_id', $companyId)
+                            ->where('code', $inventoryConsumablesCode)
+                            ->first();
 
-                        // Credit inventory accounts
+                        if ($returnBasicByBucket['raw'] > 0.0001 && ! $inventoryRawAccount) {
+                            throw new \RuntimeException('Raw material inventory account not found for code: ' . $inventoryRawCode);
+                        }
+
+                        if ($returnBasicByBucket['consumables'] > 0.0001 && ! $inventoryConsumablesAccount) {
+                            throw new \RuntimeException('Consumables inventory account not found for code: ' . $inventoryConsumablesCode);
+                        }
+
+                        $voucher = new Voucher();
+                        $businessDate = Carbon::parse($data['return_date']);
+                        $voucher->company_id = $companyId;
+                        $voucher->voucher_no = app(VoucherNumberService::class)->next('journal', $companyId, $businessDate);
+                        $voucher->voucher_date = $businessDate->toDateString();
+                        $voucher->voucher_type = 'journal';
+                        $voucher->status = 'draft';
+                        $voucher->reference = 'VRET:' . $vendorReturn->vendor_return_number;
+                        $voucher->narration = 'Vendor return ' . $vendorReturn->vendor_return_number . ' against GRN ' . $materialReceipt->receipt_number;
+                        $voucher->amount_base = round($totalReturnBasic, 2);
+                        $voucher->created_by = auth()->id();
+                        $voucher->save();
+
+                        $lineNo = 1;
+
                         if ($returnBasicByBucket['raw'] > 0.0001) {
                             VoucherLine::create([
                                 'voucher_id' => $voucher->id,
-                                'account_id' => $inventoryRawAccountId,
-                                'entry_type' => 'credit',
-                                'amount' => $returnBasicByBucket['raw'],
-                                'narration' => 'Vendor return (Raw Materials): ' . $vendorReturn->vendor_return_number,
+                                'line_no' => $lineNo++,
+                                'account_id' => $inventoryRawAccount->id,
+                                'description' => 'Vendor Return - Raw Material',
+                                'debit' => 0,
+                                'credit' => round($returnBasicByBucket['raw'], 2),
                                 'reference_type' => MaterialVendorReturn::class,
                                 'reference_id' => $vendorReturn->id,
-                                'created_by' => auth()->id(),
                             ]);
                         }
 
                         if ($returnBasicByBucket['consumables'] > 0.0001) {
                             VoucherLine::create([
                                 'voucher_id' => $voucher->id,
-                                'account_id' => $inventoryConsumablesAccountId,
-                                'entry_type' => 'credit',
-                                'amount' => $returnBasicByBucket['consumables'],
-                                'narration' => 'Vendor return (Consumables): ' . $vendorReturn->vendor_return_number,
+                                'line_no' => $lineNo++,
+                                'account_id' => $inventoryConsumablesAccount->id,
+                                'description' => 'Vendor Return - Consumables',
+                                'debit' => 0,
+                                'credit' => round($returnBasicByBucket['consumables'], 2),
                                 'reference_type' => MaterialVendorReturn::class,
                                 'reference_id' => $vendorReturn->id,
-                                'created_by' => auth()->id(),
                             ]);
                         }
 
-                        // Debit supplier (reduce payable)
                         VoucherLine::create([
                             'voucher_id' => $voucher->id,
+                            'line_no' => $lineNo++,
                             'account_id' => $supplierAccount->id,
-                            'entry_type' => 'debit',
-                            'amount' => $totalReturnBasic,
-                            'narration' => 'Vendor return: ' . $vendorReturn->vendor_return_number,
+                            'description' => 'Vendor Return - Supplier',
+                            'debit' => round($totalReturnBasic, 2),
+                            'credit' => 0,
                             'reference_type' => MaterialVendorReturn::class,
                             'reference_id' => $vendorReturn->id,
-                            'created_by' => auth()->id(),
                         ]);
+
+                        $voucher->posted_by = auth()->id();
+                        $voucher->posted_at = now();
+                        $voucher->status = 'posted';
+                        $voucher->save();
 
                         $vendorReturn->update(['voucher_id' => $voucher->id]);
 
-                        if (class_exists(\App\Models\ActivityLog::class)) {
-                            \App\Models\ActivityLog::logCustom(
-                                auth()->id(),
-                                $voucher,
-                                'vendor_return_voucher_created',
-                                'Vendor return voucher created',
-                                [
-                                    'material_receipt_id' => $materialReceipt->id,
-                                    'vendor_return_id' => $vendorReturn->id,
-                                    'voucher_id' => $voucher->id,
-                                    'voucher_no' => $voucher->voucher_no,
-                                    'amount' => $totalReturnBasic,
-                                ]
-                            );
-                        }
+                        \App\Models\ActivityLog::logCustom(
+                            'vendor_return_voucher_created',
+                            'Vendor return voucher created',
+                            $voucher,
+                            [
+                                'material_receipt_id' => $materialReceipt->id,
+                                'vendor_return_id' => $vendorReturn->id,
+                                'voucher_id' => $voucher->id,
+                                'voucher_no' => $voucher->voucher_no,
+                                'amount' => round($totalReturnBasic, 2),
+                            ]
+                        );
                     }
                 }
             }
@@ -1721,6 +1777,25 @@ $makeAvailable = ($newStatus === 'qc_passed');
 
             return back()->withInput()->with('error', 'Vendor return failed: ' . $e->getMessage());
         }
+    }
+
+    protected function rawMaterialCategories(): array
+    {
+        return ['steel_plate', 'steel_section'];
+    }
+
+    protected function isRawMaterialCategory(?string $category): bool
+    {
+        return in_array((string) $category, $this->rawMaterialCategories(), true);
+    }
+
+    protected function hasRawMaterialLines(MaterialReceipt $materialReceipt): bool
+    {
+        $materialReceipt->loadMissing('lines:id,material_receipt_id,material_category');
+
+        return $materialReceipt->lines->contains(function (MaterialReceiptLine $line) {
+            return $this->isRawMaterialCategory($line->material_category);
+        });
     }
 
 }

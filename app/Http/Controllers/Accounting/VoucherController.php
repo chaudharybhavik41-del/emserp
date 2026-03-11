@@ -16,8 +16,11 @@ use App\Models\Machine;
 use App\Services\Accounting\VoucherNumberService;
 use App\Services\Accounting\VoucherReversalService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class VoucherController extends Controller
@@ -80,6 +83,112 @@ class VoucherController extends Controller
         return $out;
     }
 
+    /**
+     * Guard manual vouchers against malformed lines that can still arithmetically balance.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     *
+     * @throws ValidationException
+     */
+    protected function validateManualVoucherLines(array $lines): void
+    {
+        $errors = [];
+
+        foreach ($lines as $index => $line) {
+            $debit  = (float) ($line['debit'] ?? 0);
+            $credit = (float) ($line['credit'] ?? 0);
+
+            if ($debit < 0) {
+                $errors["lines.$index.debit"] = 'Debit cannot be negative.';
+            }
+
+            if ($credit < 0) {
+                $errors["lines.$index.credit"] = 'Credit cannot be negative.';
+            }
+
+            if ($debit > 0 && $credit > 0) {
+                $errors["lines.$index.debit"] = 'Enter either debit or credit on a line, not both.';
+            }
+        }
+
+        if (! empty($errors)) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    /**
+     * Cash/bank ledgers allowed in contra vouchers.
+     */
+    protected function resolveContraAccountIdsFromCollection(Collection $accounts): array
+    {
+        $cashAccountTypes = Config::get('accounting.cashflow_cash_account_types', ['bank', 'cash']);
+        $cashGroupCodes = Config::get('accounting.cashflow_cash_group_codes', []);
+
+        $contraAccounts = $accounts;
+
+        if (! empty($cashAccountTypes)) {
+            $contraAccounts = $contraAccounts->whereIn('type', $cashAccountTypes);
+        }
+
+        if ($contraAccounts->isEmpty() && ! empty($cashGroupCodes)) {
+            $contraAccounts = $accounts->filter(function (Account $account) use ($cashGroupCodes) {
+                return in_array($account->group?->code, $cashGroupCodes, true);
+            });
+        }
+
+        return $contraAccounts
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    protected function resolveContraAccountIdsForCompany(int $companyId): array
+    {
+        $accounts = Account::with('group')
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
+        return $this->resolveContraAccountIdsFromCollection($accounts);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $lines
+     *
+     * @throws ValidationException
+     */
+    protected function validateContraVoucherAccounts(int $companyId, array $lines): void
+    {
+        $allowedAccountIds = $this->resolveContraAccountIdsForCompany($companyId);
+
+        if (empty($allowedAccountIds)) {
+            throw ValidationException::withMessages([
+                'voucher_type' => 'No cash or bank ledgers are configured for contra vouchers.',
+            ]);
+        }
+
+        $errors = [];
+
+        foreach ($lines as $index => $line) {
+            $debit = (float) ($line['debit'] ?? 0);
+            $credit = (float) ($line['credit'] ?? 0);
+
+            if ($debit == 0.0 && $credit == 0.0) {
+                continue;
+            }
+
+            $accountId = (int) ($line['account_id'] ?? 0);
+
+            if ($accountId <= 0 || ! in_array($accountId, $allowedAccountIds, true)) {
+                $errors["lines.$index.account_id"] = 'Contra voucher allows only cash or bank ledgers.';
+            }
+        }
+
+        if (! empty($errors)) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
 
     public function index(Request $request)
     {
@@ -105,7 +214,8 @@ class VoucherController extends Controller
     public function create()
     {
 
-        $accounts    = Account::orderBy('name')->get();
+        $accounts    = Account::with('group')->orderBy('name')->get();
+        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
 
         $costCenters = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
@@ -169,6 +279,12 @@ class VoucherController extends Controller
             // Optional UI action
             'post_now'              => ['nullable'],
         ]);
+
+        $this->validateManualVoucherLines($data['lines']);
+
+        if (($data['voucher_type'] ?? null) === 'contra') {
+            $this->validateContraVoucherAccounts($companyId, $data['lines']);
+        }
 
         $voucherNoInput = trim((string) ($data['voucher_no'] ?? ''));
         $voucherType    = (string) $data['voucher_type'];
@@ -341,7 +457,8 @@ class VoucherController extends Controller
 
         $voucher->load(['lines.account', 'lines.costCenter', 'lines.machine']);
 
-        $accounts     = Account::orderBy('name')->get();
+        $accounts     = Account::with('group')->orderBy('name')->get();
+        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
         $costCenters  = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
         $hasMachineLineDimension = Schema::hasTable('voucher_lines')
@@ -409,6 +526,12 @@ class VoucherController extends Controller
 
             'post_now'               => ['nullable'],
         ]);
+
+        $this->validateManualVoucherLines($data['lines']);
+
+        if (($data['voucher_type'] ?? null) === 'contra') {
+            $this->validateContraVoucherAccounts($companyId, $data['lines']);
+        }
 
         // Enforce company-wide uniqueness of voucher_no
         $request->validate([

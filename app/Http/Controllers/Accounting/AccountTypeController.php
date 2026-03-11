@@ -129,8 +129,23 @@ class AccountTypeController extends Controller
         }
 
         $data = $request->validate($rules);
+        $requestedCode = ! $isSystem
+            ? Str::lower(trim((string) ($data['code'] ?? $accountType->code)))
+            : (string) $accountType->code;
 
         $requestedActive = (bool) ($data['is_active'] ?? false);
+
+        if (! $isSystem && $requestedCode !== (string) $accountType->code) {
+            $inUse = Account::where('company_id', $companyId)
+                ->where('type', $accountType->code)
+                ->exists();
+
+            if ($inUse) {
+                return back()
+                    ->withErrors(['code' => 'This type code is already used by accounts and cannot be renamed.'])
+                    ->withInput();
+            }
+        }
 
         // Prevent disabling a type that is already in use (would break validations / existing accounts).
         if (! $isSystem && ! $requestedActive) {
@@ -152,7 +167,7 @@ class AccountTypeController extends Controller
         ];
 
         if (! $isSystem) {
-            $update['code'] = Str::lower(trim((string) $data['code']));
+            $update['code'] = $requestedCode;
         }
 
         $accountType->update($update);
