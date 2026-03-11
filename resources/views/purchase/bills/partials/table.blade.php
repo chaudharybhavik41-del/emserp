@@ -30,6 +30,10 @@
                             <div class="small text-muted">Voucher:
                                 {{ $bill->voucher->voucher_no ?? ('#' . $bill->voucher->id) }}</div>
                         @endif
+
+                        @if($bill->reference_no)
+                            <div class="small text-muted">Invoice No: {{ $bill->reference_no }}</div>
+                        @endif
                     </td>
                     <td>
                         <div>{{ ($bill->posting_date ?: $bill->bill_date)?->format('d-m-Y') }}</div>

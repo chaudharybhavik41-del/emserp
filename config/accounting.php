@@ -171,6 +171,8 @@ return [
         'journal'            => 'JV',      // Journal voucher
         'tools_transfer'     => 'TT',      // Tools custody transfer
         'store_issue'        => 'ISS',     // Store issue
+        'store_return'       => 'RTN',     // Store return
+        'stock_adjustment'   => 'STAD',    // Stock adjustment
         'fuel_issue'         => 'FUEL',    // Fuel issue
         'contra'             => 'CTR',     // Contra voucher
     ],

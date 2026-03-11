@@ -56,6 +56,16 @@
                 <div class="text-muted small">Date</div>
                 <div class="fw-semibold">{{ optional($adjustment->adjustment_date)->format('d-m-Y') ?? '-' }}</div>
             </div>
+            <div class="col-md-3">
+                <div class="text-muted small">Project</div>
+                <div class="fw-semibold">
+                    @if($adjustment->project)
+                        {{ $adjustment->project->code ? ($adjustment->project->code . ' - ') : '' }}{{ $adjustment->project->name }}
+                    @else
+                        <span class="text-muted">General / Store</span>
+                    @endif
+                </div>
+            </div>
         </div>
 
         <div class="mt-3">

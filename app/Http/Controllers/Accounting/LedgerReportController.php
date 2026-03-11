@@ -283,7 +283,7 @@ class LedgerReportController extends Controller
         $running = round($openingBalance, 2);
 
         foreach ($ledgerEntries as $entry) {
-            $entryDate = optional($entry->voucher?->voucher_date)->toDateString();
+            $entryDate = optional($entry->voucher?->voucher_date)->format('d-m-Y');
             $entryDelta = round((float) $entry->debit - (float) $entry->credit, 2);
             $representedDelta = 0.0;
             $entryRows = [];
@@ -425,7 +425,7 @@ class LedgerReportController extends Controller
         ]);
 
         foreach ($ledgerEntries as $e) {
-            $date = $e->voucher?->voucher_date ? optional($e->voucher->voucher_date)->toDateString() : '';
+            $date = $e->voucher?->voucher_date ? optional($e->voucher->voucher_date)->format('d-m-Y') : '';
             $particulars = trim(implode(' | ', array_filter([
                 $e->description ?: ($e->voucher?->narration ?: ''),
                 $e->voucher?->reference ? ('Ref: ' . $e->voucher->reference) : null,
@@ -601,7 +601,7 @@ class LedgerReportController extends Controller
             fputcsv($handle, ['Ledger Statement']);
             fputcsv($handle, ['Company', $companyName]);
             fputcsv($handle, ['Account', trim(($account->code ? ($account->code . ' - ') : '') . $account->name)]);
-            fputcsv($handle, ['Period', $fromDate->toDateString() . ' to ' . $toDate->toDateString()]);
+            fputcsv($handle, ['Period', $fromDate->format('d-m-Y') . ' to ' . $toDate->format('d-m-Y')]);
             fputcsv($handle, []);
             fputcsv($handle, $columns);
 
@@ -709,7 +709,7 @@ class LedgerReportController extends Controller
             fputcsv($handle, ['Ledger Statement']);
             fputcsv($handle, ['Company', $companyName]);
             fputcsv($handle, ['Account', trim(($account->code ? ($account->code . ' - ') : '') . $account->name)]);
-            fputcsv($handle, ['Period', $fromDate->toDateString() . ' to ' . $toDate->toDateString()]);
+            fputcsv($handle, ['Period', $fromDate->format('d-m-Y') . ' to ' . $toDate->format('d-m-Y')]);
             fputcsv($handle, []);
             fputcsv($handle, $columns);
 

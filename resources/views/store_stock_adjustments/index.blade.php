@@ -24,6 +24,35 @@
         </div>
     @endif
 
+    <div class="card mb-3">
+        <div class="card-body p-2">
+            <form action="{{ route('store-stock-adjustments.index') }}" method="GET" class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold mb-1">Filter by Project</label>
+                    <select name="project_id" class="form-select form-select-sm project-filter shadow-sm">
+                        <option value="">-- All Projects --</option>
+                        <option value="none" @selected(request('project_id') === 'none')>None (General/Store)</option>
+                        @foreach($projects as $project)
+                            <option value="{{ $project->id }}" @selected((string)request('project_id') === (string)$project->id)>
+                                {{ $project->code ?? 'N/A' }} - {{ $project->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-md-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-filter"></i> Filter
+                    </button>
+                    @if(request()->anyFilled(['project_id']))
+                        <a href="{{ route('store-stock-adjustments.index') }}" class="btn btn-outline-secondary btn-sm">
+                            Clear
+                        </a>
+                    @endif
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -105,4 +134,24 @@
             </div>
         @endif
     </div>
+@push('scripts')
+<script>
+$(document).ready(function() {
+    $('.project-filter').select2({
+        width: '100%',
+        placeholder: '-- select --',
+        allowClear: true,
+        selectOnClose: true
+    });
+
+    // Auto-focus search field when opening any select2
+    $(document).on('select2:open', () => {
+        const searchField = document.querySelector('.select2-search__field');
+        if (searchField) {
+            searchField.focus();
+        }
+    });
+});
+</script>
+@endpush
 @endsection

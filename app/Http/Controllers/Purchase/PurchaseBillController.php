@@ -238,10 +238,12 @@ public function index(Request $request)
         ->orderBy('code')
         ->get();
 
+    $machines   = Machine::query()->orderBy('name')->get();
+
     $emptyLines = 5;
     $submissionToken = $this->makeCreateSubmissionToken();
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'tdsSections', 'emptyLines', 'company', 'projects'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
 	}
 
     protected function supplierPurchaseOrderQuery(int $supplierId)
@@ -825,6 +827,8 @@ public function index(Request $request)
             ->where('is_active', true)
             ->orderBy('code')
             ->get();
+
+        $machines   = Machine::query()->orderBy('name')->get();
 
         $emptyLines = 3;
 

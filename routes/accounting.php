@@ -76,6 +76,7 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::delete('vouchers/{voucher}', [VoucherController::class, 'destroy'])->name('vouchers.destroy');
     Route::post('vouchers/{voucher}/post', [VoucherController::class, 'post'])->name('vouchers.post');
     Route::post('vouchers/{voucher}/reverse', [VoucherController::class, 'reverse'])->name('vouchers.reverse');
+    Route::post('vouchers/{voucher}/change-date', [VoucherController::class, 'changeDate'])->name('vouchers.change-date');
 
     // Voucher Series (centralised numbering)
     Route::resource('voucher-series', VoucherSeriesController::class)->except(['show']);

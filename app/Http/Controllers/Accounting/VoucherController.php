@@ -196,6 +196,10 @@ class VoucherController extends Controller
             ->orderByDesc('voucher_date')
             ->orderByDesc('id');
 
+        if ($status = $request->get('status')) {
+            $query->where('status', $status);
+        }
+
         if ($type = $request->get('type')) {
             $query->where('voucher_type', $type);
         }
@@ -204,11 +208,40 @@ class VoucherController extends Controller
             $query->where('project_id', $projectId);
         }
 
-        $vouchers = $query->paginate(25);
+        if ($costCenterId = $request->get('cost_center_id')) {
+            $query->where('cost_center_id', $costCenterId);
+        }
+
+        if ($search = $request->get('search')) {
+            $query->where('voucher_no', 'like', "%{$search}%");
+        }
+
+        if ($dateFrom = $request->get('date_from')) {
+            $query->whereDate('voucher_date', '>=', $dateFrom);
+        }
+
+        if ($dateTo = $request->get('date_to')) {
+            $query->whereDate('voucher_date', '<=', $dateTo);
+        }
+
+        $vouchers = $query->paginate($request->get('per_page', 25))->withQueryString();
 
         $docLinks = $this->buildDocLinksForVoucherIds($vouchers->pluck('id')->all());
 
-        return view('accounting.vouchers.index', compact('vouchers', 'docLinks'));
+        $projects    = Project::orderBy('code')->get(['id', 'code', 'name']);
+        $costCenters = CostCenter::orderBy('name')->get(['id', 'name']);
+        $voucherTypes = [
+            'journal' => 'Journal',
+            'contra'  => 'Contra',
+        ];
+
+        return view('accounting.vouchers.index', compact(
+            'vouchers',
+            'docLinks',
+            'projects',
+            'costCenters',
+            'voucherTypes'
+        ));
     }
 
     public function create()
@@ -678,6 +711,38 @@ class VoucherController extends Controller
         return redirect()
             ->route('accounting.vouchers.show', $voucher)
             ->with('success', 'Voucher reversed successfully. Reversal voucher: ' . $reversalVoucher->voucher_no);
+    }
+
+    /**
+     * Update only the voucher date.
+     * Allowed even for posted vouchers for corrections.
+     */
+    public function changeDate(Request $request, Voucher $voucher)
+    {
+        $data = $request->validate([
+            'voucher_date' => ['required', 'date'],
+        ]);
+
+        $oldDate = $voucher->voucher_date ? $voucher->voucher_date->toDateString() : 'N/A';
+        $newDate = $data['voucher_date'];
+
+        if ($oldDate === $newDate) {
+            return redirect()->back()->with('info', 'No change in date.');
+        }
+
+        $old = $voucher->getAttributes();
+        $voucher->voucher_date = $newDate;
+        $voucher->save();
+
+        ActivityLog::logUpdated(
+            $voucher,
+            $old,
+            "Updated voucher date from $oldDate to $newDate"
+        );
+
+        return redirect()
+            ->route('accounting.vouchers.show', $voucher)
+            ->with('success', 'Voucher date updated successfully.');
     }
 
     public function destroy(Voucher $voucher)
