@@ -807,6 +807,7 @@ class BankCashVoucherController extends Controller
                     ? ($bill->ra_number ?: $bill->bill_number)
                     : $bill->bill_number,
                 'bill_reference'     => $isSubcontractorRa ? ($bill->bill_number ?: null) : null,
+                'reference_no'       => $isPurchase ? $bill->reference_no : null,
                 'bill_date'          => $bill->bill_date ? ( ($bill->bill_date instanceof \Carbon\Carbon) ? $bill->bill_date->toDateString() : \Carbon\Carbon::parse($bill->bill_date)->toDateString() ) : null,
                 'total_amount'       => (float) ($row['bill_amount'] ?? $bill->total_amount),
                 'invoice_total'      => (float) ($bill->total_amount ?? 0),

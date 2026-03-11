@@ -16,9 +16,15 @@
         </div>
 
         <div class="d-flex gap-2">
-            <a href="{{ route('accounting.vouchers.index') }}" class="btn btn-outline-secondary btn-sm">
+            <a href="{{ route('accounting.payments.index') }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left"></i> Back
             </a>
+
+            @can('accounting.vouchers.update')
+                <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#changeDateModal">
+                    <i class="bi bi-calendar-event"></i> Edit Date
+                </button>
+            @endcan
 
             @if($voucher->isDraft())
                 @can('accounting.vouchers.update')
@@ -44,13 +50,13 @@
                     </form>
                 @endcan
             @else
-                @can('accounting.vouchers.update')
+                <!-- @can('accounting.vouchers.update')
                     @if(!$voucher->isReversed() && !$voucher->reversal_of_voucher_id)
                         <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#reverseModal">
                             <i class="bi bi-arrow-counterclockwise"></i> Reverse
                         </button>
                     @endif
-                @endcan
+                @endcan -->
             @endif
         </div>
     </div>
@@ -300,4 +306,68 @@
         </div>
     </div>
 </div>
+<div class="d-flex justify-content-end gap-2 mt-3">
+
+    @if($voucher->isDraft())
+        
+    @else
+        @can('accounting.vouchers.update')
+            @if(!$voucher->isReversed() && !$voucher->reversal_of_voucher_id)
+                <button type="button" class="btn btn-warning btn-sm"
+                        data-bs-toggle="modal" data-bs-target="#reverseModal">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reverse
+                </button>
+            @endif
+        @endcan
+    @endif
+
+</div>
+{{-- Change date modal --}}
+<div class="modal fade" id="changeDateModal" tabindex="-1" aria-labelledby="changeDateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content border-primary">
+            <div class="modal-header bg-primary-subtle py-2">
+                <h5 class="modal-title h6" id="changeDateModalLabel">
+                    <i class="bi bi-calendar-event"></i> Change Voucher Date
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <form method="POST" action="{{ route('accounting.vouchers.change-date', $voucher) }}">
+                @csrf
+                <div class="modal-body">
+                    <div class="mb-0">
+                        <label class="form-label small">New Date</label>
+                        <input type="date"
+                               name="voucher_date"
+                               value="{{ optional($voucher->voucher_date)->toDateString() }}"
+                               class="form-control form-control-sm"
+                               required>
+                    </div>
+                </div>
+
+                <div class="modal-footer py-1">
+                    <button type="button" class="btn btn-link btn-sm text-secondary text-decoration-none" data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        Update Date
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Manual initialization as fallback/fix for "backdrop undefined" error
+        const modalEl = document.getElementById('changeDateModal');
+        if (modalEl && window.bootstrap) {
+            // Pre-initialize to ensure config is set
+            bootstrap.Modal.getOrCreateInstance(modalEl);
+        }
+    });
+</script>
+@endpush
 @endsection

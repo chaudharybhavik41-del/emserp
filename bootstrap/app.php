@@ -37,9 +37,23 @@ return Application::configure(basePath: dirname(__DIR__))
         // Daily ERP Digest (yesterday's summary)
         $schedule->job(new \App\Jobs\SendDailyDigestJob)
             ->dailyAt('09:20');
+
+        // Keep push subscriptions healthy.
+        $schedule->command('pwa:subscriptions:prune')
+            ->dailyAt('03:30');
+
+        // Fallback queue worker loop (use Supervisor/systemd in production for primary worker).
+        if (config('pwa.push.worker_fallback_enabled', true)) {
+            $connection = (string) config('pwa.push.worker_fallback_connection', config('queue.default', 'database'));
+            $queues = (string) config('pwa.push.worker_fallback_queues', 'default');
+
+            $schedule->command("queue:work {$connection} --queue={$queues} --stop-when-empty --max-time=50 --sleep=1 --tries=3")
+                ->everyMinute()
+                ->withoutOverlapping()
+                ->runInBackground();
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
-
 

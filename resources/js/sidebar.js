@@ -29,31 +29,31 @@ function initOneSidebar(sidebarEl) {
     });
   });
 
-  // Restore last section (only if no section is already open due to route-active state)
-  window.addEventListener('load', () => {
-    const anyOpen = sidebarEl.querySelector('.collapse.show');
-    if (anyOpen) return;
+  // Restore last section (DISABLED - dropdowns stay closed by default)
+  // window.addEventListener('load', () => {
+  //   const anyOpen = sidebarEl.querySelector('.collapse.show');
+  //   if (anyOpen) return;
 
-    let last = null;
-    try {
-      last = localStorage.getItem(storageKey);
-    } catch (_) {}
-    if (!last) return;
+  //   let last = null;
+  //   try {
+  //     last = localStorage.getItem(storageKey);
+  //   } catch (_) {}
+  //   if (!last) return;
 
-    const btn = sidebarEl.querySelector(`[data-erp-section-key="${CSS.escape(last)}"]`);
-    if (!btn) return;
+  //   const btn = sidebarEl.querySelector(`[data-erp-section-key="${CSS.escape(last)}"]`);
+  //   if (!btn) return;
 
-    const target = btn.getAttribute('data-bs-target');
-    if (!target) return;
+  //   const target = btn.getAttribute('data-bs-target');
+  //   if (!target) return;
 
-    const collapseEl = sidebarEl.querySelector(target);
-    if (!collapseEl) return;
+  //   const collapseEl = sidebarEl.querySelector(target);
+  //   if (!collapseEl) return;
 
-    // Ensure bootstrap is loaded (it is via CDN, deferred)
-    const Collapse = window.bootstrap?.Collapse;
-    if (!Collapse) return;
-    Collapse.getOrCreateInstance(collapseEl, { toggle: false }).show();
-  });
+  //   // Ensure bootstrap is loaded (it is via CDN, deferred)
+  //   const Collapse = window.bootstrap?.Collapse;
+  //   if (!Collapse) return;
+  //   Collapse.getOrCreateInstance(collapseEl, { toggle: false }).show();
+  // });
 
   if (!searchInput) return;
 

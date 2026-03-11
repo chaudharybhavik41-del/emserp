@@ -6,12 +6,14 @@
 @php
     $periodFrom = optional($fromDate)->toDateString();
     $periodTo = optional($toDate)->toDateString();
+    $displayFrom = optional($fromDate)->format('d-m-Y');
+    $displayTo = optional($toDate)->format('d-m-Y');
 @endphp
 <div class="container-fluid">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h1 class="h4 mb-1">Ledger Statement</h1>
-            <div class="small text-muted">{{ $periodFrom }} to {{ $periodTo }} · Company #{{ $companyId }}</div>
+            <div class="small text-muted">{{ $displayFrom }} to {{ $displayTo }} · Company #{{ $companyId }}</div>
         </div>
     </div>
 
@@ -20,7 +22,7 @@
             <form method="GET" class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label form-label-sm">From date</label>
-                    <input type="date" name="from_date" value="{{ request('from_date', $periodFrom) }}" class="form-control form-control-sm">
+                    <input type="date" name="from_date" value="{{ request('from_date', $periodFrom) }}" class="form-control form-control-sm" autofocus >
                 </div>
 
                 <div class="col-md-3">
@@ -30,7 +32,7 @@
 
                 <div class="col-md-3">
                     <label class="form-label form-label-sm">Project (optional)</label>
-                    <select name="project_id" class="form-select form-select-sm">
+                    <select name="project_id" id="project_id" class="form-select form-select-sm select2-basic">
                         <option value="">-- All Projects (Company Ledger) --</option>
                         @foreach($projects as $p)
                             <option value="{{ $p->id }}" @selected((string) $projectId === (string) $p->id)>
@@ -43,7 +45,7 @@
 
                 <div class="col-md-3">
                     <label class="form-label form-label-sm">Account</label>
-                    <select name="account_id" class="form-select form-select-sm">
+                    <select name="account_id" id="account_id" class="form-select form-select-sm select2-basic">
                         @foreach($accounts as $a)
                             <option value="{{ $a->id }}" @selected(optional($account)->id === $a->id)>
                                 {{ $a->code }} - {{ $a->name }}@if(!$a->is_active) (Inactive)@endif
@@ -136,7 +138,7 @@
         <div class="card">
             <div class="card-header py-2 d-flex justify-content-between align-items-center">
                 <div class="fw-semibold small">
-                    Period: {{ $periodFrom }} to {{ $periodTo }}
+                    Period: {{ $displayFrom }} to {{ $displayTo }}
                     @if(($viewMode ?? 'standard') === 'analytical')
                         <span class="text-muted">· Analytical supplier ledger</span>
                     @endif
@@ -235,8 +237,9 @@
                                 @foreach($ledgerEntries as $entry)
                                     @php
                                         $running += ((float) $entry->debit - (float) $entry->credit);
+                                        $entryDate = optional($entry->voucher->voucher_date)->format('d-m-Y');
                                         $searchText = strtolower(trim(
-                                            (optional($entry->voucher->voucher_date)->toDateString() ?? '') . ' ' .
+                                            ($entryDate ?? '') . ' ' .
                                             ($entry->voucher->voucher_no ?? '') . ' ' .
                                             ($entry->voucher->voucher_type ?? '') . ' ' .
                                             ($entry->description ?: ($entry->voucher->narration ?: '-')) . ' ' .
@@ -244,7 +247,7 @@
                                         ));
                                     @endphp
                                     <tr class="ledger-entry-row" data-voucher-id="{{ $entry->voucher_id }}" data-row-text="{{ $searchText }}">
-                                        <td class="small">{{ optional($entry->voucher->voucher_date)->toDateString() }}</td>
+                                        <td class="small">{{ $entryDate }}</td>
                                         <td class="small">
                                             <a href="{{ route('accounting.vouchers.show', $entry->voucher) }}" class="text-decoration-none">{{ $entry->voucher->voucher_no }}</a>
                                         </td>
@@ -325,6 +328,21 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Initialize Select2
+    if (window.$ && $.fn.select2) {
+        $('.select2-basic').select2({
+            width: '100%'
+        });
+
+        // Focus fix for Select2 search box
+        $(document).on('select2:open', () => {
+            document.querySelector('.select2-search__field').focus();
+        });
+
+        // Auto-open Account select on load
+        // $('#account_id').select2('open');
+    }
+
     const searchInput = document.getElementById('ledgerSearch');
     const clearBtn = document.getElementById('ledgerSearchClear');
     const noMatch = document.getElementById('ledgerNoMatch');

@@ -35,12 +35,23 @@ class StoreStockAdjustmentController extends Controller
             ->only(['postToAccounts']);
     }
 
-    public function index(): View
+    public function index(Request $request): View
     {
-        $adjustments = StoreStockAdjustment::with(['project', 'createdBy', 'lines.stockItem'])
-            ->orderByDesc('adjustment_date')
+        $query = StoreStockAdjustment::query()
+            ->with(['project', 'createdBy', 'lines.stockItem']);
+
+        if ($request->filled('project_id')) {
+            if ($request->project_id === 'none') {
+                $query->whereNull('project_id');
+            } else {
+                $query->where('project_id', $request->project_id);
+            }
+        }
+
+        $adjustments = $query->orderByDesc('adjustment_date')
             ->orderByDesc('id')
-            ->paginate(25);
+            ->paginate(25)
+            ->withQueryString();
 
         $adjustments->getCollection()->transform(function (StoreStockAdjustment $adjustment) {
             $totalAmount = 0.0;
@@ -63,7 +74,9 @@ class StoreStockAdjustmentController extends Controller
             return $adjustment;
         });
 
-        return view('store_stock_adjustments.index', compact('adjustments'));
+        $projects = Project::orderBy('code')->get();
+
+        return view('store_stock_adjustments.index', compact('adjustments', 'projects'));
     }
 public function getBrands($id)
 {
@@ -103,12 +116,21 @@ public function getBrands($id)
             ->limit(200)
             ->get();
 
+        // Build UOM meta for decimal places
+        $uomMetaJson = $uoms->mapWithKeys(function (Uom $u) {
+            return [$u->id => [
+                'id'             => $u->id,
+                'decimal_places' => $u->decimal_places ?? 3,
+            ]];
+        })->toJson();
+
         return view('store_stock_adjustments.create', [
             'projects'    => $projects,
             'contractors' => $contractors,
             'items'       => $items,
             'uoms'        => $uoms,
             'itemMetaJson' => $itemMetaJson,
+            'uomMetaJson'  => $uomMetaJson,
             'stockItems'  => $stockItems,
         ]);
     }
@@ -118,7 +140,7 @@ public function getBrands($id)
         $baseRules = [
             'adjustment_date'   => ['required', 'date'],
             'adjustment_type'   => ['required', 'in:opening,increase,decrease'],
-            'project_id'        => ['nullable', 'integer', 'exists:projects,id'],
+            'project_id'        => ['nullable'],
             'reason'            => ['nullable', 'string', 'max:255'],
             'remarks'           => ['nullable', 'string'],
         ];
@@ -154,7 +176,14 @@ public function getBrands($id)
             $adjustment                  = new StoreStockAdjustment();
             $adjustment->adjustment_date = $data['adjustment_date'];
             $adjustment->adjustment_type = $type;
-            $adjustment->project_id      = $data['project_id'] ?? null;
+            
+            $projectId = $request->input('project_id');
+            if ($projectId === 'none' || $projectId === '0' || empty($projectId)) {
+                $adjustment->project_id = null;
+            } else {
+                $adjustment->project_id = $projectId;
+            }
+
             $adjustment->reason          = $data['reason'] ?? null;
             $adjustment->remarks         = $data['remarks'] ?? null;
             $adjustment->status          = 'posted';
@@ -384,6 +413,7 @@ public function getBrands($id)
         $storeStockAdjustment->load(['lines.stockItem.item', 'project', 'createdBy']);
 
         // Allow editing ONLY for Opening adjustments that are not posted to accounts.
+        // If we want to support increase/decrease, we'd need more complex logic to reverse impacts.
         if (($storeStockAdjustment->adjustment_type ?? '') !== 'opening') {
             abort(403, 'Only Opening stock adjustments can be edited.');
         }
@@ -391,16 +421,34 @@ public function getBrands($id)
             abort(403, 'This stock adjustment is already posted to accounts and cannot be edited.');
         }
 
-        $projects = Project::orderBy('name')->get();
+        $projects    = Project::orderBy('code')->get();
         $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
-        $items = Item::orderBy('name')->get();
-        $uoms = Uom::orderBy('name')->get();
+        $items       = Item::orderBy('name')->get();
+        $uoms        = Uom::orderBy('name',)->get();
 
-        // Item-wise brand suggestions (same as create)
-        $itemMetaJson = $items->mapWithKeys(function ($it) {
-            return [$it->id => [
-                'uom_id'  => $it->uom_id,
-                'brands'  => $this->normalizeBrands($it->brands ?? []),
+        // Build item meta for Brand dropdown (id, name, brands)
+        $itemMetaJson = $items->mapWithKeys(function (Item $i) {
+            return [$i->id => [
+                'id'     => $i->id,
+                'name'   => ($i->code ? ($i->code . ' - ') : '') . $i->name,
+                'uom_id' => $i->uom_id,
+                'brands' => $this->normalizeBrands($i->brands),
+            ]];
+        })->toJson();
+
+        // Only non-raw stock items for adjustment (no plates/sections)
+        $stockItems = StoreStockItem::with(['item.uom', 'project'])
+            ->whereNotIn('material_category', ['steel_plate', 'steel_section'])
+            ->whereNotIn('status', ['blocked_qc'])
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get();
+
+        // Build UOM meta for decimal places
+        $uomMetaJson = $uoms->mapWithKeys(function (Uom $u) {
+            return [$u->id => [
+                'id'             => $u->id,
+                'decimal_places' => $u->decimal_places ?? 3,
             ]];
         })->toJson();
 
@@ -411,191 +459,168 @@ public function getBrands($id)
             'items'        => $items,
             'uoms'         => $uoms,
             'itemMetaJson' => $itemMetaJson,
+            'uomMetaJson'  => $uomMetaJson,
+            'stockItems'   => $stockItems,
         ]);
     }
 
     public function update(Request $request, StoreStockAdjustment $storeStockAdjustment): RedirectResponse
-{
-    $storeStockAdjustment->load(['lines.stockItem']);
+    {
+        $storeStockAdjustment->load(['lines.stockItem']);
 
-    if (($storeStockAdjustment->adjustment_type ?? '') !== 'opening') {
-        return back()->withErrors(['general' => 'Only Opening stock adjustments can be edited.']);
-    }
-    if (($storeStockAdjustment->accounting_status ?? 'pending') === 'posted') {
-        return back()->withErrors(['general' => 'This stock adjustment is already posted to accounts and cannot be edited.']);
-    }
+        if (($storeStockAdjustment->adjustment_type ?? '') !== 'opening') {
+            return back()->withErrors(['general' => 'Only Opening stock adjustments can be edited for now.']);
+        }
+        if (($storeStockAdjustment->accounting_status ?? 'pending') === 'posted') {
+            return back()->withErrors(['general' => 'This stock adjustment is already posted to accounts and cannot be edited.']);
+        }
 
-    $data = $request->validate([
-        'adjustment_date'               => ['required', 'date'],
-        'project_id'                    => ['nullable', 'integer', 'exists:projects,id'],
-        'reason'                        => ['nullable', 'string', 'max:255'],
-        'remarks'                       => ['nullable', 'string'],
-        'opening_lines'                 => ['required', 'array', 'min:1'],
-        'opening_lines.*.line_id'       => ['nullable', 'integer'],
-        'opening_lines.*.stock_item_id' => ['nullable', 'integer'],
-        'opening_lines.*.item_id'       => ['required', 'integer', 'exists:items,id'],
-        'opening_lines.*.uom_id'        => ['required', 'integer', 'exists:uoms,id'],
-        'opening_lines.*.brand'         => ['nullable', 'string', 'max:100'],
-        'opening_lines.*.quantity'      => ['required', 'numeric', 'min:0'],
-        'opening_lines.*.unit_rate'     => ['nullable', 'numeric', 'min:0'],
-        'opening_lines.*.remarks'       => ['nullable', 'string', 'max:255'],
-    ]);
+        $data = $request->validate([
+            'adjustment_date'               => ['required', 'date'],
+            'project_id'                    => ['nullable'],
+            'reason'                        => ['nullable', 'string', 'max:255'],
+            'remarks'                       => ['nullable', 'string'],
+            'opening_lines'                 => ['required_if:adjustment_type,opening', 'array'],
+            'opening_lines.*.line_id'       => ['nullable', 'integer'],
+            'opening_lines.*.stock_item_id' => ['nullable', 'integer'],
+            'opening_lines.*.item_id'       => ['required', 'integer', 'exists:items,id'],
+            'opening_lines.*.uom_id'        => ['required', 'integer', 'exists:uoms,id'],
+            'opening_lines.*.brand'         => ['nullable', 'string', 'max:100'],
+            'opening_lines.*.quantity'      => ['required', 'numeric', 'min:0.001'],
+            'opening_lines.*.unit_rate'     => ['nullable', 'numeric', 'min:0'],
+            'opening_lines.*.remarks'       => ['nullable', 'string', 'max:255'],
+        ]);
 
-    DB::beginTransaction();
+        DB::beginTransaction();
 
-    try {
-        $storeStockAdjustment->adjustment_date = $data['adjustment_date'];
-        $storeStockAdjustment->project_id      = $data['project_id'] ?? null;
-        $storeStockAdjustment->reason          = $data['reason'] ?? null;
-        $storeStockAdjustment->remarks         = $data['remarks'] ?? null;
-        $storeStockAdjustment->save();
-
-        $hasValuedOpening = false;
-
-        // Update existing opening lines + linked stock items.
-        foreach ($data['opening_lines'] as $row) {
-            $lineId = $row['line_id'] ?? null;
-
-            $qty = (float) ($row['quantity'] ?? 0);
-
-            $brand = isset($row['brand']) && trim((string) $row['brand']) !== ''
-                ? trim((string) $row['brand'])
-                : null;
-
-            $unitRate = (float) ($row['unit_rate'] ?? 0);
-            $unitRate = $unitRate > 0 ? $unitRate : null;
-
-            if ($unitRate !== null) {
-                $hasValuedOpening = true;
+        try {
+            $storeStockAdjustment->adjustment_date = $data['adjustment_date'];
+            
+            $projectId = $request->input('project_id');
+            if ($projectId === 'none' || $projectId === '0' || empty($projectId)) {
+                $storeStockAdjustment->project_id = null;
+            } else {
+                $storeStockAdjustment->project_id = $projectId;
             }
 
-            // Existing line edit
-            if ($lineId) {
-                /** @var StoreStockAdjustmentLine|null $line */
-                $line = $storeStockAdjustment->lines->firstWhere('id', (int) $lineId);
-                if (! $line) {
-                    continue;
+            $storeStockAdjustment->reason          = $data['reason'] ?? null;
+            $storeStockAdjustment->remarks         = $data['remarks'] ?? null;
+            $storeStockAdjustment->save();
+
+            $hasValuedOpening = false;
+            $inputLineIds = collect($data['opening_lines'] ?? [])->pluck('line_id')->filter()->toArray();
+
+            // 1. Delete lines that are no longer present
+            foreach ($storeStockAdjustment->lines as $existingLine) {
+                if (!in_array($existingLine->id, $inputLineIds)) {
+                    $stock = $existingLine->stockItem;
+                    if ($stock) {
+                        // Check if issued
+                        $issued = (float) ($stock->weight_kg_total - $stock->weight_kg_available);
+                        if ($issued > 0.0001) {
+                            throw new \RuntimeException("Cannot delete line #{$existingLine->id} as stock has already been issued ({$issued}).");
+                        }
+                        $stock->delete();
+                    }
+                    $existingLine->delete();
+                }
+            }
+
+            // 2. Update existing lines + create new ones
+            foreach ($data['opening_lines'] ?? [] as $row) {
+                $lineId = $row['line_id'] ?? null;
+                $qty = (float) ($row['quantity'] ?? 0);
+                $brand = isset($row['brand']) && trim((string) $row['brand']) !== '' ? trim((string) $row['brand']) : null;
+                $unitRate = (float) ($row['unit_rate'] ?? 0);
+                $unitRate = $unitRate > 0 ? $unitRate : null;
+
+                if ($unitRate !== null) {
+                    $hasValuedOpening = true;
                 }
 
-                $stock = $line->stockItem;
-                if (! $stock) {
-                    continue;
-                }
+                if ($lineId) {
+                    $line = $storeStockAdjustment->lines()->findOrFail($lineId);
+                    $stock = $line->stockItem;
 
-                // Guard: item cannot be changed for existing opening lines (UI is locked but still enforce server-side)
-                $inputItemId = (int) ($row['item_id'] ?? 0);
-                if ($inputItemId && $inputItemId !== (int) $stock->item_id) {
-                    throw new \RuntimeException('Item cannot be changed for existing opening lines.');
-                }
+                    if ($stock) {
+                        // Guard: item cannot be changed for existing opening lines
+                        if ((int)$row['item_id'] !== (int)$stock->item_id) {
+                            throw new \RuntimeException('Item cannot be changed for existing opening lines.');
+                        }
 
-                $inputStockId = (int) ($row['stock_item_id'] ?? 0);
-                if ($inputStockId && $inputStockId !== (int) $stock->id) {
-                    throw new \RuntimeException('Invalid stock reference for opening line.');
-                }
+                        $issued = (float) ($stock->weight_kg_total - $stock->weight_kg_available);
+                        if ($qty < $issued - 0.0001) {
+                            throw new \RuntimeException("Cannot reduce quantity below issued amount ({$issued}) for line #{$lineId}.");
+                        }
 
-                // Guard: cannot reduce below already issued quantity.
-                $issued = 0.0;
-                if ($stock->weight_kg_total !== null && $stock->weight_kg_available !== null) {
-                    $issued = max(0.0, (float) $stock->weight_kg_total - (float) $stock->weight_kg_available);
-                } elseif ($stock->qty_pcs_total !== null && $stock->qty_pcs_available !== null) {
-                    $issued = max(0.0, (float) $stock->qty_pcs_total - (float) $stock->qty_pcs_available);
-                }
+                        $stock->weight_kg_total     = $qty;
+                        $stock->weight_kg_available = max(0.0, $qty - $issued);
+                        $stock->brand               = $brand;
+                        $stock->opening_unit_rate   = $unitRate;
+                        $stock->opening_rate_uom_id = $unitRate !== null ? (int) $row['uom_id'] : null;
+                        $stock->remarks             = $row['remarks'] ?? null;
+                        $stock->save();
+                    }
 
-                if ($qty < $issued) {
-                    throw new \RuntimeException("Cannot reduce opening quantity below already issued quantity. Already issued: {$issued}. New qty: {$qty}.");
-                }
-
-                // Recompute available based on already issued.
-                if ($stock->weight_kg_total !== null) {
-                    $stock->weight_kg_total     = $qty;
-                    $stock->weight_kg_available = max(0.0, $qty - $issued);
+                    $line->uom_id     = (int) $row['uom_id'];
+                    $line->brand      = $brand;
+                    $line->quantity   = $qty;
+                    $line->remarks    = $row['remarks'] ?? null;
+                    $line->save();
                 } else {
-                    $stock->qty_pcs_total      = $qty;
-                    $stock->qty_pcs_available  = max(0.0, $qty - $issued);
+                    // New line
+                    $stock = StoreStockItem::create([
+                        'item_id'                  => (int) $row['item_id'],
+                        'brand'                    => $brand,
+                        'project_id'               => $storeStockAdjustment->project_id,
+                        'is_client_material'       => false,
+                        'material_category'        => 'consumable',
+                        'weight_kg_total'          => $qty,
+                        'weight_kg_available'      => $qty,
+                        'source_type'              => 'opening',
+                        'source_reference'         => $storeStockAdjustment->reference_number,
+                        'opening_unit_rate'        => $unitRate,
+                        'opening_rate_uom_id'      => $unitRate !== null ? (int) $row['uom_id'] : null,
+                        'status'                   => 'available',
+                        'remarks'                  => $row['remarks'] ?? null,
+                    ]);
+
+                    $line = new StoreStockAdjustmentLine();
+                    $line->store_stock_adjustment_id = $storeStockAdjustment->id;
+                    $line->store_stock_item_id       = $stock->id;
+                    $line->item_id                   = $stock->item_id;
+                    $line->uom_id                    = (int) $row['uom_id'];
+                    $line->project_id                = $storeStockAdjustment->project_id;
+                    $line->brand                     = $brand;
+                    $line->quantity                  = $qty;
+                    $line->remarks                   = $row['remarks'] ?? null;
+                    $line->save();
                 }
-
-                $stock->brand               = $brand;
-                $stock->opening_unit_rate   = $unitRate;
-                $stock->opening_rate_uom_id = $unitRate !== null ? (int) $row['uom_id'] : null;
-
-                // Keep stock remarks aligned (optional)
-                if (array_key_exists('remarks', $row)) {
-                    $stock->remarks = $row['remarks'] ?? null;
-                }
-
-                $stock->save();
-
-                $line->item_id    = $stock->item_id;
-                $line->uom_id     = (int) $row['uom_id'];
-                $line->project_id = $storeStockAdjustment->project_id;
-                $line->brand      = $brand;
-                $line->quantity   = $qty;
-                $line->remarks    = $row['remarks'] ?? null;
-                $line->save();
-
-                continue;
             }
 
-            // New line add (creates new opening stock item)
-            if ($qty <= 0) {
-                continue;
+            // Update accounting status
+            if ($hasValuedOpening) {
+                $storeStockAdjustment->accounting_status    = 'pending';
+                $storeStockAdjustment->accounting_posted_by = null;
+                $storeStockAdjustment->accounting_posted_at = null;
+            } else {
+                $storeStockAdjustment->accounting_status    = 'not_required';
+                $storeStockAdjustment->accounting_posted_by = $request->user()?->id;
+                $storeStockAdjustment->accounting_posted_at = now();
             }
 
-            $stock = StoreStockItem::create([
-                'material_receipt_line_id' => null,
-                'item_id'                  => (int) $row['item_id'],
-                'brand'                    => $brand,
-                'project_id'               => $storeStockAdjustment->project_id,
-                'is_client_material'       => false,
-                'material_category'        => 'consumable',
-                'qty_pcs_total'            => 0,
-                'qty_pcs_available'        => 0,
-                'weight_kg_total'          => $qty,
-                'weight_kg_available'      => $qty,
-                'source_type'              => 'opening',
-                'source_reference'         => $storeStockAdjustment->reference_number,
-                'opening_unit_rate'        => $unitRate,
-                'opening_rate_uom_id'      => $unitRate !== null ? (int) $row['uom_id'] : null,
-                'status'                   => 'available',
-                'remarks'                  => $row['remarks'] ?? null,
-            ]);
+            $storeStockAdjustment->save();
 
-            $line = new StoreStockAdjustmentLine();
-            $line->store_stock_adjustment_id = $storeStockAdjustment->id;
-            $line->store_stock_item_id       = $stock->id;
-            $line->item_id                   = $stock->item_id;
-            $line->uom_id                    = (int) $row['uom_id'];
-            $line->project_id                = $storeStockAdjustment->project_id;
-            $line->brand                     = $brand;
-            $line->quantity                  = $qty;
-            $line->remarks                   = $row['remarks'] ?? null;
-            $line->save();
+            DB::commit();
+
+            return redirect()
+                ->route('store-stock-adjustments.show', $storeStockAdjustment)
+                ->with('success', 'Stock adjustment updated.');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withInput()->withErrors(['general' => $e->getMessage()]);
         }
-
-        // If opening lines include a unit rate, allow posting to accounts.
-        // Otherwise, mark as not_required (quantity-only opening).
-        if ($hasValuedOpening) {
-            $storeStockAdjustment->accounting_status    = 'pending';
-            $storeStockAdjustment->accounting_posted_by = null;
-            $storeStockAdjustment->accounting_posted_at = null;
-        } else {
-            $storeStockAdjustment->accounting_status    = 'not_required';
-            $storeStockAdjustment->accounting_posted_by = $request->user()?->id;
-            $storeStockAdjustment->accounting_posted_at = now();
-        }
-
-        $storeStockAdjustment->save();
-
-        DB::commit();
-
-        return redirect()
-            ->route('store-stock-adjustments.show', $storeStockAdjustment)
-            ->with('success', 'Stock adjustment updated.');
-    } catch (\Throwable $e) {
-        DB::rollBack();
-        return back()->withInput()->withErrors(['general' => $e->getMessage()]);
     }
-}
 
 
     /**

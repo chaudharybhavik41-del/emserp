@@ -38,22 +38,20 @@
     $isTopbar = ($navigationMode ?? 'sidebar') === 'topbar';
 
     // Which section should be expanded by default based on current route
-    $openCore       = $isRoute(['access.*','users.*','uoms.*','departments.*','companies.*','settings.*','mail-profiles.*','mail-templates.*','standard-terms.*','notifications.*']);
-    $openSecurity   = $isRoute(['activity-logs.*','login-logs.*','sessions.*']);
-    $openMasters    = $isRoute(['material-types.*','material-categories.*','material-subcategories.*','items.*','parties.*']);
-    $openCrm        = $isRoute(['crm.*']);
-    $openHr         = request()->is('hr*') || $isRoute(['hr.*']);
-    $openPurchase   = $isRoute(['purchase-indents.*','purchase-rfqs.*','purchase-orders.*','purchase.bills.*']);
-    $openStore      = $isRoute(['store.*','material-receipts.*','store-stock.*','store-stock-items.*','store-stock-summary.*','store-stock-register.*','store-low-stock.*','store-remnants.*','store-requisitions.*','store-issues.*','fuel-issues.*','store-returns.*','store-stock-adjustments.*','gate-passes.*','machines.*','machine-assignments.*','maintenance.plans.*','maintenance.logs.*','maintenance.breakdowns.*','machine-calibrations.*','maintenance.reports.*']);
-    $openAccounting = $isRoute(['accounting.*','reports.*','payments.*','receipts.*']);
-    $openProduction = $isRoute(['production.*']);
-    $openProjects   = $isRoute(['projects.*','bom-templates.*']);
-    $openTasks      = $isRoute(['tasks.*','task-board.*','task-lists.*','task-settings.*']);
-	$openSupport    = $isRoute(['support.*']);
-	$openStorage    = $isRoute(['storage.*']);
-    if ($isTopbar) {
-        $openCore = $openSecurity = $openMasters = $openCrm = $openHr = $openPurchase = $openStore = $openAccounting = $openProduction = $openProjects = $openTasks = $openSupport = $openStorage = false;
-    }
+    // DISABLED: Dropdowns now stay closed by default - user must click to open
+    $openCore       = false;
+    $openSecurity   = false;
+    $openMasters    = false;
+    $openCrm        = false;
+    $openHr         = false;
+    $openPurchase   = false;
+    $openStore      = false;
+    $openAccounting = false;
+    $openProduction = false;
+    $openProjects   = false;
+    $openTasks      = false;
+	$openSupport    = false;
+	$openStorage    = false;
 
     // Core section is not wrapped in @canany in the original file, so avoid showing an empty collapsible.
     $showCore = false;

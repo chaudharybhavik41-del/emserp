@@ -609,7 +609,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const total = typeof bill.total_amount === 'number' ? bill.total_amount : parseFloat(bill.total_amount || 0) || 0;
             const outstd = typeof bill.outstanding_amount === 'number' ? bill.outstanding_amount : parseFloat(bill.outstanding_amount || 0) || 0;
-            const reference = bill.bill_reference ? '<div class="text-muted small">' + bill.bill_reference + '</div>' : '';
+            const mainLabel = bill.reference_no ? 'Invoice No: ' + bill.reference_no : (bill.bill_number || '');
+            const subLabel = bill.bill_reference ? '<div class="text-muted small">' + bill.bill_reference + '</div>' : '';
 
             tr.innerHTML = ''
                 + '<td class="text-center">'
@@ -619,7 +620,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 + '         data-outstanding="' + outstd + '"'
                 + '         ' + (checked ? 'checked' : '') + '>'
                 + '</td>'
-                + '<td class="small"><div>' + (bill.bill_kind || 'Bill') + ' - ' + (bill.bill_number || '') + '</div>' + reference + '</td>'
+                + '<td class="small"><div>' + mainLabel + '</div>' + subLabel + '</td>'
                 + '<td class="small">' + (bill.bill_date || '') + '</td>'
                 + '<td class="small text-end">' + total.toFixed(2) + '</td>'
                 + '<td class="small text-end">' + outstd.toFixed(2) + '</td>'
