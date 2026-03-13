@@ -191,6 +191,7 @@
         return [
             'id'            => $v->id,
             'name'          => $v->name,
+            'legal_name'    => $v->legal_name,
             'email'         => $first->email ?? ($v->primary_email ?? ''),
             'contact_name'  => $first->name ?? '',
             'contact_phone' => $first->phone ?? '',
@@ -241,7 +242,7 @@
     function vendorOptions(selected){
         return VENDORS_META.map(v => {
             const sel = String(v.id) === String(selected) ? 'selected' : '';
-            return `<option value="${v.id}" ${sel}>${v.name}</option>`;
+            return `<option value="${v.id}" ${sel}>${v.legal_name}</option>`;
         }).join('');
     }
 
