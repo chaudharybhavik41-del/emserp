@@ -319,6 +319,8 @@ Route::middleware('auth')->group(function () {
     Route::resource('parties', PartyController::class);
 
     // Party contacts
+
+    Route::get('/gstin-search', [PartyController::class, 'searchGST'])->name('parties.gstin.search');
     Route::post('parties/{party}/contacts', [PartyContactController::class, 'store'])->name('parties.contacts.store');
     Route::put('party-contacts/{contact}', [PartyContactController::class, 'update'])->name('party-contacts.update');
     Route::delete('party-contacts/{contact}', [PartyContactController::class, 'destroy'])->name('party-contacts.destroy');

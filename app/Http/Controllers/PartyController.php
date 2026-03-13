@@ -7,6 +7,8 @@ use App\Http\Requests\StorePartyRequest;
 use App\Http\Requests\UpdatePartyRequest;
 use App\Models\Party;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 class PartyController extends Controller
 {
@@ -27,6 +29,21 @@ class PartyController extends Controller
             ->only(['destroy']);
     }
 
+public function searchGST(Request $request)
+{
+    $gstin = $request->gstin;
+    $token = DB::table('api_tokens')->value('access_token');
+
+    $response = Http::withOptions([
+        'verify' => false
+    ])->withHeaders([
+        'accept' => 'application/json',
+        'Authorization' => 'Bearer ' . $token
+    ])->get("https://www.fynamics.co.in/api/gst/search-taxpayer/TP/".$gstin);
+
+
+    return response()->json($response->json());
+}
     /**
      * Display a listing of the parties.
      */
@@ -86,29 +103,42 @@ class PartyController extends Controller
     /**
      * Store a newly created party in storage.
      */
-    public function store(StorePartyRequest $request)
-    {
-        $data = $request->validated();
+   public function store(StorePartyRequest $request)
+{
+    $data = $request->validated();
 
-        $data['is_supplier']   = $request->boolean('is_supplier');
-        $data['is_contractor'] = $request->boolean('is_contractor');
-        $data['is_client']     = $request->boolean('is_client');
-        $data['is_active']     = $request->has('is_active')
-            ? $request->boolean('is_active')
-            : true;
+    // Party Types
+    $data['is_supplier']   = $request->boolean('is_supplier');
+    $data['is_contractor'] = $request->boolean('is_contractor');
+    $data['is_client']     = $request->boolean('is_client');
 
-        // Auto-generate code if not provided
-        if (empty($data['code'])) {
-            $data['code'] = $this->generatePartyCode($data);
-        }
+    // Active Status
+    $data['is_active'] = $request->has('is_active')
+        ? $request->boolean('is_active')
+        : true;
 
-        $party = Party::create($data);
+    // GSTIN Yes / No
+    $data['has_gstin'] = $request->has('has_gstin')
+        ? $request->boolean('has_gstin')
+        : null;
 
-        return redirect()
-            ->route('parties.show', $party)
-            ->with('success', 'Party created successfully.');
+    // If GSTIN = No then remove gstin value
+    if (!$data['has_gstin']) {
+        $data['gstin'] = null;
     }
 
+    // Auto Generate Code
+    if (empty($data['code'])) {
+        $data['code'] = $this->generatePartyCode($data);
+    }
+
+    // Create Party
+    $party = Party::create($data);
+
+    return redirect()
+        ->route('parties.show', $party)
+        ->with('success', 'Party created successfully.');
+}
     /**
      * Display the specified party.
      */

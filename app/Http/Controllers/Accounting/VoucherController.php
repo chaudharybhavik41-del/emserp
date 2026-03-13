@@ -683,7 +683,7 @@ class VoucherController extends Controller
         });
 
         return redirect()
-            ->route('accounting.vouchers.show', $voucher)
+            ->route('accounting.vouchers.index', $voucher)
             ->with('success', 'Voucher posted successfully.');
     }
 
