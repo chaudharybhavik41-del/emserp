@@ -11,6 +11,10 @@ return new class extends Migration {
             return;
         }
 
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         $statements = [];
 
         if (Schema::hasColumn('mail_profiles', 'host')) {

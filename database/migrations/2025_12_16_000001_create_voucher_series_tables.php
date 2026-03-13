@@ -75,7 +75,7 @@ return new class extends Migration
                     // Keep backward compatibility:
                     // - purchase vouchers historically used PB-000001
                     // - store issues used ISS-000001 (or issue_number)
-                    $noFy = in_array($key, ['purchase', 'store_issue'], true);
+                    $noFy = in_array($key, ['purchase', 'store_issue', 'store_return', 'stock_adjustment', 'fuel_issue'], true);
 
                     DB::table('voucher_series')->updateOrInsert(
                         ['company_id' => $companyId, 'key' => $key],

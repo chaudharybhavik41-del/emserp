@@ -82,10 +82,10 @@ class StoreReturnPostingService
             throw new RuntimeException('Config accounting.store.machine_maintenance_spare_expense_account_code is not set.');
         }
 
-        $wipAccount            = Account::where('code', $wipCode)->first();
-        $factoryExpenseAccount = Account::where('code', $factoryExpCode)->first();
+        $wipAccount            = Account::where('company_id', $companyId)->where('code', $wipCode)->first();
+        $factoryExpenseAccount = Account::where('company_id', $companyId)->where('code', $factoryExpCode)->first();
         $machineSpareExpenseAccount = $isMachineSpareReturn
-            ? Account::where('code', $machineSpareExpCode)->first()
+            ? Account::where('company_id', $companyId)->where('code', $machineSpareExpCode)->first()
             : null;
 
         if (! $wipAccount) {

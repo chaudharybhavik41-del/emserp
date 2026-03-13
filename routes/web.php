@@ -111,6 +111,29 @@ use App\Http\Controllers\Production\ProductionTraceabilitySearchController;
 use App\Http\Controllers\Production\ProductionPlanRouteMatrixController;
 use App\Http\Controllers\Production\ProductionModuleEntryController;
 use App\Http\Controllers\Production\ProductionWorkbenchController;
+use App\Http\Controllers\ProductionV2\ProductionV2AssemblyController;
+use App\Http\Controllers\ProductionV2\ProductionV2DemandDashboardController;
+use App\Http\Controllers\ProductionV2\ProductionV2BomImportController;
+use App\Http\Controllers\ProductionV2\ProductionV2CuttingPlanController;
+use App\Http\Controllers\ProductionV2\ProductionV2CutBatchController;
+use App\Http\Controllers\ProductionV2\ProductionV2DprController;
+use App\Http\Controllers\ProductionV2\ProductionV2DesignWorkbenchController;
+use App\Http\Controllers\ProductionV2\ProductionV2DesignReleaseController;
+use App\Http\Controllers\ProductionV2\ProductionV2FitupController;
+use App\Http\Controllers\ProductionV2\ProductionV2InspectionController;
+use App\Http\Controllers\ProductionV2\ProductionV2MaterialRequirementController;
+use App\Http\Controllers\ProductionV2\ProductionV2ModuleEntryController;
+use App\Http\Controllers\ProductionV2\ProductionV2OperationMasterController;
+use App\Http\Controllers\ProductionV2\ProductionV2PartDefinitionController;
+use App\Http\Controllers\ProductionV2\ProductionV2QcGateController;
+use App\Http\Controllers\ProductionV2\ProductionV2RoutePlanningController;
+use App\Http\Controllers\ProductionV2\ProductionV2RouteTemplateController;
+use App\Http\Controllers\ProductionV2\ProductionV2ReworkController;
+use App\Http\Controllers\ProductionV2\ProductionV2TrialAssemblyController;
+use App\Http\Controllers\ProductionV2\ProductionV2OperationEventController;
+use App\Http\Controllers\ProductionV2\ProductionV2WeldingController;
+use App\Http\Controllers\ProductionV2\ProductionV2WipController;
+use App\Http\Controllers\ProductionV2\ProductionV2WorkbenchController;
 
 
 // Approval Module
@@ -703,6 +726,119 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
         ->name('production.workbench');
     Route::get('production/project/{project}', [ProductionWorkbenchController::class, 'index'])
         ->name('production.workbench.project');
+    Route::get('production-v2', [ProductionV2ModuleEntryController::class, 'index'])
+        ->name('production-v2.index');
+    Route::get('production-v2/design', [ProductionV2ModuleEntryController::class, 'design'])
+        ->name('production-v2.design.index');
+    Route::get('production-v2/production', [ProductionV2ModuleEntryController::class, 'production'])
+        ->name('production-v2.production.index');
+    Route::get('production-v2/project/{project}', [ProductionV2WorkbenchController::class, 'show'])
+        ->name('production-v2.project');
+    Route::get('production-v2/project/{project}/design', [ProductionV2DesignWorkbenchController::class, 'show'])
+        ->name('production-v2.project.design');
+    Route::post('production-v2/project/{project}/design/batch-correct', [ProductionV2DesignWorkbenchController::class, 'batchCorrect'])
+        ->name('production-v2.project.design.batch-correct');
+    Route::post('production-v2/project/{project}/mode', [ProductionV2WorkbenchController::class, 'updateMode'])
+        ->name('production-v2.project.mode');
+
+    Route::prefix('projects/{project}/production-v2')->name('projects.production-v2.')->group(function () {
+        Route::get('/', [ProductionV2WorkbenchController::class, 'show'])->name('workbench');
+        Route::get('dprs', [ProductionV2DprController::class, 'index'])->name('dprs.index');
+        Route::get('dprs/create', [ProductionV2DprController::class, 'create'])->name('dprs.create');
+        Route::post('dprs', [ProductionV2DprController::class, 'store'])->name('dprs.store');
+        Route::get('dprs/{productionDpr}', [ProductionV2DprController::class, 'show'])->name('dprs.show');
+        Route::get('route-templates', [ProductionV2RouteTemplateController::class, 'index'])->name('route-templates.index');
+        Route::get('route-templates/create', [ProductionV2RouteTemplateController::class, 'create'])->name('route-templates.create');
+        Route::post('route-templates', [ProductionV2RouteTemplateController::class, 'store'])->name('route-templates.store');
+        Route::get('route-templates/{routeTemplate}', [ProductionV2RouteTemplateController::class, 'show'])->name('route-templates.show');
+        Route::get('route-templates/{routeTemplate}/edit', [ProductionV2RouteTemplateController::class, 'edit'])->name('route-templates.edit');
+        Route::put('route-templates/{routeTemplate}', [ProductionV2RouteTemplateController::class, 'update'])->name('route-templates.update');
+        Route::get('route-planning', [ProductionV2RoutePlanningController::class, 'index'])->name('route-planning.index');
+        Route::put('route-planning/parts/{part}', [ProductionV2RoutePlanningController::class, 'updatePart'])->name('route-planning.parts.update');
+        Route::put('route-planning/assemblies/{assembly}', [ProductionV2RoutePlanningController::class, 'updateAssembly'])->name('route-planning.assemblies.update');
+        Route::get('operation-masters', [ProductionV2OperationMasterController::class, 'index'])->name('operation-masters.index');
+        Route::get('operation-masters/create', [ProductionV2OperationMasterController::class, 'create'])->name('operation-masters.create');
+        Route::post('operation-masters', [ProductionV2OperationMasterController::class, 'store'])->name('operation-masters.store');
+        Route::get('operation-masters/{operationMaster}', [ProductionV2OperationMasterController::class, 'show'])->name('operation-masters.show');
+        Route::get('operation-masters/{operationMaster}/edit', [ProductionV2OperationMasterController::class, 'edit'])->name('operation-masters.edit');
+        Route::put('operation-masters/{operationMaster}', [ProductionV2OperationMasterController::class, 'update'])->name('operation-masters.update');
+        Route::get('import-from-bom', [ProductionV2BomImportController::class, 'form'])->name('import-bom.form');
+        Route::post('import-from-bom', [ProductionV2BomImportController::class, 'store'])->name('import-bom.store');
+        Route::get('design-releases', [ProductionV2DesignReleaseController::class, 'index'])->name('design-releases.index');
+        Route::get('design-releases/create', [ProductionV2DesignReleaseController::class, 'create'])->name('design-releases.create');
+        Route::post('design-releases', [ProductionV2DesignReleaseController::class, 'store'])->name('design-releases.store');
+        Route::get('design-releases/{designRelease}', [ProductionV2DesignReleaseController::class, 'show'])->name('design-releases.show');
+        Route::get('material-requirements', [ProductionV2MaterialRequirementController::class, 'index'])->name('material-requirements.index');
+        Route::get('material-requirements/create', [ProductionV2MaterialRequirementController::class, 'create'])->name('material-requirements.create');
+        Route::post('material-requirements', [ProductionV2MaterialRequirementController::class, 'store'])->name('material-requirements.store');
+        Route::get('material-requirements/{materialRequirement}/edit', [ProductionV2MaterialRequirementController::class, 'edit'])->name('material-requirements.edit');
+        Route::put('material-requirements/{materialRequirement}', [ProductionV2MaterialRequirementController::class, 'update'])->name('material-requirements.update');
+        Route::post('material-requirements/{materialRequirement}/revise', [ProductionV2MaterialRequirementController::class, 'revise'])->name('material-requirements.revise');
+        Route::get('material-requirements/{materialRequirement}', [ProductionV2MaterialRequirementController::class, 'show'])->name('material-requirements.show');
+        Route::post('material-requirements/{materialRequirement}/release', [ProductionV2MaterialRequirementController::class, 'release'])->name('material-requirements.release');
+        Route::get('cutting-plans', [ProductionV2CuttingPlanController::class, 'index'])->name('cutting-plans.index');
+        Route::get('cutting-plans/create', [ProductionV2CuttingPlanController::class, 'create'])->name('cutting-plans.create');
+        Route::post('cutting-plans', [ProductionV2CuttingPlanController::class, 'store'])->name('cutting-plans.store');
+        Route::get('cutting-plans/{cuttingPlan}/edit', [ProductionV2CuttingPlanController::class, 'edit'])->name('cutting-plans.edit');
+        Route::put('cutting-plans/{cuttingPlan}', [ProductionV2CuttingPlanController::class, 'update'])->name('cutting-plans.update');
+        Route::post('cutting-plans/{cuttingPlan}/revise', [ProductionV2CuttingPlanController::class, 'revise'])->name('cutting-plans.revise');
+        Route::get('cutting-plans/{cuttingPlan}', [ProductionV2CuttingPlanController::class, 'show'])->name('cutting-plans.show');
+        Route::get('cut-batches', [ProductionV2CutBatchController::class, 'index'])->name('cut-batches.index');
+        Route::get('cut-batches/create', [ProductionV2CutBatchController::class, 'create'])->name('cut-batches.create');
+        Route::post('cut-batches', [ProductionV2CutBatchController::class, 'store'])->name('cut-batches.store');
+        Route::get('cut-batches/{cutBatch}', [ProductionV2CutBatchController::class, 'show'])->name('cut-batches.show');
+        Route::get('fitups', [ProductionV2FitupController::class, 'index'])->name('fitups.index');
+        Route::get('fitups/create', [ProductionV2FitupController::class, 'create'])->name('fitups.create');
+        Route::post('fitups', [ProductionV2FitupController::class, 'store'])->name('fitups.store');
+        Route::get('fitups/{fitup}/print', [ProductionV2FitupController::class, 'print'])->name('fitups.print');
+        Route::get('fitups/{fitup}', [ProductionV2FitupController::class, 'show'])->name('fitups.show');
+        Route::get('welding-events', [ProductionV2WeldingController::class, 'index'])->name('welding-events.index');
+        Route::get('welding-events/create', [ProductionV2WeldingController::class, 'create'])->name('welding-events.create');
+        Route::post('welding-events', [ProductionV2WeldingController::class, 'store'])->name('welding-events.store');
+        Route::get('welding-events/{weldingEvent}/print', [ProductionV2WeldingController::class, 'print'])->name('welding-events.print');
+        Route::get('welding-events/{weldingEvent}', [ProductionV2WeldingController::class, 'show'])->name('welding-events.show');
+        Route::get('inspection-events', [ProductionV2InspectionController::class, 'index'])->name('inspection-events.index');
+        Route::get('inspection-events/create', [ProductionV2InspectionController::class, 'create'])->name('inspection-events.create');
+        Route::post('inspection-events', [ProductionV2InspectionController::class, 'store'])->name('inspection-events.store');
+        Route::get('inspection-events/{inspectionEvent}/print', [ProductionV2InspectionController::class, 'print'])->name('inspection-events.print');
+        Route::get('inspection-events/{inspectionEvent}', [ProductionV2InspectionController::class, 'show'])->name('inspection-events.show');
+        Route::get('qc-gates', [ProductionV2QcGateController::class, 'index'])->name('qc-gates.index');
+        Route::get('qc-gates/create', [ProductionV2QcGateController::class, 'create'])->name('qc-gates.create');
+        Route::post('qc-gates', [ProductionV2QcGateController::class, 'store'])->name('qc-gates.store');
+        Route::get('qc-gates/{qcGate}', [ProductionV2QcGateController::class, 'show'])->name('qc-gates.show');
+        Route::get('operation-events', [ProductionV2OperationEventController::class, 'index'])->name('operation-events.index');
+        Route::get('operation-events/create', [ProductionV2OperationEventController::class, 'create'])->name('operation-events.create');
+        Route::post('operation-events', [ProductionV2OperationEventController::class, 'store'])->name('operation-events.store');
+        Route::get('operation-events/{operationEvent}', [ProductionV2OperationEventController::class, 'show'])->name('operation-events.show');
+        Route::get('rework-events', [ProductionV2ReworkController::class, 'index'])->name('rework-events.index');
+        Route::get('rework-events/create', [ProductionV2ReworkController::class, 'create'])->name('rework-events.create');
+        Route::post('rework-events', [ProductionV2ReworkController::class, 'store'])->name('rework-events.store');
+        Route::get('rework-events/{reworkEvent}/print', [ProductionV2ReworkController::class, 'print'])->name('rework-events.print');
+        Route::get('rework-events/{reworkEvent}', [ProductionV2ReworkController::class, 'show'])->name('rework-events.show');
+        Route::get('trial-assemblies', [ProductionV2TrialAssemblyController::class, 'index'])->name('trial-assemblies.index');
+        Route::get('trial-assemblies/create', [ProductionV2TrialAssemblyController::class, 'create'])->name('trial-assemblies.create');
+        Route::post('trial-assemblies', [ProductionV2TrialAssemblyController::class, 'store'])->name('trial-assemblies.store');
+        Route::get('trial-assemblies/{trialAssembly}', [ProductionV2TrialAssemblyController::class, 'show'])->name('trial-assemblies.show');
+        Route::get('wip', [ProductionV2WipController::class, 'index'])->name('wip.index');
+
+        Route::get('parts', [ProductionV2PartDefinitionController::class, 'index'])->name('parts.index');
+        Route::get('parts/create', [ProductionV2PartDefinitionController::class, 'create'])->name('parts.create');
+        Route::post('parts', [ProductionV2PartDefinitionController::class, 'store'])->name('parts.store');
+        Route::get('parts/{part}', [ProductionV2PartDefinitionController::class, 'show'])->name('parts.show');
+        Route::get('parts/{part}/edit', [ProductionV2PartDefinitionController::class, 'edit'])->name('parts.edit');
+        Route::put('parts/{part}', [ProductionV2PartDefinitionController::class, 'update'])->name('parts.update');
+        Route::post('parts/{part}/revise', [ProductionV2PartDefinitionController::class, 'revise'])->name('parts.revise');
+
+        Route::get('assemblies', [ProductionV2AssemblyController::class, 'index'])->name('assemblies.index');
+        Route::get('assemblies/create', [ProductionV2AssemblyController::class, 'create'])->name('assemblies.create');
+        Route::post('assemblies', [ProductionV2AssemblyController::class, 'store'])->name('assemblies.store');
+        Route::get('assemblies/{assembly}', [ProductionV2AssemblyController::class, 'show'])->name('assemblies.show');
+        Route::get('assemblies/{assembly}/edit', [ProductionV2AssemblyController::class, 'edit'])->name('assemblies.edit');
+        Route::put('assemblies/{assembly}', [ProductionV2AssemblyController::class, 'update'])->name('assemblies.update');
+        Route::post('assemblies/{assembly}/revise', [ProductionV2AssemblyController::class, 'revise'])->name('assemblies.revise');
+
+        Route::get('demand-balance', [ProductionV2DemandDashboardController::class, 'index'])->name('demand.index');
+    });
     Route::get('production/production-plans', [ProductionPlanController::class, 'index'])
         ->name('production.production-plans.index');
     Route::get('production/production-dashboard', [ProductionModuleEntryController::class, 'dashboard'])

@@ -11,6 +11,9 @@ return new class extends Migration
     {
         // store_issue_id was nullable with FK ON DELETE SET NULL.
         // We now enforce Store Issue as mandatory for spare consumption costing/reporting.
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
 
         Schema::table('machine_spare_consumptions', function (Blueprint $table) {
             $table->dropForeign(['store_issue_id']);
@@ -28,6 +31,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('machine_spare_consumptions', function (Blueprint $table) {
             $table->dropForeign(['store_issue_id']);
         });

@@ -181,16 +181,13 @@ class MaterialReceiptController extends Controller
             ->all();
 
         // Map: purchase_order_item_id => sums of operationally received quantity.
-        // Raw lines count only after QC pass; non-raw lines count immediately.
+        // GRN lines count only after QC pass.
         $receivedAgg = collect();
 
         if (! empty($poItemIds)) {
             $receivedAgg = MaterialReceiptLine::query()
                 ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
-                ->where(function ($query) {
-                    $query->where('material_receipts.status', 'qc_passed')
-                        ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
-                })
+                ->where('material_receipts.status', 'qc_passed')
                 ->whereIn('material_receipt_lines.purchase_order_item_id', $poItemIds)
                 ->selectRaw(
                     'material_receipt_lines.purchase_order_item_id as purchase_order_item_id, ' .
@@ -483,7 +480,7 @@ class MaterialReceiptController extends Controller
             $receipt->invoice_date       = $data['invoice_date'] ?? null;
             $receipt->challan_number     = $data['challan_number'] ?? null;
             $receipt->vehicle_number     = $data['vehicle_number'] ?? null;
-            $receipt->status             = 'draft';
+            $receipt->status             = 'qc_pending';
             $receipt->created_by         = $request->user()?->id;
             $receipt->remarks            = $data['remarks'] ?? null;
             $receipt->save();
@@ -596,8 +593,6 @@ class MaterialReceiptController extends Controller
                 }
                 $totalWeight = ! is_null($totalWeight) ? (float) $totalWeight : null;
 
-                $isRawMaterial = $this->isRawMaterialCategory($line->material_category);
-
                 // Steel Plate -> create one stock row per piece (for Plate No / Heat No traceability)
                 // Steel Section -> create ONE combined stock row (avoid huge record counts; TC can be linked once)
                 if ($line->material_category === 'steel_section') {
@@ -615,12 +610,12 @@ class MaterialReceiptController extends Controller
                         'section_profile'          => $line->section_profile,
                         'grade'                    => $line->grade,
                         'qty_pcs_total'            => $qtyPcs,
-                        'qty_pcs_available'        => $isRawMaterial ? 0 : $qtyPcs,
+                        'qty_pcs_available'        => 0,
                         'weight_kg_total'          => $totalWeight,
-                        'weight_kg_available'      => $isRawMaterial ? 0 : $totalWeight,
+                        'weight_kg_available'      => 0,
                         'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
                         'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                        'status'                   => $isRawMaterial ? 'blocked_qc' : 'available',
+                        'status'                   => 'blocked_qc',
                     ]);
                 } else {
                     $perPieceWeight = null;
@@ -644,12 +639,12 @@ class MaterialReceiptController extends Controller
                             'section_profile'          => $line->section_profile,
                             'grade'                    => $line->grade,
                             'qty_pcs_total'            => 1,
-                            'qty_pcs_available'        => $isRawMaterial ? 0 : 1,
+                            'qty_pcs_available'        => 0,
                             'weight_kg_total'          => $perPieceWeight,
-                            'weight_kg_available'      => $isRawMaterial ? 0 : $perPieceWeight,
+                            'weight_kg_available'      => 0,
                             'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
                             'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                            'status'                   => $isRawMaterial ? 'blocked_qc' : 'available',
+                            'status'                   => 'blocked_qc',
                         ]);
                     }
                 }
@@ -760,12 +755,6 @@ class MaterialReceiptController extends Controller
 
     public function updateStatus(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
     {
-        if (! $this->hasRawMaterialLines($materialReceipt)) {
-            return back()->withErrors([
-                'status' => 'QC status is applicable only when the GRN contains raw material lines.',
-            ]);
-        }
-
         $validated = $request->validate([
             'status' => ['required', 'string', 'in:draft,qc_pending,qc_passed,qc_rejected'],
         ]);
@@ -832,13 +821,12 @@ class MaterialReceiptController extends Controller
      * Keep StoreStockItem availability in sync with GRN QC status.
      *
      * Current policy:
-     * - Raw-material stock rows are created in QC hold.
-     * - Non-raw stock rows are available immediately and are not controlled by QC status.
-     * - When raw-material GRN becomes qc_passed -> available = totals.
-     * - When raw-material GRN is not qc_passed -> available = 0.
+     * - All GRN stock rows are created in QC hold.
+     * - When GRN becomes qc_passed -> available = totals.
+     * - When GRN is not qc_passed -> available = 0.
      *
      * IMPORTANT: If someone tries to revert a qc_passed GRN back to draft/qc_pending/qc_rejected,
-     * we block it if any raw-material stock from that GRN has already been issued/consumed.
+     * we block it if any stock from that GRN has already been issued/consumed.
      */
     protected function syncStockAvailabilityForReceipt(MaterialReceipt $receipt, string $newStatus, string $oldStatus): void
     {
@@ -850,7 +838,6 @@ class MaterialReceiptController extends Controller
         // Lock stock rows to avoid race with store issue/return
         $stocks = StoreStockItem::query()
             ->whereIn('material_receipt_line_id', $lineIds)
-            ->whereIn('material_category', $this->rawMaterialCategories())
             ->lockForUpdate()
             ->get();
 
@@ -995,10 +982,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
             )
             ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
             ->where('material_receipts.purchase_order_id', $purchaseOrderId)
-            ->where(function ($query) {
-                $query->where('material_receipts.status', 'qc_passed')
-                    ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
-            })
+            ->where('material_receipts.status', 'qc_passed')
             ->whereNotNull('material_receipt_lines.purchase_order_item_id')
             ->groupBy('purchase_order_item_id')
             ->get()
@@ -1018,7 +1002,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
      * Recalculate indent-level received totals + auto-close indent lines based on operationally received GRNs.
      *
      * Notes:
-     * - Raw lines are counted only after QC pass; non-raw lines are counted immediately.
+     * - GRN lines are counted only after QC pass.
      * - Received quantity is taken as:
      *      - SUM(received_weight_kg) if > 0, else SUM(qty_pcs)
      *   because some materials are weight-based, some are piece-based.
@@ -1049,10 +1033,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
             ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
             ->join('purchase_order_items as poi', 'poi.id', '=', 'material_receipt_lines.purchase_order_item_id')
             ->whereIn('poi.purchase_indent_item_id', $indentItemIds)
-            ->where(function ($query) {
-                $query->where('material_receipts.status', 'qc_passed')
-                    ->orWhereNotIn('material_receipt_lines.material_category', $this->rawMaterialCategories());
-            })
+            ->where('material_receipts.status', 'qc_passed')
             ->groupBy('poi.purchase_indent_item_id')
             ->get()
             ->keyBy('indent_item_id');
@@ -1158,8 +1139,8 @@ $makeAvailable = ($newStatus === 'qc_passed');
      */
     public function destroy(MaterialReceipt $materialReceipt): RedirectResponse
     {
-    // QC PASSED raw-material GRNs cannot be deleted.
-    if ($this->hasRawMaterialLines($materialReceipt) && $materialReceipt->status === 'qc_passed') {
+    // QC PASSED GRNs cannot be deleted.
+    if ($materialReceipt->status === 'qc_passed') {
         return back()->with('error', 'QC PASSED GRN cannot be deleted. Use vendor return process instead.');
     }
 
@@ -1315,8 +1296,8 @@ $makeAvailable = ($newStatus === 'qc_passed');
 
     public function storeReturn(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
     {
-        if ($this->hasRawMaterialLines($materialReceipt) && $materialReceipt->status !== 'qc_passed') {
-            return back()->with('error', 'Vendor return is allowed only after QC pass for raw-material GRN.');
+        if ($materialReceipt->status !== 'qc_passed') {
+            return back()->with('error', 'Vendor return is allowed only after QC pass for the GRN.');
         }
 
         $data = $request->validate([

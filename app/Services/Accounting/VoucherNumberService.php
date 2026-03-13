@@ -137,7 +137,7 @@ class VoucherNumberService
         $prefix = trim($prefix);
 
         // Default format rules
-        $noFyKeys = ['purchase', 'store_issue', 'fuel_issue'];
+        $noFyKeys = ['purchase', 'store_issue', 'store_return', 'stock_adjustment', 'fuel_issue'];
         $noFy = in_array($seriesKey, $noFyKeys, true);
 
         // Ensure prefix is unique within company

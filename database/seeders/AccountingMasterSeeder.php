@@ -11,8 +11,14 @@ class AccountingMasterSeeder extends Seeder
 {
     public function run(): void
     {
-        // Use first company as default
-        $companyId = Company::query()->value('id') ?? 1;
+        // Seed a default company for fresh databases before accounting masters depend on company_id.
+        $companyId = Company::query()->value('id')
+            ?? Company::query()->create([
+                'code' => 'DEFAULT',
+                'name' => 'Default Company',
+                'legal_name' => 'Default Company',
+                'is_default' => true,
+            ])->id;
 
         $groupCache = [];
 

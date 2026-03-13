@@ -28,6 +28,7 @@ class StorePurchaseBillRequest extends FormRequest
 
     public function rules(): array
     {
+        $existingBillIdForToken = $this->getExistingBillIdForSubmissionToken();
         $expenseMachineRule = Schema::hasTable('machines')
             ? ['nullable', 'integer', Rule::exists('machines', 'id')]
             : ['nullable'];
@@ -50,7 +51,7 @@ class StorePurchaseBillRequest extends FormRequest
             'due_date'           => ['nullable', 'date'],
 
             // Supplier invoice reference fields
-            'reference_no'       => ['nullable', 'string', 'max:100'],
+            'reference_no'       => ['required', 'string', 'max:100'],
             'challan_number'     => ['nullable', 'string', 'max:100'],
             'remarks'            => ['nullable', 'string', 'max:5000'],
 
@@ -117,7 +118,12 @@ class StorePurchaseBillRequest extends FormRequest
 
         return $rules;
     }
-
+public function messages(): array
+{
+    return [
+        'reference_no.required' => 'Invoice Number (Supplier) is required.',
+    ];
+}
     public function withValidator($validator)
     {
         $validator->after(function ($v) {
