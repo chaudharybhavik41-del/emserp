@@ -1,15 +1,15 @@
 
 @php
-    /** @var \App\Models\Item|null $item */
-    $isEdit = isset($item) && $item->exists;
+/** @var \App\Models\Item|null $item */
+$isEdit = isset($item) && $item->exists;
 
-    $selectedTypeId        = old('material_type_id', $item->material_type_id ?? '');
-    $selectedCategoryId    = old('material_category_id', $item->material_category_id ?? '');
-    $selectedSubcategoryId = old('material_subcategory_id', $item->material_subcategory_id ?? '');
-    $selectedUomId         = old('uom_id', $item->uom_id ?? '');
-    $defaultReorder       = $defaultReorder ?? null;
-    $reorderMinQty        = old('reorder_min_qty', $defaultReorder?->min_qty ?? '');
-    $reorderTargetQty     = old('reorder_target_qty', $defaultReorder?->target_qty ?? '');
+$selectedTypeId = old('material_type_id', $item->material_type_id ?? '');
+$selectedCategoryId = old('material_category_id', $item->material_category_id ?? '');
+$selectedSubcategoryId = old('material_subcategory_id', $item->material_subcategory_id ?? '');
+$selectedUomId = old('uom_id', $item->uom_id ?? '');
+$defaultReorder = $defaultReorder ?? null;
+$reorderMinQty = old('reorder_min_qty', $defaultReorder?->min_qty ?? '');
+$reorderTargetQty = old('reorder_target_qty', $defaultReorder?->target_qty ?? '');
 
 @endphp
 
@@ -170,7 +170,7 @@
     </div>
 
     {{-- Grade / Spec / Thickness / Size --}}
-    <div class="row mb-3">
+    <div class="row mb-3  material-details">
         <div class="col-md-3">
             <label for="grade" class="form-label">Grade</label>
             <input type="text"
@@ -226,7 +226,7 @@
     </div>
 
     {{-- Density / Weight per Meter --}}
-    <div class="row mb-3">
+    <div class="row mb-3 material-details">
         <div class="col-md-3">
             <label for="density" class="form-label">Density</label>
             <input type="number"
@@ -294,7 +294,7 @@
                 class="form-select form-select-sm select2-tags @error('brands') is-invalid @enderror"
                 multiple>
             @php
-                $selectedBrands = collect(old('brands', $item->brands ?? []))->filter()->values()->all();
+$selectedBrands = collect(old('brands', $item->brands ?? []))->filter()->values()->all();
             @endphp
 
             @foreach($selectedBrands as $brand)
@@ -433,6 +433,41 @@
 
 @push('scripts')
     <script>
+
+        document.addEventListener('DOMContentLoaded', function () {
+                var typeSelect = document.getElementById('material_type_id');
+                var materialDetails = document.querySelectorAll('.material-details');
+
+                // Array of values for which details should be hidden
+                var hideTypes = ['CONSUMABLE', 'SERVICE', 'MACHINERY', 'FUEL'];
+
+                function toggleMaterialDetails() {
+                    if (!typeSelect) return;
+
+                    // Get selected option text in uppercase
+                    var selectedText = typeSelect.options[typeSelect.selectedIndex].text.toUpperCase();
+
+                    // Check if selected type matches any in hideTypes
+                    var hide = hideTypes.some(function (type) {
+                        return selectedText.includes(type);
+                    });
+
+                    // Show/hide rows
+                    materialDetails.forEach(function (row) {
+                        row.style.display = hide ? 'none' : 'flex';
+
+                        // Optional: clear values when hidden
+                        if (hide) {
+                            Array.from(row.querySelectorAll('input')).forEach(input => input.value = '');
+                        }
+                    });
+                }
+
+                if (typeSelect) {
+                    typeSelect.addEventListener('change', toggleMaterialDetails);
+                    toggleMaterialDetails(); // Run on page load
+                }
+            });
         document.addEventListener('DOMContentLoaded', function () {
             var typeSelect        = document.getElementById('material_type_id');
             var categorySelect    = document.getElementById('material_category_id');

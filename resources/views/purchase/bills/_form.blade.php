@@ -436,7 +436,7 @@ if (count($initialSelectedPurchaseOrderIds) > 1) {
                             data-gst-state="{{ $gstState }}"
                             data-state="{{ $s->state }}"
                             {{ (string) old('supplier_id', $bill->supplier_id) === (string) $s->id ? 'selected' : '' }}>
-                            {{ $s->name }}
+                            {{ $s->legal_name }}
                         </option>
                     @endforeach
                 </select>

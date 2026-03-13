@@ -35,6 +35,7 @@ class Party extends Model
         'gst_state_code',
         'gst_raw_json',
         'is_active',
+        'has_gstin'
     ];
 
     protected $casts = [

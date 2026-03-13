@@ -56,6 +56,7 @@ class ProjectCostSheetController extends Controller
         $projects = $projectsQuery
             ->orderBy('name')
             ->get();
+            
 
         // Get cost summary for each project
         $projectCosts = [];
@@ -69,8 +70,16 @@ class ProjectCostSheetController extends Controller
         }
 
         // Sort by total cost descending
-        uasort($projectCosts, fn($a, $b) => $b['total_cost'] <=> $a['total_cost']);
+        // uasort($projectCosts, fn($a, $b) => $b['total_cost'] <=> $a['total_cost']);
+uasort($projectCosts, function ($a, $b) {
+    $aCode = $a['project']->code ?? '';
+    $bCode = $b['project']->code ?? '';
 
+    $aNum = (int) substr(strrchr($aCode, '-'), 1);
+    $bNum = (int) substr(strrchr($bCode, '-'), 1);
+
+    return $aNum <=> $bNum;
+});
         // Grand totals
         $grandTotals = [
             'material'      => 0,
