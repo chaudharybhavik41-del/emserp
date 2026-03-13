@@ -16,6 +16,7 @@ class ProductionRemnant extends Model
         'project_id',
         'production_plan_id',
         'production_dpr_line_id',
+        'production_v2_cut_batch_id',
         'mother_stock_item_id',
         'remnant_stock_item_id',
         'thickness_mm',
@@ -40,5 +41,10 @@ class ProductionRemnant extends Model
     public function remnantStock()
     {
         return $this->belongsTo(StoreStockItem::class, 'remnant_stock_item_id');
+    }
+
+    public function productionV2CutBatch()
+    {
+        return $this->belongsTo(\App\Models\ProductionV2\ProductionCutBatch::class, 'production_v2_cut_batch_id');
     }
 }

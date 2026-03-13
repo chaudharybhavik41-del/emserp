@@ -38,6 +38,9 @@ class PurchasePermissionSeeder extends Seeder
         $sendRfq = Permission::firstOrCreate(
             ['name' => 'purchase.rfq.send', 'guard_name' => 'web']
         );
+        $changeBillPostingDate = Permission::firstOrCreate(
+            ['name' => 'purchase.bill.change_posting_date', 'guard_name' => 'web']
+        );
 
         $allPerms = [
             $viewIndent,
@@ -47,6 +50,7 @@ class PurchasePermissionSeeder extends Seeder
             $viewRfq,
             $createRfq,
             $sendRfq,
+            $changeBillPostingDate,
         ];
 
         // Helper: give all purchase permissions to a role if it exists

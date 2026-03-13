@@ -48,6 +48,7 @@
     $openStore      = false;
     $openAccounting = false;
     $openProduction = false;
+    $openProductionV2 = false;
     $openProjects   = false;
     $openTasks      = false;
 	$openSupport    = false;
@@ -2029,6 +2030,44 @@
                 </li>
                 @endcanany
                 @canany([
+                    'production.plan.view', 'production.plan.create', 'production.plan.update',
+                    'production.report.view'
+                ])
+                <li class="nav-item erp-sidebar-section mb-1">
+                    <button type="button" class="btn btn-sm w-100 text-start d-flex align-items-center justify-content-between border-0 rounded-3 px-3 py-2 erp-accordion-header"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#{{ $secId('production-v2') }}"
+                            aria-expanded="{{ $openProductionV2 ? 'true' : 'false' }}"
+                            aria-controls="{{ $secId('production-v2') }}"
+                            data-erp-section-toggle
+                            data-erp-section-key="production-v2">
+                        <span class="d-flex align-items-center gap-2">
+                            <i class="bi bi-layers fs-3"></i>
+                            <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Production V2</span>
+                        </span>
+                        <i class="bi bi-chevron-down erp-chevron"></i>
+                    </button>
+                    <div id="{{ $secId('production-v2') }}" class="collapse {{ $openProductionV2 ? 'show' : '' }}">
+                        <ul class="nav flex-column small mt-1">
+                    @php
+                        $rProdV2Entry = $pickRoute(['production-v2.index']);
+                    @endphp
+
+                    @if($rProdV2Entry)
+                        <li class="nav-item">
+                            <a data-erp-menu-item href="{{ route($rProdV2Entry) }}"
+                               class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                      {{ $isRoute(['production-v2.*', 'projects.production-v2.*']) ? 'active' : 'text-body-secondary' }}">
+                                <i class="bi bi-grid-1x2 me-2"></i>
+                                <span>Production V2 Workbench</span>
+                            </a>
+                        </li>
+                    @endif
+                        </ul>
+                    </div>
+                </li>
+                @endcanany
+                @canany([
                     'production.activity.view', 'production.activity.create', 'production.activity.update', 'production.activity.delete',
                     'production.report.view', 'production.plan.view', 'production.dpr.view', 'production.qc.perform',
                     'production.billing.view', 'production.dispatch.view', 'production.traceability.view'
@@ -2043,7 +2082,7 @@
                             data-erp-section-key="production">
                         <span class="d-flex align-items-center gap-2">
                             <i class="bi bi-diagram-3 fs-3"></i>
-                            <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Production</span>
+                            <span class="text-uppercase fw-semibold" style="font-size: 0.75rem;">Production Legacy</span>
                         </span>
                         <i class="bi bi-chevron-down erp-chevron"></i>
                     </button>
@@ -2062,11 +2101,11 @@
 
                     @if($rProdWorkbench)
                         <li class="nav-item">
-                            <a data-erp-menu-item href="{{ route($rProdWorkbench) }}"
-                               class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                      {{ $isRoute('production.workbench*') ? 'active' : 'text-body-secondary' }}">
+                                <a data-erp-menu-item href="{{ route($rProdWorkbench) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('production.workbench*') ? 'active' : 'text-body-secondary' }}">
                                 <i class="bi bi-speedometer2 me-2"></i>
-                                <span>Production Workbench</span>
+                                <span>Legacy Workbench</span>
                             </a>
                         </li>
                     @endif

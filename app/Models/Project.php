@@ -28,6 +28,7 @@ class Project extends Model
         'quotation_id',
 
         'status',
+        'production_mode',
 
         // Site details (already developed earlier)
         'site_location',

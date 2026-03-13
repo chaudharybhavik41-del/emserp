@@ -108,6 +108,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'purchase.rfq.send',
             'purchase.po.approve',
             'purchase.po.send',
+            'purchase.bill.change_posting_date',
+            'subcontractor_ra.change_posting_date',
             
             // Store
             'store.material_receipt.post',

@@ -2,6 +2,7 @@
 
 namespace App\Models\Production;
 
+use App\Models\Machine;
 use App\Models\Party;
 use App\Models\Project;
 use App\Models\User;
@@ -85,6 +86,11 @@ class ProductionDpr extends Model
     public function worker()
     {
         return $this->belongsTo(User::class, 'worker_user_id');
+    }
+
+    public function machine()
+    {
+        return $this->belongsTo(Machine::class, 'machine_id');
     }
 
     public function isDraft(): bool { return $this->status === 'draft'; }

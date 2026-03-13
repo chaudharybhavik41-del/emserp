@@ -208,9 +208,9 @@ public function index(Request $request)
 	{
     $bill            = new PurchaseBill();
     // Bill Date = Invoice Date (GST)
-    $bill->bill_date = now()->toDateString();
+    $bill->bill_date = old('bill_date', now()->toDateString());
     // Posting Date = Voucher/Books date (Tally style)
-    $bill->posting_date = $bill->bill_date;
+    $bill->posting_date = old('posting_date', $bill->bill_date);
 
     $company   = Company::where('is_default', true)->first();
     $companyId = $company?->id ?? 1;
@@ -243,7 +243,7 @@ public function index(Request $request)
     $emptyLines = 5;
     $submissionToken = $this->makeCreateSubmissionToken();
 
-    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects'));
+    return view('purchase.bills.create', compact('bill', 'suppliers', 'items', 'uoms', 'accounts', 'machines', 'tdsSections', 'emptyLines', 'company', 'projects', 'submissionToken'));
 	}
 
     protected function supplierPurchaseOrderQuery(int $supplierId)

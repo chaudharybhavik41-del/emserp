@@ -24,6 +24,7 @@ class RaBillsPermissionSeeder extends Seeder
             'subcontractor_ra.approve',
             'subcontractor_ra.reject',
             'subcontractor_ra.post',
+            'subcontractor_ra.change_posting_date',
 
             // Client RA Bills
             'client_ra.view',

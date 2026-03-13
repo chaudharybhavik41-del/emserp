@@ -1,6 +1,7 @@
 @php
 /** @var \App\Models\PurchaseBill|null $bill */
 $isEdit = isset($bill) && $bill->exists;
+$errors = $errors ?? new \Illuminate\Support\ViewErrorBag();
 
 // ------- ITEM LINES (old() -> existing -> blank rows) -------
 $itemLines = old('lines');
@@ -44,7 +45,7 @@ $showItemTable = collect($itemLines)->contains(function ($line) {
     return !empty($line['item_id']);
 });
 
-if (! $isEdit && ! $hasGrnLinkedItemLines) {
+if (!$isEdit && !$hasGrnLinkedItemLines) {
     $itemLines = [];
 }
 
@@ -352,54 +353,54 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
     @endif
 
     @php
-        $initialSelectedPurchaseOrderIds = collect(old('purchase_order_ids', $bill->purchase_order_id ? [$bill->purchase_order_id] : []))
-            ->filter(fn ($id) => filled($id))
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $id > 0)
-            ->unique()
-            ->values()
-            ->all();
-        $initialSelectedPurchaseOrders = \App\Models\PurchaseOrder::query()
-            ->with('project')
-            ->whereIn('id', $initialSelectedPurchaseOrderIds)
-            ->get()
-            ->keyBy('id');
-        $initialPurchaseOrderMeta = collect($initialSelectedPurchaseOrderIds)
-            ->map(function ($purchaseOrderId) use ($initialSelectedPurchaseOrders) {
-                $po = $initialSelectedPurchaseOrders->get($purchaseOrderId);
-                if (! $po) {
-                    return null;
-                }
-
-                $display = $po->code ?: ('PO#' . $po->id);
-                if ($po->po_date) {
-                    $display .= ' | ' . $po->po_date->format('Y-m-d');
-                }
-                if ($po->project?->code) {
-                    $display .= ' | ' . $po->project->code;
-                }
-                if ($po->project?->name) {
-                    $display .= ' - ' . $po->project->name;
-                }
-
-                return [
-                    'id' => (int) $po->id,
-                    'code' => $po->code ?: ('PO#' . $po->id),
-                    'display' => $display,
-                    'project_id' => $po->project_id,
-                    'vendor_branch_id' => $po->vendor_branch_id,
-                    'payment_terms_days' => $po->payment_terms_days,
-                ];
-            })
-            ->filter()
-            ->values()
-            ->all();
-        $linkedPurchaseOrderDisplay = '';
-        if (count($initialSelectedPurchaseOrderIds) > 1) {
-            $linkedPurchaseOrderDisplay = count($initialSelectedPurchaseOrderIds) . ' POs selected';
-        } elseif ($bill->purchaseOrder) {
-            $linkedPurchaseOrderDisplay = $bill->purchaseOrder->code . ' - ' . optional($bill->purchaseOrder->project)->name;
+$initialSelectedPurchaseOrderIds = collect(old('purchase_order_ids', $bill->purchase_order_id ? [$bill->purchase_order_id] : []))
+    ->filter(fn($id) => filled($id))
+    ->map(fn($id) => (int) $id)
+    ->filter(fn($id) => $id > 0)
+    ->unique()
+    ->values()
+    ->all();
+$initialSelectedPurchaseOrders = \App\Models\PurchaseOrder::query()
+    ->with('project')
+    ->whereIn('id', $initialSelectedPurchaseOrderIds)
+    ->get()
+    ->keyBy('id');
+$initialPurchaseOrderMeta = collect($initialSelectedPurchaseOrderIds)
+    ->map(function ($purchaseOrderId) use ($initialSelectedPurchaseOrders) {
+        $po = $initialSelectedPurchaseOrders->get($purchaseOrderId);
+        if (!$po) {
+            return null;
         }
+
+        $display = $po->code ?: ('PO#' . $po->id);
+        if ($po->po_date) {
+            $display .= ' | ' . $po->po_date->format('Y-m-d');
+        }
+        if ($po->project?->code) {
+            $display .= ' | ' . $po->project->code;
+        }
+        if ($po->project?->name) {
+            $display .= ' - ' . $po->project->name;
+        }
+
+        return [
+            'id' => (int) $po->id,
+            'code' => $po->code ?: ('PO#' . $po->id),
+            'display' => $display,
+            'project_id' => $po->project_id,
+            'vendor_branch_id' => $po->vendor_branch_id,
+            'payment_terms_days' => $po->payment_terms_days,
+        ];
+    })
+    ->filter()
+    ->values()
+    ->all();
+$linkedPurchaseOrderDisplay = '';
+if (count($initialSelectedPurchaseOrderIds) > 1) {
+    $linkedPurchaseOrderDisplay = count($initialSelectedPurchaseOrderIds) . ' POs selected';
+} elseif ($bill->purchaseOrder) {
+    $linkedPurchaseOrderDisplay = $bill->purchaseOrder->code . ' - ' . optional($bill->purchaseOrder->project)->name;
+}
     @endphp
 
     <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ count($initialSelectedPurchaseOrderIds) === 1 ? $initialSelectedPurchaseOrderIds[0] : '' }}">
@@ -429,7 +430,7 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
                     <option value="">-- Select Supplier --</option>
                     @foreach($suppliers as $s)
                         @php
-                            $gstState = $s->gst_state_code ?: (preg_match('/^\d{2}/', (string) $s->gstin) ? substr((string) $s->gstin, 0, 2) : '');
+    $gstState = $s->gst_state_code ?: (preg_match('/^\d{2}/', (string) $s->gstin) ? substr((string) $s->gstin, 0, 2) : '');
                         @endphp
                         <option value="{{ $s->id }}"
                             data-gst-state="{{ $gstState }}"
@@ -504,12 +505,20 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
         </div>
 
         <div class="col-md-3">
-            <label class="form-label">Bill No <span class="text-danger">*</span></label>
-            <input type="text" name="bill_number" class="form-control form-control-sm">
+            <label class="form-label">Reference Number <span class="text-danger">*</span></label>
+            <input type="text"
+                   name="bill_number"
+                   class="form-control form-control-sm @error('bill_number') is-invalid @enderror"
+                   value="{{ $bill->bill_number }}"
+                   readonly>
+            @error('bill_number')
+            <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+            <div class="form-text">Auto-generated internal purchase bill reference.</div>
         </div>
 
         <div class="col-md-4">
-            <label class="form-label">Invoice No (Supplier)</label>
+            <label class="form-label">Invoice Number (Supplier) <span class="text-danger">*</span></label>
             <input type="text"
                    name="reference_no"
                    id="invoice_number"
@@ -684,18 +693,20 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
         </div>
 
         <div class="col-md-4">
-            <label class="form-label">Bill No <span class="text-danger">*</span></label>
+            <label class="form-label">Reference Number <span class="text-danger">*</span></label>
             <input type="text"
                    name="bill_number"
                    class="form-control form-control-sm @error('bill_number') is-invalid @enderror"
-                   value="{{ old('bill_number', $bill->bill_number) }}">
+                   value="{{ $bill->bill_number }}"
+                   readonly>
             @error('bill_number')
             <div class="invalid-feedback">{{ $message }}</div>
             @enderror
+            <div class="form-text">Auto-generated internal purchase bill reference.</div>
         </div>
 
         <div class="col-md-4">
-            <label class="form-label">Invoice No (Supplier)</label>
+            <label class="form-label">Invoice Number (Supplier)</label>
             <input type="text"
                    name="reference_no"
                    id="invoice_number"
@@ -995,7 +1006,7 @@ $uomLabels = collect($uoms ?? [])->mapWithKeys(function ($uom) {
                 </td>
                 <td>
                     @php
-                        $selMachine = old('expense_lines.' . $i . '.machine_id', $ex['machine_id'] ?? null);
+    $selMachine = old('expense_lines.' . $i . '.machine_id', $ex['machine_id'] ?? null);
                     @endphp
                     <select name="expense_lines[{{ $i }}][machine_id]" class="form-select form-select-sm exp-machine">
                         <option value="">-- None --</option>

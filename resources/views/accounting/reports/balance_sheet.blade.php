@@ -6,8 +6,8 @@
 @php
     // Profit/Loss balancing logic: positive = Profit (credit) goes to Liabilities side
     // negative = Loss (debit) goes to Assets side
-    $plIsProfit = $plBalance > 0;
-    $plAmount = abs($plBalance);
+    $plIsProfit = $profitLoss > 0;
+    $plAmount = abs($profitLoss);
     $ledgerTo = optional($asOfDate)->toDateString();
     $ledgerFrom = optional($asOfDate)->copy()->startOfMonth()->toDateString();
     $assetsDrCr = $totalAssets >= 0 ? 'Dr' : 'Cr';
