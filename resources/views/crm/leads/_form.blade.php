@@ -1,6 +1,7 @@
 @php
     /** @var \App\Models\CrmLead|null $lead */
     $isEdit = isset($lead) && $lead->exists;
+    $prefill = $prefill ?? [];
 @endphp
 
 <form method="POST"
@@ -34,7 +35,7 @@
                    id="title"
                    name="title"
                    class="form-control @error('title') is-invalid @enderror"
-                   value="{{ old('title', $lead->title ?? '') }}"
+                   value="{{ old('title', $lead->title ?? ($prefill['title'] ?? '')) }}"
                    maxlength="255">
             @error('title')
             <div class="invalid-feedback">{{ $message }}</div>
@@ -67,7 +68,7 @@
                    id="contact_name"
                    name="contact_name"
                    class="form-control @error('contact_name') is-invalid @enderror"
-                   value="{{ old('contact_name', $lead->contact_name ?? '') }}"
+                   value="{{ old('contact_name', $lead->contact_name ?? ($prefill['contact_name'] ?? '')) }}"
                    maxlength="255">
             @error('contact_name')
             <div class="invalid-feedback">{{ $message }}</div>
@@ -80,7 +81,7 @@
                    id="contact_email"
                    name="contact_email"
                    class="form-control @error('contact_email') is-invalid @enderror"
-                   value="{{ old('contact_email', $lead->contact_email ?? '') }}"
+                   value="{{ old('contact_email', $lead->contact_email ?? ($prefill['contact_email'] ?? '')) }}"
                    maxlength="255">
             @error('contact_email')
             <div class="invalid-feedback">{{ $message }}</div>
@@ -93,7 +94,7 @@
                    id="contact_phone"
                    name="contact_phone"
                    class="form-control @error('contact_phone') is-invalid @enderror"
-                   value="{{ old('contact_phone', $lead->contact_phone ?? '') }}"
+                   value="{{ old('contact_phone', $lead->contact_phone ?? ($prefill['contact_phone'] ?? '')) }}"
                    maxlength="50">
             @error('contact_phone')
             <div class="invalid-feedback">{{ $message }}</div>
@@ -235,7 +236,7 @@
                   name="notes"
                   rows="4"
                   class="form-control @error('notes') is-invalid @enderror"
-        >{{ old('notes', $lead->notes ?? '') }}</textarea>
+        >{{ old('notes', $lead->notes ?? ($prefill['notes'] ?? '')) }}</textarea>
         @error('notes')
         <div class="invalid-feedback">{{ $message }}</div>
         @enderror

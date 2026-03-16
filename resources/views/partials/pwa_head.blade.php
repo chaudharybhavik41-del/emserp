@@ -10,11 +10,27 @@
 <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('images/pwa-180.png') }}">
 <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('images/pwa-192.png') }}">
 @php
+    $authFingerprint = auth()->check()
+        ? 'user:' . (string) auth()->id()
+        : 'guest';
+
     $erpPwaConfig = [
         'pushEnabled' => (bool) config('pwa.push.enabled', true),
         'vapidPublicKey' => (string) config('pwa.push.vapid_public_key', ''),
         'syncEnabled' => (bool) config('pwa.background_sync.enabled', true),
         'criticalFormPathPrefixes' => array_values(config('pwa.background_sync.critical_form_path_prefixes', [])),
+        'safeUpdatePrompt' => (bool) config('pwa.runtime.safe_update_prompt', true),
+        'clearRuntimeOnAuthChange' => (bool) config('pwa.runtime.clear_runtime_on_auth_change', true),
+        'periodicSyncEnabled' => (bool) config('pwa.runtime.periodic_sync_enabled', true),
+        'periodicSyncTag' => (string) config('pwa.runtime.periodic_sync_tag', 'ems-light-status-refresh-v1'),
+        'periodicSyncMinIntervalMinutes' => (int) config('pwa.runtime.periodic_sync_min_interval_minutes', 180),
+        'fileHandlingEnabled' => (bool) config('pwa.runtime.file_handling_enabled', true),
+        'authFingerprint' => $authFingerprint,
+        'logoutPath' => Route::has('logout') ? route('logout', [], false) : '/logout',
+        'unreadNotificationCount' => auth()->check() ? (int) auth()->user()->unreadNotifications()->count() : 0,
+        'diagnosticsUrl' => Route::has('pwa.diagnostics') ? route('pwa.diagnostics', [], false) : null,
+        'statusUrl' => Route::has('pwa.status') ? route('pwa.status', [], false) : null,
+        'fileHandlerImportUrl' => Route::has('pwa.file-handler.import') ? route('pwa.file-handler.import', [], false) : null,
     ];
 @endphp
 <script>

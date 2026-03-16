@@ -9,6 +9,15 @@
 
 <div class="card">
     <div class="card-body">
+        @if(!empty(array_filter($prefill ?? [])))
+            <div class="alert alert-info d-flex align-items-start gap-2">
+                <i class="bi bi-phone"></i>
+                <div>
+                    <strong>PWA share import</strong><br>
+                    Shared content has been prefilled into this lead form. Review it before saving.
+                </div>
+            </div>
+        @endif
         @include('crm.leads._form')
     </div>
 </div>

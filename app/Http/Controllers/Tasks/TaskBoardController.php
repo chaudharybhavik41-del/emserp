@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tasks;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Tasks\Concerns\InteractsWithTaskModule;
 use App\Models\Bom;
 use App\Models\Project;
 use App\Models\Tasks\Task;
@@ -11,6 +12,7 @@ use App\Models\Tasks\TaskList;
 use App\Models\Tasks\TaskPriority;
 use App\Models\Tasks\TaskStatus;
 use App\Models\User;
+use App\Services\Tasks\TaskAutomationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,15 +20,15 @@ use Illuminate\View\View;
 
 class TaskBoardController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware('auth');
-        $this->middleware('permission:tasks.view');
-    }
+    use InteractsWithTaskModule;
 
-    protected function getCompanyId(): int
-    {
-        return auth()->user()->company_id ?? 1;
+    public function __construct(
+        protected TaskAutomationService $taskAutomationService
+    ) {
+        $this->middleware('auth');
+        $this->middleware('permission:tasks.view')->only(['index', 'stats', 'getColumnTasks']);
+        $this->middleware('permission:tasks.update')->only(['moveTask', 'quickUpdate']);
+        $this->middleware('permission:tasks.create')->only(['quickCreate']);
     }
 
     /**
@@ -34,7 +36,7 @@ class TaskBoardController extends Controller
      */
     public function index(Request $request): View
     {
-        $companyId = $this->getCompanyId();
+        $selectedSavedView = $this->resolveSavedView($request);
         $taskListId = $request->get('list');
         $projectId = $request->get('project');
         $bomId = $request->get('bom');
@@ -45,7 +47,8 @@ class TaskBoardController extends Controller
                 'children as subtask_count',
                 'children as completed_subtask_count' => fn($q) => $q->whereHas('status', fn($s) => $s->where('is_closed', true)),
             ])
-            ->forCompany($companyId)
+            ->forCompany($this->getCompanyId())
+            ->visibleToUser($this->taskUser())
             ->notArchived()
             ->rootTasks();
 
@@ -61,32 +64,7 @@ class TaskBoardController extends Controller
             $query->where('bom_id', $bomId);
         }
 
-        // Apply filters
-        if ($priorityIds = $request->get('priority')) {
-            $query->withPriority(explode(',', $priorityIds));
-        }
-
-        if ($assigneeId = $request->get('assignee')) {
-            if ($assigneeId === 'me') {
-                $query->assignedTo(auth()->id());
-            } elseif ($assigneeId === 'unassigned') {
-                $query->whereNull('assignee_id');
-            } else {
-                $query->assignedTo($assigneeId);
-            }
-        }
-
-        if ($taskType = $request->get('type')) {
-            $query->ofType($taskType);
-        }
-
-        if ($labelIds = $request->get('labels')) {
-            $query->withLabel(explode(',', $labelIds));
-        }
-
-        if ($search = $request->get('q')) {
-            $query->search($search);
-        }
+        $this->applyTaskFilters($query, $request);
 
         $tasks = $query->orderBy('position')->get();
         $boardStats = [
@@ -100,29 +78,17 @@ class TaskBoardController extends Controller
         $tasksByStatus = $tasks->groupBy('status_id');
 
         // Get all statuses for columns
-        $statuses = TaskStatus::active()->ordered()->get();
+        $statuses = TaskStatus::forCompany($this->getCompanyId())->active()->ordered()->get();
 
         // Filter options
-        $taskLists = TaskList::active()->notArchived()->orderBy('name')->get();
-        $priorities = TaskPriority::active()->ordered()->get();
-        $labels = TaskLabel::active()->orderBy('name')->get();
-        $users = User::where('is_active', true)->orderBy('name')->get();
-        $projects = Project::where('status', 'active')->orderBy('name')->get();
-        $selectedProjectId = (int) ($projectId ?: 0);
-        if ($selectedProjectId <= 0 && $bomId) {
-            $selectedProjectId = (int) (Bom::query()->where('id', (int) $bomId)->value('project_id') ?: 0);
-        }
-        $boms = $selectedProjectId > 0
-            ? Bom::query()->where('project_id', $selectedProjectId)->orderBy('bom_number')->get()
-            : collect();
+        $filterOptions = $this->taskFilterOptions($request);
 
-        $currentList = $taskListId ? TaskList::find($taskListId) : null;
+        $currentList = $taskListId ? $this->visibleTaskListsQuery()->find($taskListId) : null;
         $currentProject = $projectId ? Project::find($projectId) : null;
 
-        return view('tasks.board.index', compact(
-            'tasks', 'tasksByStatus', 'statuses', 'taskLists', 'priorities',
-            'labels', 'users', 'projects', 'boms', 'currentList', 'currentProject', 'boardStats'
-        ));
+        return view('tasks.board.index', array_merge($filterOptions, compact(
+            'tasks', 'tasksByStatus', 'statuses', 'currentList', 'currentProject', 'boardStats', 'selectedSavedView'
+        )));
     }
 
     /**
@@ -136,13 +102,21 @@ class TaskBoardController extends Controller
             'position' => 'required|integer|min:0',
         ]);
 
-        $task = Task::findOrFail($request->task_id);
+        $task = Task::query()
+            ->forCompany($this->getCompanyId())
+            ->visibleToUser($this->taskUser())
+            ->findOrFail($request->task_id);
+        $this->authorizeTaskEdit($task);
+
         DB::beginTransaction();
         try {
             // Update all positions in the target column
             if ($request->has('column_tasks')) {
                 foreach ($request->column_tasks as $index => $taskId) {
-                    Task::where('id', $taskId)->update(['position' => $index]);
+                    Task::query()
+                        ->where('id', $taskId)
+                        ->where('task_list_id', $task->task_list_id)
+                        ->update(['position' => $index]);
                 }
             }
 
@@ -150,6 +124,9 @@ class TaskBoardController extends Controller
             $task->update([
                 'status_id' => $request->status_id,
                 'position' => $request->position,
+            ]);
+            $this->taskAutomationService->handleTaskEvent($task->fresh(['taskList', 'watchers', 'assignee', 'project']), 'status_changed', [
+                'changed_fields' => ['status_id', 'position'],
             ]);
 
             DB::commit();
@@ -180,6 +157,7 @@ class TaskBoardController extends Controller
                 'children as completed_subtask_count' => fn($q) => $q->whereHas('status', fn($s) => $s->where('is_closed', true)),
             ])
             ->forCompany($this->getCompanyId())
+            ->visibleToUser($this->taskUser())
             ->notArchived()
             ->rootTasks()
             ->where('status_id', $status->id);
@@ -220,14 +198,17 @@ class TaskBoardController extends Controller
         ]);
 
         try {
+            $taskList = $this->visibleTaskListsQuery()->findOrFail((int) $request->task_list_id);
+            $this->authorizeTaskListEdit($taskList);
+
             // Get max position for the status
             $maxPosition = Task::where('status_id', $request->status_id)
-                ->where('task_list_id', $request->task_list_id)
+                ->where('task_list_id', $taskList->id)
                 ->max('position') ?? 0;
 
             $task = Task::create([
-                'company_id' => $this->getCompanyId(),
-                'task_list_id' => $request->task_list_id,
+                'company_id' => $taskList->company_id,
+                'task_list_id' => $taskList->id,
                 'title' => $request->title,
                 'status_id' => $request->status_id,
                 'priority_id' => $request->priority_id,
@@ -237,6 +218,7 @@ class TaskBoardController extends Controller
             ]);
 
             $task->load(['status', 'priority', 'assignee', 'labels']);
+            $this->taskAutomationService->handleTaskEvent($task->fresh(['taskList', 'watchers', 'assignee', 'project']), 'created');
 
             return response()->json([
                 'success' => true,
@@ -256,6 +238,8 @@ class TaskBoardController extends Controller
      */
     public function quickUpdate(Request $request, Task $task): JsonResponse
     {
+        $this->authorizeTaskEdit($task);
+
         $request->validate([
             'title' => 'sometimes|string|max:500',
             'status_id' => 'sometimes|exists:task_statuses,id',
@@ -265,9 +249,20 @@ class TaskBoardController extends Controller
         ]);
 
         try {
+            $changedFields = array_keys($request->only([
+                'title', 'status_id', 'priority_id', 'assignee_id', 'due_date'
+            ]));
             $task->update($request->only([
                 'title', 'status_id', 'priority_id', 'assignee_id', 'due_date'
             ]));
+            $this->taskAutomationService->handleTaskEvent($task->fresh(['taskList', 'watchers', 'assignee', 'project']), 'updated', [
+                'changed_fields' => $changedFields,
+            ]);
+            if (in_array('status_id', $changedFields, true)) {
+                $this->taskAutomationService->handleTaskEvent($task->fresh(['taskList', 'watchers', 'assignee', 'project']), 'status_changed', [
+                    'changed_fields' => ['status_id'],
+                ]);
+            }
 
             return response()->json([
                 'success' => true,

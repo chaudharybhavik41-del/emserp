@@ -4,6 +4,14 @@
 
 @section('content')
 <div class="container-fluid">
+    @php
+        $backRoute = match((string) ($voucher->voucher_type ?? '')) {
+            'payment' => route('accounting.payments.index'),
+            'receipt' => route('accounting.receipts.index'),
+            'contra' => route('accounting.contra-vouchers.index'),
+            default => route('accounting.vouchers.index'),
+        };
+    @endphp
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h1 class="h4 mb-0">Voucher: {{ $voucher->voucher_no }}</h1>
@@ -16,7 +24,7 @@
         </div>
 
         <div class="d-flex gap-2">
-            <a href="{{ route('accounting.payments.index') }}" class="btn btn-outline-secondary btn-sm">
+            <a href="{{ $backRoute }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left"></i> Back
             </a>
 

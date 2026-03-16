@@ -414,9 +414,12 @@
 	@if(($bill->status ?? null) === 'posted')
     @php
         $allocRows = \App\Models\Accounting\AccountBillAllocation::query()
+            ->join('vouchers', 'vouchers.id', '=', 'account_bill_allocations.voucher_id')
             ->whereIn('bill_type', [\App\Models\PurchaseBill::class, 'purchase_bills'])
             ->where('bill_id', $bill->id)
             ->where('mode', 'against')
+            ->where('vouchers.status', 'posted')
+            ->select('account_bill_allocations.*')
             ->orderByDesc('id')
             ->get();
 
@@ -539,7 +542,7 @@
                 $postingLogs = \App\Models\ActivityLog::query()
                     ->where('subject_type', get_class($bill))
                     ->where('subject_id', $bill->id)
-                    ->where('action', 'posted_purchase_bill')
+                    ->whereIn('action', ['posted_purchase_bill', 'posted_to_accounts'])
                     ->orderByDesc('created_at')
                     ->limit(10)
                     ->get();

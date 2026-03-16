@@ -73,11 +73,11 @@
 
 /* --- Premium Header Styling --- */
 .erp-header {
-    background: rgba(255, 255, 255, 0.96) !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
-    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04);
+    background: rgba(255, 255, 255, 0.84) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
     transition: all 0.3s ease;
     z-index: 1030;
 }
@@ -96,10 +96,9 @@
 
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header:hover,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link:hover {
-    transform: translateY(-2px);
-    background: rgba(0, 0, 0, 0.03);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    box-shadow: none;
 }
 
 [data-bs-theme="dark"] .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header:hover,
@@ -160,7 +159,7 @@
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.2rem;
     overflow-x: visible !important;
     overflow-y: visible !important;
     width: 100%;
@@ -182,12 +181,12 @@
 
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link {
-    width: 5.5rem !important;
-    min-width: 5.5rem;
-    min-height: 4rem;
+    width: 4.5rem !important;
+    min-width: 4.5rem;
+    min-height: 3.35rem;
     height: auto;
-    padding: 0.35rem 0.2rem !important;
-    border-radius: 0.75rem;
+    padding: 0.3rem 0.15rem !important;
+    border-radius: 0.9rem;
     display: inline-flex;
     flex-direction: column;
     align-items: center;
@@ -208,14 +207,14 @@
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > i,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > i {
     margin: 0 !important;
-    font-size: 1.35rem; /* Increased icon size */
+    font-size: 1.1rem;
     line-height: 1;
 }
 
 .erp-module-topbar-list > .erp-sidebar-section > .erp-accordion-header > span > span,
 .erp-module-topbar-list > .erp-sidebar-section > a.erp-nav-link > span {
     display: block !important;
-    font-size: 0.68rem !important; /* Increased text size */
+    font-size: 0.63rem !important;
     font-weight: 600;
     line-height: 1.1;
     white-space: normal;
@@ -243,9 +242,9 @@
     z-index: 3000;
     padding: 0.35rem;
     border: 1px solid var(--bs-border-color);
-    border-radius: 0.75rem;
+    border-radius: 1rem;
     background: var(--bs-body-bg);
-    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
     transform: translateX(var(--erp-flyout-shift, 0));
 }
 
@@ -463,7 +462,9 @@
                                     <a class="dropdown-item d-flex align-items-center justify-content-between" href="{{ route('notifications.index') }}">
                                         <span><i class="bi bi-bell me-1"></i> Notifications</span>
                                         @if($notifUnread > 0)
-                                            <span class="badge rounded-pill bg-danger">{{ $notifUnread > 99 ? '99+' : $notifUnread }}</span>
+                                            <span class="badge rounded-pill bg-danger" data-pwa-unread-count>{{ $notifUnread > 99 ? '99+' : $notifUnread }}</span>
+                                        @else
+                                            <span class="badge rounded-pill bg-danger d-none" data-pwa-unread-count>0</span>
                                         @endif
                                     </a>
                                 </li>
@@ -506,13 +507,13 @@
 
             {{-- Optional page header (title + actions) --}}
             @hasSection('page_header')
-                <div class="d-flex flex-column gap-2 flex-sm-row flex-sm-wrap align-items-sm-center justify-content-sm-between mb-3">
+                <div class="erp-page-header d-flex flex-column gap-3 flex-sm-row flex-sm-wrap align-items-sm-center justify-content-sm-between">
                     @yield('page_header')
                 </div>
             @endif
 
             {{-- Main page wrapper with soft shadow --}}
-            <div class="erp-main-card">
+            <div class="erp-main-card erp-surface">
                 @yield('content')
             </div>
         </div>
@@ -551,6 +552,10 @@
 <script src="{{ asset('js/erp-theme.js') }}" defer></script>
 <script>
     document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll('.toast[data-erp-toast]').forEach(function (toastEl) {
+            if (!window.bootstrap || !bootstrap.Toast) return;
+            bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        });
 
         const mobileSidebarEl = document.getElementById('sidebarOffcanvas');
 

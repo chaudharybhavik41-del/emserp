@@ -124,15 +124,17 @@
                             <tr>
                                 <th style="width: 10%;">Select</th>
                                 <th style="width: 18%;">Bill No</th>
-                                <th style="width: 16%;">Bill Date</th>
-                                <th style="width: 16%;">Bill Amount</th>
-                                <th style="width: 16%;">Outstanding</th>
+                                <th style="width: 12%;">Bill Date</th>
+                                <th style="width: 12%;">Invoice Amt</th>
+                                <th style="width: 12%;">TDS</th>
+                                <th style="width: 12%;">Receivable</th>
+                                <th style="width: 12%;">Outstanding</th>
                                 <th style="width: 24%;">Allocate Now</th>
                             </tr>
                         </thead>
                         <tbody id="client-bill-rows">
                             <tr class="text-muted">
-                                <td colspan="6" class="text-center small py-2">
+                                <td colspan="8" class="text-center small py-2">
                                     Select a client/debtor ledger to load open bills for allocation.
                                 </td>
                             </tr>
@@ -353,7 +355,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!bills || !bills.length) {
             const tr = document.createElement('tr');
             tr.classList.add('text-muted');
-            tr.innerHTML = '<td colspan="6" class="text-center small py-2">No open client bills for this ledger.</td>';
+            tr.innerHTML = '<td colspan="8" class="text-center small py-2">No open client bills for this ledger.</td>';
             tbody.appendChild(tr);
             if (expectedTdsInput) { expectedTdsInput.value = '0.00'; }
             updateSummary();
@@ -366,7 +368,13 @@ document.addEventListener('DOMContentLoaded', function () {
             const oldAmount = allocMap[key] || '';
             const checked = selectedMap[key] || parseNumber(oldAmount) > 0;
 
-            const total = typeof bill.total_amount === 'number' ? bill.total_amount : parseFloat(bill.total_amount || 0) || 0;
+            const total = typeof bill.invoice_amount === 'number'
+                ? bill.invoice_amount
+                : (typeof bill.total_amount === 'number' ? bill.total_amount : parseFloat(bill.total_amount || 0) || 0);
+            const tds = typeof bill.tds_amount === 'number' ? bill.tds_amount : parseFloat(bill.tds_amount || 0) || 0;
+            const receivable = typeof bill.receivable_amount === 'number'
+                ? bill.receivable_amount
+                : parseFloat(bill.receivable_amount || 0) || total;
             const outstd = typeof bill.outstanding_amount === 'number' ? bill.outstanding_amount : parseFloat(bill.outstanding_amount || 0) || 0;
 
             tr.innerHTML = ''
@@ -377,9 +385,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 + '         data-outstanding="' + outstd + '"'
                 + '         ' + (checked ? 'checked' : '') + '>'
                 + '</td>'
-                + '<td class="small">' + bill.bill_number + '</td>'
+                + '<td class="small">'
+                + '  <div>' + bill.bill_number + '</div>'
+                + '  ' + (bill.bill_reference && bill.bill_reference !== bill.bill_number
+                        ? '<div class="text-muted" style="font-size:11px;">Inv: ' + bill.bill_reference + '</div>'
+                        : '')
+                + '</td>'
                 + '<td class="small">' + (bill.bill_date || '') + '</td>'
                 + '<td class="small text-end">' + total.toFixed(2) + '</td>'
+                + '<td class="small text-end">' + tds.toFixed(2) + '</td>'
+                + '<td class="small text-end">' + receivable.toFixed(2) + '</td>'
                 + '<td class="small text-end">' + outstd.toFixed(2) + '</td>'
                 + '<td>'
                 + '  <input type="hidden" name="receipt_allocations[' + idx + '][bill_id]" value="' + bill.id + '">'
@@ -547,7 +562,7 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (e) {
             console.error(e);
             tbody.innerHTML = '<tr class="text-danger">'
-                + '<td colspan="6" class="text-center small py-2">Could not load client bills. Please retry or contact admin.</td>'
+                + '<td colspan="8" class="text-center small py-2">Could not load client bills. Please retry or contact admin.</td>'
                 + '</tr>';
             if (expectedTdsInput) { expectedTdsInput.value = '0.00'; }
             updateSummary();

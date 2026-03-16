@@ -1,10 +1,17 @@
 @extends('layouts.erp')
 
-@section('title', 'Vouchers')
+@section('title', $pageTitle ?? 'Vouchers')
 
 @section('content')
 <div class="container-fluid">
     @php
+        $pageTitle = $pageTitle ?? 'Vouchers';
+        $createRoute = $createRoute ?? route('accounting.vouchers.create');
+        $createLabel = $createLabel ?? 'Add Voucher';
+        $filterRoute = $filterRoute ?? route('accounting.vouchers.index');
+        $resetRoute = $resetRoute ?? route('accounting.vouchers.index', ['wip_to_cogs' => request()->boolean('wip_to_cogs') ? '1' : '0']);
+        $hideTypeFilter = $hideTypeFilter ?? false;
+        $forcedVoucherType = $forcedVoucherType ?? null;
         $isWipToCogs = $isWipToCogs ?? request()->boolean('wip_to_cogs');
         $voucherRows = method_exists($vouchers, 'getCollection') ? $vouchers->getCollection() : collect($vouchers);
         $postedCount = $voucherRows->where('status', 'posted')->count();
@@ -14,7 +21,7 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h4 mb-0">
-            Vouchers
+            {{ $pageTitle }}
             @if($isWipToCogs)
                 <span class="badge bg-info text-dark ms-2">WIP → COGS Drafts</span>
             @endif
@@ -28,7 +35,7 @@
             @endif
 
             @can('accounting.vouchers.create')
-                <a href="{{ route('accounting.vouchers.create') }}" class="btn btn-primary btn-sm">Add Voucher</a>
+                <a href="{{ $createRoute }}" class="btn btn-primary btn-sm">{{ $createLabel }}</a>
             @endcan
         </div>
     </div>
@@ -70,8 +77,11 @@
 
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-body">
-            <form method="GET" action="{{ route('accounting.vouchers.index') }}" class="row g-2">
+            <form method="GET" action="{{ $filterRoute }}" class="row g-2">
                 <input type="hidden" name="wip_to_cogs" value="{{ $isWipToCogs ? '1' : '0' }}">
+                @if($forcedVoucherType)
+                    <input type="hidden" name="type" value="{{ $forcedVoucherType }}">
+                @endif
                 <div class="col-md-2">
                     <label class="form-label small fw-bold">Search</label>
                     <input type="text" name="search" value="{{ request('search') }}" class="form-control form-control-sm" placeholder="Voucher No...">
@@ -85,15 +95,17 @@
                         <option value="reversed" {{ request('status') === 'reversed' ? 'selected' : '' }}>Reversed</option>
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold">Type</label>
-                    <select name="type" class="form-select form-select-sm">
-                        <option value="">All Types</option>
-                        @foreach($voucherTypes as $val => $lbl)
-                            <option value="{{ $val }}" {{ request('type') === $val ? 'selected' : '' }}>{{ $lbl }}</option>
-                        @endforeach
-                    </select>
-                </div>
+                @unless($hideTypeFilter)
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold">Type</label>
+                        <select name="type" class="form-select form-select-sm">
+                            <option value="">All Types</option>
+                            @foreach($voucherTypes as $val => $lbl)
+                                <option value="{{ $val }}" {{ request('type') === $val ? 'selected' : '' }}>{{ $lbl }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                @endunless
                  <div class="col-md-2">
                     <label class="form-label small fw-bold">Project</label>
                     <select name="project_id" class="form-select form-select-sm project-select">
@@ -114,7 +126,7 @@
                 </div>
                 <div class="col-md-2 d-flex align-items-end gap-1">
                     <button type="submit" class="btn btn-primary btn-sm px-3">Filter</button>
-                    <a href="{{ route('accounting.vouchers.index', ['wip_to_cogs' => $isWipToCogs ? '1' : '0']) }}" class="btn btn-outline-secondary btn-sm px-3">Reset</a>
+                    <a href="{{ $resetRoute }}" class="btn btn-outline-secondary btn-sm px-3">Reset</a>
                 </div>
             </form>
         </div>

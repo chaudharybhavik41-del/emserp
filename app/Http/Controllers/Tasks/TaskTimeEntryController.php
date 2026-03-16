@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tasks;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Tasks\Concerns\InteractsWithTaskModule;
 use App\Models\Tasks\Task;
 use App\Models\Tasks\TaskTimeEntry;
 use Illuminate\Http\JsonResponse;
@@ -11,15 +12,20 @@ use Illuminate\Http\Request;
 
 class TaskTimeEntryController extends Controller
 {
+    use InteractsWithTaskModule;
+
     public function __construct()
     {
         $this->middleware('auth');
         $this->middleware('permission:tasks.update')->only(['store']);
+        $this->middleware('permission:tasks.update')->only(['startTimer', 'stopTimer']);
         $this->middleware('permission:tasks.update|tasks.delete')->only(['destroy']);
     }
 
     public function store(Request $request, Task $task): RedirectResponse|JsonResponse
     {
+        $this->authorizeTaskEdit($task);
+
         $data = $request->validate([
             'hours' => 'nullable|integer|min:0|max:24',
             'minutes' => 'nullable|integer|min:0|max:59',
@@ -62,8 +68,65 @@ class TaskTimeEntryController extends Controller
         return back()->with('success', 'Time logged successfully.');
     }
 
+    public function startTimer(Request $request, Task $task): RedirectResponse|JsonResponse
+    {
+        $this->authorizeTaskEdit($task);
+
+        $existingRunningEntry = TaskTimeEntry::query()
+            ->where('user_id', auth()->id())
+            ->whereNull('ended_at')
+            ->latest('started_at')
+            ->first();
+
+        if ($existingRunningEntry) {
+            $existingRunningEntry->stop();
+        }
+
+        $entry = $task->timeEntries()->create([
+            'user_id' => auth()->id(),
+            'description' => $request->string('description')->trim()->toString() ?: null,
+            'started_at' => now(),
+            'ended_at' => null,
+            'duration_minutes' => 0,
+        ]);
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Timer started.',
+                'entry' => $entry->load('user'),
+            ]);
+        }
+
+        return back()->with('success', 'Timer started.');
+    }
+
+    public function stopTimer(Request $request, Task $task, TaskTimeEntry $timeEntry): RedirectResponse|JsonResponse
+    {
+        $this->authorizeTaskEdit($task);
+
+        if ((int) $timeEntry->task_id !== (int) $task->id || (int) $timeEntry->user_id !== (int) auth()->id()) {
+            abort(404);
+        }
+
+        $timeEntry->stop();
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Timer stopped.',
+                'entry' => $timeEntry->fresh('user'),
+                'task' => $task->fresh(['timeEntries']),
+            ]);
+        }
+
+        return back()->with('success', 'Timer stopped.');
+    }
+
     public function destroy(Request $request, Task $task, TaskTimeEntry $timeEntry): RedirectResponse|JsonResponse
     {
+        $this->authorizeTaskView($task);
+
         if ((int) $timeEntry->task_id !== (int) $task->id) {
             abort(404);
         }

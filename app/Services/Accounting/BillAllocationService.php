@@ -53,6 +53,42 @@ class BillAllocationService
         return $this->asOf($date)->toDateString();
     }
 
+    protected function applyPayableAsOfFilter(Builder $query, Carbon $asOf): Builder
+    {
+        return $query->where(function (Builder $dateQuery) use ($asOf) {
+            $dateQuery->where(function (Builder $postedQuery) use ($asOf) {
+                $postedQuery->whereNotNull('posting_date')
+                    ->whereDate('posting_date', '<=', $asOf->toDateString());
+            })->orWhere(function (Builder $fallbackQuery) use ($asOf) {
+                $fallbackQuery->whereNull('posting_date')
+                    ->whereDate('bill_date', '<=', $asOf->toDateString());
+            });
+        });
+    }
+
+    protected function payableBillAccountingDate(Model $bill): Carbon
+    {
+        $postingDate = $bill->getAttribute('posting_date');
+        if ($postingDate instanceof Carbon) {
+            return $postingDate->copy()->startOfDay();
+        }
+
+        if (is_string($postingDate) && trim($postingDate) !== '') {
+            return Carbon::parse($postingDate)->startOfDay();
+        }
+
+        $billDate = $bill->getAttribute('bill_date');
+        if ($billDate instanceof Carbon) {
+            return $billDate->copy()->startOfDay();
+        }
+
+        if (is_string($billDate) && trim($billDate) !== '') {
+            return Carbon::parse($billDate)->startOfDay();
+        }
+
+        return now()->startOfDay();
+    }
+
     /**
      * Sum allocations for a list of bill IDs, considering only POSTED vouchers.
      * Optionally filters by allocation_date <= asOfDate.
@@ -101,7 +137,7 @@ class BillAllocationService
     // AP side (Supplier / Purchase Bills)
     // ---------------------------------------------------------------------
 
-    protected function resolveSupplierParty(Account $account): ?Party
+    protected function resolvePurchaseBillParty(Account $account): ?Party
     {
         if ($account->related_model_type !== Party::class || empty($account->related_model_id)) {
             return null;
@@ -116,7 +152,7 @@ class BillAllocationService
             $party = Party::query()->find((int) $account->related_model_id);
         }
 
-        if (! $party || ! $party->is_supplier) {
+        if (! $party || (! $party->is_supplier && ! $party->is_contractor)) {
             return null;
         }
 
@@ -174,7 +210,7 @@ class BillAllocationService
      */
     public function getOpenPurchaseBillsForAccount(Account $account, Carbon|string|null $asOfDate = null): Collection
     {
-        $party = $this->resolveSupplierParty($account);
+        $party = $this->resolvePurchaseBillParty($account);
         if (! $party) {
             return collect();
         }
@@ -186,8 +222,8 @@ class BillAllocationService
         $bills = PurchaseBill::where('company_id', $companyId)
             ->where('supplier_id', $supplierId)
             ->where('status', 'posted')
-            ->whereDate('bill_date', '<=', $asOf->toDateString())
-            ->orderBy('bill_date')
+            ->tap(fn (Builder $query) => $this->applyPayableAsOfFilter($query, $asOf))
+            ->orderByRaw('COALESCE(posting_date, bill_date)')
             ->orderBy('id')
             ->get();
 
@@ -242,8 +278,8 @@ class BillAllocationService
             ->where('company_id', $companyId)
             ->where('subcontractor_id', $subcontractorId)
             ->where('status', 'posted')
-            ->whereDate('bill_date', '<=', $asOf->toDateString())
-            ->orderBy('bill_date')
+            ->tap(fn (Builder $query) => $this->applyPayableAsOfFilter($query, $asOf))
+            ->orderByRaw('COALESCE(posting_date, bill_date)')
             ->orderBy('id')
             ->get();
 
@@ -294,10 +330,7 @@ class BillAllocationService
             ->concat($subcontractorBills)
             ->sortBy(function (array $row) {
                 $bill = $row['bill'];
-                $billDate = $bill->bill_date;
-                $dateKey = $billDate instanceof Carbon
-                    ? $billDate->toDateString()
-                    : (string) $billDate;
+                $dateKey = $this->payableBillAccountingDate($bill)->toDateString();
 
                 return $dateKey . '|' . str_pad((string) ((int) ($bill->id ?? 0)), 12, '0', STR_PAD_LEFT);
             })
@@ -325,7 +358,7 @@ class BillAllocationService
         $normalized = [];
         $totalAlloc = 0.0;
 
-        $supplierParty = $this->resolveSupplierParty($supplierAccount);
+        $supplierParty = $this->resolvePurchaseBillParty($supplierAccount);
         $subcontractorParty = $this->resolveSubcontractorParty($supplierAccount);
         if (! $supplierParty && ! $subcontractorParty) {
             // No allocations allowed unless this is a Party ledger.
@@ -363,21 +396,19 @@ class BillAllocationService
 
             $bill = null;
             if ($billType === PurchaseBill::class && $supplierParty) {
-                $bill = PurchaseBill::query()
+                $billQuery = PurchaseBill::query()
                     ->where('company_id', $companyId)
                     ->where('supplier_id', (int) $supplierParty->id)
                     ->where('status', 'posted')
-                    ->whereDate('bill_date', '<=', $asOf->toDateString())
-                    ->where('id', $billId)
-                    ->first();
+                    ->where('id', $billId);
+                $bill = $this->applyPayableAsOfFilter($billQuery, $asOf)->first();
             } elseif ($billType === SubcontractorRaBill::class && $subcontractorParty) {
-                $bill = SubcontractorRaBill::query()
+                $billQuery = SubcontractorRaBill::query()
                     ->where('company_id', $companyId)
                     ->where('subcontractor_id', (int) $subcontractorParty->id)
                     ->where('status', 'posted')
-                    ->whereDate('bill_date', '<=', $asOf->toDateString())
-                    ->where('id', $billId)
-                    ->first();
+                    ->where('id', $billId);
+                $bill = $this->applyPayableAsOfFilter($billQuery, $asOf)->first();
             }
 
             if (! $bill) {
@@ -525,7 +556,7 @@ class BillAllocationService
             : now()->startOfDay();
         $allocDate = $allocAsOf->toDateString();
         $partyAccount = $partyLine->account;
-        $supplierParty = $this->resolveSupplierParty($partyAccount);
+        $supplierParty = $this->resolvePurchaseBillParty($partyAccount);
         $subcontractorParty = $this->resolveSubcontractorParty($partyAccount);
 
         foreach (collect($rows)->groupBy('bill_type') as $billType => $groupRows) {
@@ -542,17 +573,23 @@ class BillAllocationService
             }
 
             $bills = match ($billType) {
-                PurchaseBill::class => PurchaseBill::query()
-                    ->where('company_id', $companyId)
-                    ->where('supplier_id', (int) ($supplierParty?->id ?? 0))
-                    ->whereIn('id', $billIds)
+                PurchaseBill::class => $this->applyPayableAsOfFilter(
+                    PurchaseBill::query()
+                        ->where('company_id', $companyId)
+                        ->where('supplier_id', (int) ($supplierParty?->id ?? 0))
+                        ->whereIn('id', $billIds),
+                    $allocAsOf
+                )
                     ->lockForUpdate()
                     ->get()
                     ->keyBy('id'),
-                SubcontractorRaBill::class => SubcontractorRaBill::query()
-                    ->where('company_id', $companyId)
-                    ->where('subcontractor_id', (int) ($subcontractorParty?->id ?? 0))
-                    ->whereIn('id', $billIds)
+                SubcontractorRaBill::class => $this->applyPayableAsOfFilter(
+                    SubcontractorRaBill::query()
+                        ->where('company_id', $companyId)
+                        ->where('subcontractor_id', (int) ($subcontractorParty?->id ?? 0))
+                        ->whereIn('id', $billIds),
+                    $allocAsOf
+                )
                     ->lockForUpdate()
                     ->get()
                     ->keyBy('id'),
@@ -998,6 +1035,13 @@ class BillAllocationService
         $amount = round((float) $amount, 2);
         if ($amount <= 0) {
             return;
+        }
+
+        $clientAccount = $clientLine->account;
+        if (! $clientAccount || ! $this->resolveClientParty($clientAccount)) {
+            throw ValidationException::withMessages([
+                'party_account_id' => 'On-Account receipts can only be stored for client Party ledgers.',
+            ]);
         }
 
         $voucher = $clientLine->voucher;

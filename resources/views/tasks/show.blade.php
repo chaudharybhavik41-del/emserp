@@ -27,20 +27,25 @@
             <a href="{{ url()->previous() }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i> Back
             </a>
+            @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
             <a href="{{ route('tasks.edit', $task) }}" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i> Edit
             </a>
+            @endif
             <div class="dropdown">
                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                     <i class="bi bi-three-dots"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end">
+                    @can('tasks.create')
                     <li><a class="dropdown-item" href="{{ route('tasks.duplicate', $task) }}" onclick="event.preventDefault(); document.getElementById('duplicate-form').submit();">
                         <i class="bi bi-copy me-2"></i> Duplicate
                     </a></li>
                     <li><a class="dropdown-item" href="{{ route('tasks.create', ['parent' => $task->id]) }}">
                         <i class="bi bi-plus me-2"></i> Add Subtask
                     </a></li>
+                    @endcan
+                    @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
                     <li><hr class="dropdown-divider"></li>
                     @if($task->is_archived)
                     <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); document.getElementById('unarchive-form').submit();">
@@ -51,18 +56,27 @@
                         <i class="bi bi-archive me-2"></i> Archive
                     </a></li>
                     @endif
+                    @endcan
+                    @if(auth()->user()->can('tasks.delete') && $task->canEdit(auth()->user()))
                     <li><a class="dropdown-item text-danger" href="#" onclick="if(confirm('Delete this task?')) document.getElementById('delete-form').submit();">
                         <i class="bi bi-trash me-2"></i> Delete
                     </a></li>
+                    @endif
                 </ul>
             </div>
         </div>
     </div>
 
+    @can('tasks.create')
     <form id="duplicate-form" action="{{ route('tasks.duplicate', $task) }}" method="POST" class="d-none">@csrf</form>
+    @endcan
+    @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
     <form id="archive-form" action="{{ route('tasks.archive', $task) }}" method="POST" class="d-none">@csrf</form>
     <form id="unarchive-form" action="{{ route('tasks.unarchive', $task) }}" method="POST" class="d-none">@csrf</form>
+    @endif
+    @if(auth()->user()->can('tasks.delete') && $task->canEdit(auth()->user()))
     <form id="delete-form" action="{{ route('tasks.destroy', $task) }}" method="POST" class="d-none">@csrf @method('DELETE')</form>
+    @endif
 
     <div class="row">
         {{-- Main Content --}}
@@ -221,10 +235,14 @@
                 </div>
                 <div class="card-body">
                     {{-- Add Comment Form --}}
-                    <form action="{{ route('tasks.comments.store', $task) }}" method="POST" class="mb-3">
+                    <form action="{{ route('tasks.comments.store', $task) }}" method="POST" enctype="multipart/form-data" class="mb-3">
                         @csrf
                         <div class="mb-2">
                             <textarea name="content" class="form-control" rows="3" placeholder="Add a comment..."></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <input type="file" name="attachments[]" class="form-control form-control-sm" multiple>
+                            <small class="text-muted">Attachments up to 5 MB each.</small>
                         </div>
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="form-check">
@@ -272,6 +290,15 @@
                                 @endif
                             </div>
                             <div class="mt-1">{!! $comment->formatted_content !!}</div>
+                            @if($comment->attachments->count() > 0)
+                            <div class="d-flex flex-wrap gap-2 mt-2">
+                                @foreach($comment->attachments as $attachment)
+                                <a href="{{ asset('storage/' . $attachment->path) }}" target="_blank" class="badge bg-light text-dark text-decoration-none">
+                                    <i class="bi bi-paperclip me-1"></i>{{ $attachment->original_filename }}
+                                </a>
+                                @endforeach
+                            </div>
+                            @endif
                         </div>
                     </div>
                     @empty
@@ -446,17 +473,52 @@
             @endif
 
             {{-- Dependencies --}}
-            @if($task->dependencies->count() > 0 || $task->dependents->count() > 0)
             <div class="card mb-3">
                 <div class="card-header"><strong>Dependencies</strong></div>
                 <div class="card-body">
+                    @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
+                    <form action="{{ route('tasks.dependencies.store', $task) }}" method="POST" class="row g-2 mb-3">
+                        @csrf
+                        <div class="col-12">
+                            <select name="depends_on_task_id" class="form-select form-select-sm">
+                                <option value="">Add blocking task...</option>
+                                @foreach($dependencyOptions as $dependencyOption)
+                                <option value="{{ $dependencyOption->id }}">{{ $dependencyOption->task_number }} · {{ $dependencyOption->title }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="col-7">
+                            <select name="dependency_type" class="form-select form-select-sm">
+                                <option value="finish_to_start">Finish to Start</option>
+                                <option value="start_to_start">Start to Start</option>
+                                <option value="finish_to_finish">Finish to Finish</option>
+                                <option value="start_to_finish">Start to Finish</option>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <input type="number" name="lag_days" class="form-control form-control-sm" min="0" placeholder="Lag">
+                        </div>
+                        <div class="col-2">
+                            <button type="submit" class="btn btn-sm btn-outline-primary w-100">Add</button>
+                        </div>
+                    </form>
+                    @endif
                     @if($task->dependencies->count() > 0)
                     <div class="mb-2">
                         <small class="text-muted">Blocked by:</small>
                         @foreach($task->dependencies as $dep)
-                        <div class="d-flex align-items-center">
-                            <span class="badge me-2" style="background-color: {{ $dep->status->color }}; width: 8px; height: 8px; padding: 0;"></span>
-                            <a href="{{ route('tasks.show', $dep) }}" class="small">{{ $dep->task_number }}</a>
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center">
+                                <span class="badge me-2" style="background-color: {{ $dep->status->color }}; width: 8px; height: 8px; padding: 0;"></span>
+                                <a href="{{ route('tasks.show', $dep) }}" class="small">{{ $dep->task_number }}</a>
+                            </div>
+                            @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
+                            <form action="{{ route('tasks.dependencies.destroy', [$task, $dep]) }}" method="POST">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-link btn-sm text-danger text-decoration-none p-0">Remove</button>
+                            </form>
+                            @endif
                         </div>
                         @endforeach
                     </div>
@@ -474,17 +536,45 @@
                     @endif
                 </div>
             </div>
-            @endif
 
             {{-- Time Entries --}}
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <strong>Time Tracking</strong>
+                    @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
                     <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#logTimeModal">
                         <i class="bi bi-plus"></i> Log Time
                     </button>
+                    @endif
                 </div>
                 <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center border rounded px-3 py-2 mb-3">
+                        <div>
+                            @if($runningTimeEntry)
+                            <div class="fw-semibold">Timer running</div>
+                            <div class="small text-muted">
+                                Started {{ $runningTimeEntry->started_at->diffForHumans() }}
+                                <span id="runningTimerClock" data-started-at="{{ $runningTimeEntry->started_at->toIso8601String() }}"></span>
+                            </div>
+                            @else
+                            <div class="fw-semibold">No active timer</div>
+                            <div class="small text-muted">Start a live timer on this task for active work.</div>
+                            @endif
+                        </div>
+                        @if(auth()->user()->can('tasks.update') && $task->canEdit(auth()->user()))
+                        @if($runningTimeEntry)
+                        <form action="{{ route('tasks.time-entries.stop', [$task, $runningTimeEntry]) }}" method="POST">
+                            @csrf
+                            <button type="submit" class="btn btn-sm btn-danger">Stop Timer</button>
+                        </form>
+                        @else
+                        <form action="{{ route('tasks.time-entries.start', $task) }}" method="POST">
+                            @csrf
+                            <button type="submit" class="btn btn-sm btn-outline-success">Start Timer</button>
+                        </form>
+                        @endif
+                        @endif
+                    </div>
                     @if($task->timeEntries->count() > 0)
                     <ul class="list-unstyled mb-0 small">
                         @foreach($task->timeEntries as $entry)
@@ -552,6 +642,20 @@
 
 @push('scripts')
 <script>
+const runningTimerClock = document.getElementById('runningTimerClock');
+if (runningTimerClock) {
+    const startedAt = new Date(runningTimerClock.dataset.startedAt);
+    const renderClock = () => {
+        const diffMs = Date.now() - startedAt.getTime();
+        const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        runningTimerClock.textContent = `· ${hours}h ${minutes}m elapsed`;
+    };
+    renderClock();
+    setInterval(renderClock, 60000);
+}
+
 function updateStatus(statusId) {
     fetch('{{ route("tasks.update-status", $task) }}', {
         method: 'PATCH',

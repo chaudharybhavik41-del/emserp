@@ -8,9 +8,11 @@ use App\Models\CrmLead;
 use App\Models\CrmLeadSource;
 use App\Models\CrmLeadStage;
 use App\Models\Party;
+use App\Models\Project;
 use App\Models\User;
 use App\Models\Department;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class CrmLeadController extends Controller
 {
@@ -43,7 +45,15 @@ class CrmLeadController extends Controller
 
     public function index(Request $request)
     {
-        $query = CrmLead::with(['party', 'source', 'stage', 'owner', 'department']);
+        $query = CrmLead::with([
+            'party',
+            'source',
+            'stage',
+            'owner',
+            'department',
+            'activities:id,lead_id,due_at,done_at,created_at',
+            'quotations:id,lead_id,status,grand_total,created_at',
+        ]);
 
         if ($request->filled('q')) {
             $q = trim($request->get('q'));
@@ -66,10 +76,59 @@ class CrmLeadController extends Controller
             $query->where('owner_id', $request->integer('owner_id'));
         }
 
-        $leads = $query
-            ->orderByDesc('id')
-            ->paginate(25)
-            ->withQueryString();
+        $priorityFilter = $request->string('priority')->toString();
+        $followUpFilter = $request->string('follow_up_status')->toString();
+        $sortBy = $request->string('sort_by')->toString();
+
+        $usesComputedSorting = in_array($sortBy, ['score_desc', 'weighted_value_desc', 'next_follow_up_asc'], true);
+        $usesComputedFilters = $priorityFilter !== '' || $followUpFilter !== '';
+
+        if ($usesComputedSorting || $usesComputedFilters) {
+            $collection = $query
+                ->orderByDesc('id')
+                ->get();
+
+            if ($priorityFilter !== '') {
+                $collection = $collection
+                    ->filter(fn (CrmLead $lead) => $lead->lead_temperature === $priorityFilter)
+                    ->values();
+            }
+
+            if ($followUpFilter !== '') {
+                $collection = $collection
+                    ->filter(fn (CrmLead $lead) => $lead->follow_up_status === $followUpFilter)
+                    ->values();
+            }
+
+            $collection = (match ($sortBy) {
+                'score_desc' => $collection->sortByDesc(
+                    fn (CrmLead $lead) => ((int) $lead->lead_score * 1000000000) + ((int) round($lead->weighted_value))
+                ),
+                'weighted_value_desc' => $collection->sortByDesc(
+                    fn (CrmLead $lead) => ((int) round($lead->weighted_value) * 1000) + (int) $lead->lead_score
+                ),
+                'next_follow_up_asc' => $collection->sortBy(fn (CrmLead $lead) => $lead->next_follow_up_at?->getTimestamp() ?? PHP_INT_MAX),
+                default => $collection->sortByDesc('id'),
+            })->values();
+
+            $perPage = 25;
+            $page = max(1, (int) $request->integer('page', 1));
+            $leads = new LengthAwarePaginator(
+                $collection->forPage($page, $perPage)->values(),
+                $collection->count(),
+                $perPage,
+                $page,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
+        } else {
+            $leads = $query
+                ->orderByDesc('id')
+                ->paginate(25)
+                ->withQueryString();
+        }
 
         $stages = CrmLeadStage::where('is_active', true)
             ->orderBy('sort_order')
@@ -81,7 +140,7 @@ class CrmLeadController extends Controller
         return view('crm.leads.index', compact('leads', 'stages', 'owners'));
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $clients     = Party::where('is_client', true)->orderBy('name')->get();
         $sources     = CrmLeadSource::where('is_active', true)->orderBy('name')->get();
@@ -89,7 +148,15 @@ class CrmLeadController extends Controller
         $owners      = User::orderBy('name')->get();
         $departments = Department::orderBy('name')->get();
 
-        return view('crm.leads.create', compact('clients', 'sources', 'stages', 'owners', 'departments'));
+        $prefill = [
+            'title' => trim((string) $request->query('title', '')),
+            'contact_name' => trim((string) $request->query('contact_name', '')),
+            'contact_email' => trim((string) $request->query('contact_email', '')),
+            'contact_phone' => trim((string) $request->query('contact_phone', '')),
+            'notes' => trim((string) $request->query('notes', '')),
+        ];
+
+        return view('crm.leads.create', compact('clients', 'sources', 'stages', 'owners', 'departments', 'prefill'));
     }
 
     public function store(StoreCrmLeadRequest $request)
@@ -124,7 +191,34 @@ class CrmLeadController extends Controller
 
     public function show(CrmLead $lead)
     {
-        $lead->load(['party', 'source', 'stage', 'owner', 'department', 'quotations', 'attachments.uploader']);
+        $lead->load([
+            'party',
+            'source',
+            'stage',
+            'owner',
+            'department',
+            'quotations',
+            'attachments.uploader',
+        ]);
+
+        $activities = $lead->activities()
+            ->with('user')
+            ->orderByRaw('CASE WHEN done_at IS NULL THEN 0 ELSE 1 END')
+            ->orderBy('due_at')
+            ->orderByDesc('created_at')
+            ->get();
+
+        $pendingActivities = $activities
+            ->filter(fn ($activity) => $activity->done_at === null)
+            ->values();
+
+        $completedActivities = $activities
+            ->filter(fn ($activity) => $activity->done_at !== null)
+            ->values();
+
+        $overdueActivitiesCount = $pendingActivities
+            ->filter(fn ($activity) => $activity->due_at && $activity->due_at->isPast())
+            ->count();
 
         $wonStages = CrmLeadStage::where('is_active', true)
             ->where('is_won', true)
@@ -136,7 +230,15 @@ class CrmLeadController extends Controller
             ->orderBy('sort_order')
             ->get();
 
-        return view('crm.leads.show', compact('lead', 'wonStages', 'lostStages'));
+        return view('crm.leads.show', compact(
+            'lead',
+            'wonStages',
+            'lostStages',
+            'activities',
+            'pendingActivities',
+            'completedActivities',
+            'overdueActivitiesCount'
+        ));
     }
 
     public function edit(CrmLead $lead)
@@ -190,6 +292,12 @@ class CrmLeadController extends Controller
 
     public function destroy(CrmLead $lead)
     {
+        if ($lead->quotations()->exists() || Project::query()->where('lead_id', $lead->id)->exists()) {
+            return redirect()
+                ->route('crm.leads.show', $lead)
+                ->with('error', 'This lead cannot be deleted because quotations or downstream project records already exist.');
+        }
+
         $lead->delete();
 
         return redirect()

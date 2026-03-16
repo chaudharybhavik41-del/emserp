@@ -8,6 +8,11 @@
 @endphp
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0">Quotations</h1>
+    @if(\Illuminate\Support\Facades\Route::has('crm.dashboard'))
+        <a href="{{ route('crm.dashboard') }}" class="btn btn-outline-dark btn-sm">
+            CRM Dashboard
+        </a>
+    @endif
 </div>
 
 <div class="card mb-3">
@@ -122,23 +127,27 @@
                         @endcan
 
                         @can('crm.quotation.update')
-                            <a href="{{ route('crm.quotations.edit', $q) }}"
-                               class="btn btn-sm btn-outline-primary ms-1">
-                                Edit
-                            </a>
+                            @if(in_array($q->status, ['draft', 'sent'], true))
+                                <a href="{{ route('crm.quotations.edit', $q) }}"
+                                   class="btn btn-sm btn-outline-primary ms-1">
+                                    Edit
+                                </a>
+                            @endif
                         @endcan
 
                         @can('crm.quotation.delete')
-                            <form action="{{ route('crm.quotations.destroy', $q) }}"
-                                  method="POST"
-                                  class="d-inline"
-                                  onsubmit="return confirm('Delete this quotation?');">
-                                @csrf
-                                @method('DELETE')
-                                <button class="btn btn-sm btn-outline-danger ms-1">
-                                    Delete
-                                </button>
-                            </form>
+                            @if($q->status !== 'accepted')
+                                <form action="{{ route('crm.quotations.destroy', $q) }}"
+                                      method="POST"
+                                      class="d-inline"
+                                      onsubmit="return confirm('Delete this quotation?');">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button class="btn btn-sm btn-outline-danger ms-1">
+                                        Delete
+                                    </button>
+                                </form>
+                            @endif
                         @endcan
                     </td>
                 </tr>
@@ -160,5 +169,3 @@
     @endif
 </div>
 @endsection
-
-

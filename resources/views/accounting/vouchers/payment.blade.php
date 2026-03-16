@@ -59,6 +59,20 @@
                     </div>
 
                     <div class="col-md-4">
+                        <label class="form-label form-label-sm">Payment Type</label>
+                        <select name="payment_type" id="payment_type"
+                                class="form-select form-select-sm @error('payment_type') is-invalid @enderror">
+                            <option value="bill_allocation" @selected(old('payment_type', 'bill_allocation') === 'bill_allocation')>Bill Allocation</option>
+                            <option value="on_account" @selected(old('payment_type') === 'on_account')>On Account</option>
+                            <option value="advance_po" @selected(old('payment_type') === 'advance_po')>Advance Against PO</option>
+                            <option value="advance_work_order" @selected(old('payment_type') === 'advance_work_order')>Advance Against Work Order</option>
+                        </select>
+                        @error('payment_type')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+
+                    <div class="col-md-4" id="single-payee-block">
                         <label class="form-label form-label-sm">Payee Ledger (Supplier / Subcontractor / Expense)</label>
                         <select name="party_account_id" id="party_account_id"
                                 class="form-select form-select-sm @error('party_account_id') is-invalid @enderror">
@@ -78,18 +92,31 @@
                         @enderror
                         <div class="form-text" id="payee-outstanding-text">Select a payee ledger to view total outstanding.</div>
                     </div>
+                </div>
 
-                    <div class="col-md-4">
-                        <label class="form-label form-label-sm">Payment Type</label>
-                        <select name="payment_type" id="payment_type"
-                                class="form-select form-select-sm @error('payment_type') is-invalid @enderror">
-                            <option value="bill_allocation" @selected(old('payment_type', 'bill_allocation') === 'bill_allocation')>Bill Allocation</option>
-                            <option value="on_account" @selected(old('payment_type') === 'on_account')>On Account</option>
-                            <option value="advance_po" @selected(old('payment_type') === 'advance_po')>Advance Against PO</option>
-                            <option value="advance_work_order" @selected(old('payment_type') === 'advance_work_order')>Advance Against Work Order</option>
-                        </select>
-                        @error('payment_type')
-                            <div class="invalid-feedback">{{ $message }}</div>
+                <div class="card border-0 bg-light mb-3 d-none" id="on-account-rows-block">
+                    <div class="card-body py-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <div class="fw-semibold small">On Account Payee Rows</div>
+                                <div class="text-muted small">Use multiple payee rows only for on-account payments.</div>
+                            </div>
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="add-on-account-row">Add Row</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 56%;">Payee Ledger</th>
+                                        <th style="width: 26%;">Amount</th>
+                                        <th style="width: 18%;" class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="on-account-rows-body"></tbody>
+                            </table>
+                        </div>
+                        @error('on_account_rows')
+                            <div class="text-danger small mt-2">{{ $message }}</div>
                         @enderror
                     </div>
                 </div>
@@ -104,7 +131,6 @@
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
                     </div>
-
                     <div class="col-md-8 d-none" id="purchase-order-block">
                         <label class="form-label form-label-sm">Purchase Order Reference</label>
                         <select name="purchase_order_id" id="purchase_order_id"
@@ -242,6 +268,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const paymentType   = document.getElementById('payment_type');
     const dateInput     = document.getElementById('voucher_date');
     const amountInput   = document.getElementById('voucher_amount');
+    const singlePayeeBlock = document.getElementById('single-payee-block');
+    const onAccountRowsBlock = document.getElementById('on-account-rows-block');
+    const onAccountRowsBody = document.getElementById('on-account-rows-body');
+    const addOnAccountRowButton = document.getElementById('add-on-account-row');
     const tbody         = document.getElementById('purchase-bill-rows');
     const poBlock       = document.getElementById('purchase-order-block');
     const poSelect      = document.getElementById('purchase_order_id');
@@ -259,6 +289,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const bankBalanceText = document.getElementById('bank-account-balance-text');
     const payeeOutstandingText = document.getElementById('payee-outstanding-text');
     const oldAlloc      = @json(old('purchase_allocations', []));
+    const oldOnAccountRows = @json(old('on_account_rows', []));
     const oldPaymentType = @json(old('payment_type', 'bill_allocation'));
     const oldPurchaseOrderId = @json(old('purchase_order_id'));
     const oldWorkOrderId = @json(old('subcontractor_work_order_id'));
@@ -294,6 +325,10 @@ document.addEventListener('DOMContentLoaded', function () {
         return partySelect && partySelect.selectedIndex >= 0
             ? partySelect.options[partySelect.selectedIndex]
             : null;
+    }
+
+    function isOnAccountMode() {
+        return !!paymentType && paymentType.value === 'on_account';
     }
 
     function optionMatchesPaymentType(option, type) {
@@ -398,10 +433,26 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function currentPaymentAmount() {
+        if (isOnAccountMode()) {
+            let total = 0;
+
+            if (onAccountRowsBody) {
+                onAccountRowsBody.querySelectorAll('input[data-role="on-account-amount"]').forEach(function (input) {
+                    total += parseNumber(input.value);
+                });
+            }
+
+            return total;
+        }
+
         return parseNumber(amountInput ? amountInput.value : 0);
     }
 
     function currentAllocatedTotal(exceptInput) {
+        if (isOnAccountMode()) {
+            return 0;
+        }
+
         let total = 0;
 
         tbody.querySelectorAll('tr').forEach(function (row) {
@@ -424,6 +475,222 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         return total;
+    }
+
+    function buildOnAccountPayeeOptions(selectedValue) {
+        let html = '<option value="">-- Select --</option>';
+
+        originalPartyOptions.forEach(function (option) {
+            if (!option.value) {
+                return;
+            }
+
+            html += '<option value="' + option.value + '"' + (String(selectedValue || '') === String(option.value) ? ' selected' : '') + '>'
+                + option.text
+                + '</option>';
+        });
+
+        return html;
+    }
+
+    function normalizeOnAccountRows(rows, preserveEmpty) {
+        const normalized = Array.isArray(rows)
+            ? rows.map(function (row) {
+                return {
+                    party_account_id: String(row && row.party_account_id ? row.party_account_id : ''),
+                    amount: row && row.amount !== undefined && row.amount !== null ? String(row.amount) : '',
+                };
+            })
+            : [];
+
+        const filtered = preserveEmpty
+            ? normalized
+            : normalized.filter(function (row) {
+                return row.party_account_id !== '' || parseNumber(row.amount) > 0;
+            });
+
+        return filtered.length ? filtered : [{ party_account_id: '', amount: '' }];
+    }
+
+    function currentOnAccountRows(preserveEmpty) {
+        if (!onAccountRowsBody) {
+            return [];
+        }
+
+        const rows = [];
+        onAccountRowsBody.querySelectorAll('tr').forEach(function (row) {
+            const select = row.querySelector('select[data-role="on-account-payee"]');
+            const amount = row.querySelector('input[data-role="on-account-amount"]');
+
+            if (!select || !amount) {
+                return;
+            }
+
+            rows.push({
+                party_account_id: select.value || '',
+                amount: amount.value || '',
+            });
+        });
+
+        return normalizeOnAccountRows(rows, preserveEmpty);
+    }
+
+    function seedOnAccountRows() {
+        if (onAccountRowsBody && onAccountRowsBody.children.length > 0) {
+            return currentOnAccountRows(true);
+        }
+
+        if (Array.isArray(oldOnAccountRows) && oldOnAccountRows.length) {
+            return normalizeOnAccountRows(oldOnAccountRows);
+        }
+
+        if (partySelect && partySelect.value) {
+            return [{
+                party_account_id: String(partySelect.value),
+                amount: amountInput && parseNumber(amountInput.value) > 0 ? money(amountInput.value) : '',
+            }];
+        }
+
+        return normalizeOnAccountRows([]);
+    }
+
+    function updateOnAccountRemoveButtons() {
+        if (!onAccountRowsBody) {
+            return;
+        }
+
+        const buttons = onAccountRowsBody.querySelectorAll('button[data-role="remove-on-account-row"]');
+        const disableRemoval = buttons.length <= 1;
+
+        buttons.forEach(function (button) {
+            button.disabled = disableRemoval;
+        });
+    }
+
+    function syncSinglePayeeFromOnAccountRows() {
+        if (!partySelect || partySelect.value) {
+            return;
+        }
+
+        const rows = currentOnAccountRows(true).filter(function (row) {
+            return row.party_account_id !== '';
+        });
+
+        const uniquePayees = Array.from(new Set(rows.map(function (row) { return String(row.party_account_id); })));
+
+        if (uniquePayees.length === 1) {
+            partySelect.value = uniquePayees[0];
+        }
+    }
+
+    function syncOnAccountAmount() {
+        if (!amountInput) {
+            return;
+        }
+
+        if (isOnAccountMode()) {
+            const total = currentPaymentAmount();
+            amountInput.value = total > 0 ? money(total) : '';
+            amountInput.readOnly = true;
+            amountInput.classList.add('bg-light');
+        } else {
+            amountInput.readOnly = false;
+            amountInput.classList.remove('bg-light');
+        }
+
+        updateSummary();
+        updateAmountInputColor();
+    }
+
+    function renderOnAccountRows(rows) {
+        if (!onAccountRowsBody) {
+            return;
+        }
+
+        const normalizedRows = normalizeOnAccountRows(rows, true);
+        onAccountRowsBody.innerHTML = '';
+
+        normalizedRows.forEach(function (row, index) {
+            const tr = document.createElement('tr');
+
+            tr.innerHTML = ''
+                + '<td>'
+                + '  <select name="on_account_rows[' + index + '][party_account_id]"'
+                + '          class="form-select form-select-sm"'
+                + '          data-role="on-account-payee">'
+                +        buildOnAccountPayeeOptions(row.party_account_id)
+                + '  </select>'
+                + '</td>'
+                + '<td>'
+                + '  <input type="number" step="0.01"'
+                + '         name="on_account_rows[' + index + '][amount]"'
+                + '         class="form-control form-control-sm text-end"'
+                + '         data-role="on-account-amount"'
+                + '         autocomplete="off"'
+                + '         value="' + (parseNumber(row.amount) > 0 ? money(row.amount) : '') + '">'
+                + '</td>'
+                + '<td class="text-center">'
+                + '  <button type="button" class="btn btn-outline-danger btn-sm" data-role="remove-on-account-row">Remove</button>'
+                + '</td>';
+
+            onAccountRowsBody.appendChild(tr);
+        });
+
+        bindOnAccountRowEvents();
+        updateOnAccountRemoveButtons();
+        syncOnAccountAmount();
+    }
+
+    function addOnAccountRow(row) {
+        const rows = currentOnAccountRows(true);
+        rows.push({
+            party_account_id: row && row.party_account_id ? String(row.party_account_id) : '',
+            amount: row && row.amount ? String(row.amount) : '',
+        });
+        renderOnAccountRows(rows);
+    }
+
+    function bindOnAccountRowEvents() {
+        if (!onAccountRowsBody) {
+            return;
+        }
+
+        onAccountRowsBody.querySelectorAll('select[data-role="on-account-payee"]').forEach(function (select) {
+            select.addEventListener('change', syncOnAccountAmount);
+        });
+
+        onAccountRowsBody.querySelectorAll('input[data-role="on-account-amount"]').forEach(function (input) {
+            input.addEventListener('input', syncOnAccountAmount);
+            input.addEventListener('blur', function () {
+                const value = parseNumber(input.value);
+                input.value = value > 0 ? money(value) : '';
+                syncOnAccountAmount();
+            });
+        });
+
+        onAccountRowsBody.querySelectorAll('button[data-role="remove-on-account-row"]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const rows = currentOnAccountRows(true);
+                const currentRow = button.closest('tr');
+                const currentIndex = Array.from(onAccountRowsBody.querySelectorAll('tr')).indexOf(currentRow);
+                const nextRows = rows.filter(function (_row, index) {
+                    return index !== currentIndex;
+                });
+
+                renderOnAccountRows(nextRows);
+            });
+        });
+    }
+
+    function syncBillAllocationAmount() {
+        if (!amountInput || isOnAccountMode() || paymentType.value !== 'bill_allocation') {
+            return;
+        }
+
+        const totalAllocated = currentAllocatedTotal();
+        amountInput.value = totalAllocated > 0 ? money(totalAllocated) : '';
+        updateSummary();
+        updateAmountInputColor();
     }
 
     function updateSummary() {
@@ -475,18 +742,24 @@ document.addEventListener('DOMContentLoaded', function () {
     function updatePaymentTypeState() {
         const type = paymentType.value;
         const partyLedger = isPartyLedgerSelected();
+        const showOnAccountRows = type === 'on_account';
 
         const currentType = type;
         const showBills = currentType === 'bill_allocation';
         const showPo = currentType === 'advance_po';
         const showWorkOrder = currentType === 'advance_work_order';
 
+        singlePayeeBlock.classList.toggle('d-none', showOnAccountRows);
+        onAccountRowsBlock.classList.toggle('d-none', !showOnAccountRows);
         billBlock.classList.toggle('d-none', !showBills);
         billHeader.classList.toggle('d-none', !showBills);
         poBlock.classList.toggle('d-none', !showPo);
         workOrderBlock.classList.toggle('d-none', !showWorkOrder);
 
-        if (currentType === 'bill_allocation') {
+        if (showOnAccountRows) {
+            renderOnAccountRows(seedOnAccountRows());
+            helpText.textContent = 'Add one or more payee ledgers with amounts. The total payment amount is auto-calculated from these on-account rows.';
+        } else if (currentType === 'bill_allocation') {
             helpText.textContent = partyLedger
                 ? 'Select the bills you want to settle. Any balance left after selected allocations will stay on account.'
                 : 'Select a supplier or subcontractor payee ledger to load open bills.';
@@ -500,6 +773,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 : 'Select a subcontractor payee ledger to use advance against work order.';
         } else {
             helpText.textContent = 'No bill selection is required. The full payment amount will remain on account for supplier/subcontractor ledgers or act as a direct payment for non-party ledgers.';
+        }
+
+        if (!showOnAccountRows) {
+            syncSinglePayeeFromOnAccountRows();
+            syncOnAccountAmount();
         }
 
         updateSummary();
@@ -674,12 +952,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 updateSummary();
-                // Update Amount field with Total Allocated
-                const totalAllocated = currentAllocatedTotal();
-                if (totalAllocated > 0) {
-                    amountInput.value = money(totalAllocated);
-                    updateAmountInputColor();
-                }
+                syncBillAllocationAmount();
             });
 
             amountField.addEventListener('input', function () {
@@ -701,12 +974,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 updateSummary();
-                // Update Amount field with Total Allocated
-                const totalAllocated = currentAllocatedTotal();
-                if (totalAllocated > 0) {
-                    amountInput.value = money(totalAllocated);
-                    updateAmountInputColor();
-                }
+                syncBillAllocationAmount();
             });
         });
     }
@@ -786,6 +1054,11 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
+        if (isOnAccountMode()) {
+            payeeOutstandingText.textContent = 'Use bill allocation for bill-wise outstanding. On-account mode supports multiple payee rows.';
+            return;
+        }
+
         const accountId = partySelect.value;
         if (!accountId) {
             payeeOutstandingText.textContent = 'Select a payee ledger to view total outstanding.';
@@ -820,18 +1093,26 @@ document.addEventListener('DOMContentLoaded', function () {
             allocMap = {};
             selectedMap = {};
             updatePaymentTypeState();
-            loadPayeeSummary();
-            loadBills();
-            loadPurchaseOrders();
-            loadWorkOrders();
+            if (!isOnAccountMode()) {
+                loadPayeeSummary();
+                loadBills();
+                loadPurchaseOrders();
+                loadWorkOrders();
+            }
         });
 
-        if (partySelect.value) {
+        if (partySelect.value && !isOnAccountMode()) {
             loadPayeeSummary();
             loadBills();
             loadPurchaseOrders();
             loadWorkOrders();
         }
+    }
+
+    if (addOnAccountRowButton) {
+        addOnAccountRowButton.addEventListener('click', function () {
+            addOnAccountRow({ party_account_id: '', amount: '' });
+        });
     }
 
     if (bankSelect) {
@@ -845,8 +1126,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (dateInput) {
         dateInput.addEventListener('change', function () {
             loadBankSummary();
-            loadPayeeSummary();
-            if (partySelect && partySelect.value) {
+            if (isOnAccountMode()) {
+                syncOnAccountAmount();
+            } else {
+                loadPayeeSummary();
+            }
+            if (!isOnAccountMode() && partySelect && partySelect.value) {
                 loadBills();
             }
         });
@@ -891,6 +1176,7 @@ document.addEventListener('DOMContentLoaded', function () {
     paymentType.value = oldPaymentType;
     rebuildPartyOptions();
     updatePaymentTypeState();
+    loadPayeeSummary();
     updateSummary();
     
     // Final color update after all initialization

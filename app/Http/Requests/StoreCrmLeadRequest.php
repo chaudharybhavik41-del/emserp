@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreCrmLeadRequest extends FormRequest
 {
@@ -21,7 +22,7 @@ class StoreCrmLeadRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'code'                => ['nullable', 'string', 'max:50'],
+            'code'                => ['nullable', 'string', 'max:50', Rule::unique('crm_leads', 'code')],
             'title'               => ['required', 'string', 'max:255'],
             'party_id'            => ['nullable', 'integer', 'exists:parties,id'],
             'contact_name'        => ['nullable', 'string', 'max:255'],
@@ -32,7 +33,7 @@ class StoreCrmLeadRequest extends FormRequest
             'expected_value'      => ['nullable', 'numeric', 'min:0'],
             'probability'         => ['nullable', 'integer', 'min:0', 'max:100'],
             'lead_date'           => ['nullable', 'date'],
-            'expected_close_date' => ['nullable', 'date'],
+            'expected_close_date' => ['nullable', 'date', 'after_or_equal:lead_date'],
             'owner_id'            => ['nullable', 'integer', 'exists:users,id'],
             'department_id'       => ['nullable', 'integer', 'exists:departments,id'],
             'notes'               => ['nullable', 'string'],

@@ -24,6 +24,9 @@
         </div>
     </div>
 
+    @include('tasks.partials.planning-nav')
+    @include('tasks.partials.saved-views', ['currentViewType' => 'list'])
+
     {{-- Overview --}}
     <div class="row g-2 mb-3">
         <div class="col-6 col-lg">
@@ -72,6 +75,9 @@
     <div class="card mb-3">
         <div class="card-body py-2">
             <form method="GET" action="{{ route('tasks.index') }}" class="row g-2 align-items-end">
+                @if(request('saved_view'))
+                <input type="hidden" name="saved_view" value="{{ request('saved_view') }}">
+                @endif
                 {{-- Search --}}
                 <div class="col-md-3">
                     <input type="text" name="q" class="form-control form-control-sm" 
@@ -337,22 +343,32 @@
                                         <li><a class="dropdown-item" href="{{ route('tasks.show', $task) }}">
                                             <i class="bi bi-eye me-2"></i> View
                                         </a></li>
+                                        @can('tasks.update')
                                         <li><a class="dropdown-item" href="{{ route('tasks.edit', $task) }}">
                                             <i class="bi bi-pencil me-2"></i> Edit
                                         </a></li>
+                                        @endcan
+                                        @can('tasks.create')
                                         <li><a class="dropdown-item" href="{{ route('tasks.duplicate', $task) }}" 
                                                onclick="event.preventDefault(); document.getElementById('duplicate-{{ $task->id }}').submit();">
                                             <i class="bi bi-copy me-2"></i> Duplicate
                                         </a></li>
+                                        @endcan
+                                        @can('tasks.delete')
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item text-danger" href="#" 
                                                onclick="if(confirm('Delete this task?')) document.getElementById('delete-{{ $task->id }}').submit();">
                                             <i class="bi bi-trash me-2"></i> Delete
                                         </a></li>
+                                        @endcan
                                     </ul>
                                 </div>
+                                @can('tasks.create')
                                 <form id="duplicate-{{ $task->id }}" action="{{ route('tasks.duplicate', $task) }}" method="POST" class="d-none">@csrf</form>
+                                @endcan
+                                @can('tasks.delete')
                                 <form id="delete-{{ $task->id }}" action="{{ route('tasks.destroy', $task) }}" method="POST" class="d-none">@csrf @method('DELETE')</form>
+                                @endcan
                             </td>
                         </tr>
                         @empty
@@ -406,9 +422,11 @@
                 <button type="button" class="btn btn-sm btn-outline-light" onclick="bulkArchive()">
                     <i class="bi bi-archive"></i> Archive
                 </button>
+                @can('tasks.delete')
                 <button type="button" class="btn btn-sm btn-outline-danger" onclick="bulkDelete()">
                     <i class="bi bi-trash"></i> Delete
                 </button>
+                @endcan
             </div>
         </div>
     </div>

@@ -21,7 +21,8 @@ class PurchaseBillPostingService
     public function __construct(
         protected PartyAccountService $partyAccountService,
         protected ItemAccountingResolver $itemAccountingResolver,
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected AccountingDateControlService $accountingDateControlService
     ) {
     }
 
@@ -53,6 +54,10 @@ class PurchaseBillPostingService
     {
         if ($bill->status === 'posted' && $bill->voucher_id) {
             throw new RuntimeException('Purchase bill is already posted.');
+        }
+
+        if (($bill->status ?? null) !== 'draft') {
+            throw new RuntimeException('Only draft purchase bills can be posted.');
         }
 
         $supplier = $bill->supplier;
@@ -98,6 +103,11 @@ class PurchaseBillPostingService
         // Voucher Date should follow Posting Date (Books), not Invoice Date.
         // If posting_date is empty (legacy data), fallback to bill_date.
         $voucherDate = $bill->posting_date ?: $bill->bill_date;
+        $this->accountingDateControlService->assertDateOpenForRuntime(
+            $voucherDate,
+            $companyId,
+            'Posting date'
+        );
 
         // -----------------------
         // Project Resolution
@@ -260,8 +270,20 @@ class PurchaseBillPostingService
             $machineExpenseLines,
             $wipOtherAccountId
         ) {
+            $lockedBill = PurchaseBill::query()
+                ->lockForUpdate()
+                ->findOrFail($bill->id);
+
+            if (($lockedBill->status ?? null) === 'posted' && ! empty($lockedBill->voucher_id)) {
+                throw new RuntimeException('Purchase bill is already posted.');
+            }
+
+            if (($lockedBill->status ?? null) !== 'draft') {
+                throw new RuntimeException('Only draft purchase bills can be posted.');
+            }
+
             // Capture old bill attributes for audit
-            $oldBillAttributes = $bill->getOriginal();
+            $oldBillAttributes = $lockedBill->getOriginal();
 
             // Resolve project cost center once (only when project is unambiguous)
             $voucherCostCenterId = null;
@@ -772,9 +794,9 @@ class PurchaseBillPostingService
             $voucher->save();
 
             // 9) Mark bill as posted and link voucher
-            $bill->voucher_id = $voucher->id;
-            $bill->status = 'posted';
-            $bill->save();
+            $lockedBill->voucher_id = $voucher->id;
+            $lockedBill->status = 'posted';
+            $lockedBill->save();
 
 
             // 9.5) Auto-register MACHINERY machines from this posted bill (idempotent)
@@ -782,30 +804,30 @@ class PurchaseBillPostingService
             try {
                 if (config('machinery.auto_register_from_purchase_bill', true)) {
                     app(\App\Services\Machinery\MachineAutoRegistrationService::class)
-                        ->registerFromPurchaseBill($bill);
+                        ->registerFromPurchaseBill($lockedBill);
                 }
 
-                $this->linkRegisteredMachinesToVoucherLines($bill, $voucher, $itemDebitVoucherLineIdByAccount);
+                $this->linkRegisteredMachinesToVoucherLines($lockedBill, $voucher, $itemDebitVoucherLineIdByAccount);
             } catch (\Throwable $e) {
                 // Swallow to avoid blocking accounting posting
                 // (errors will still be visible in logs)
-                logger()->warning('Machine auto-register/link failed for PurchaseBill #' . $bill->id . ': ' . $e->getMessage());
+                logger()->warning('Machine auto-register/link failed for PurchaseBill #' . $lockedBill->id . ': ' . $e->getMessage());
             }
 
             // 10) Audit logs
             ActivityLog::logUpdated(
-                $bill,
+                $lockedBill,
                 $oldBillAttributes,
                 'Purchase bill posted to accounts as voucher ' . $voucher->voucher_no
             );
 
             ActivityLog::logCustom(
                 'posted_to_accounts',
-                'Purchase bill ' . ($bill->bill_number ?: ('#' . $bill->id)) . ' posted to accounts as voucher ' . $voucher->voucher_no,
+                'Purchase bill ' . ($lockedBill->bill_number ?: ('#' . $lockedBill->id)) . ' posted to accounts as voucher ' . $voucher->voucher_no,
                 $voucher,
                 [
-                    'bill_id'       => $bill->id,
-                    'bill_number'   => $bill->bill_number,
+                    'bill_id'       => $lockedBill->id,
+                    'bill_number'   => $lockedBill->bill_number,
                     'voucher_id'    => $voucher->id,
                     'voucher_no'    => $voucher->voucher_no,
                     'voucher_type'  => $voucher->voucher_type,

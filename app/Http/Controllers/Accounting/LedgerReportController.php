@@ -7,11 +7,15 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\Accounting\Account;
 use App\Models\Accounting\AccountBillAllocation;
 use App\Models\Accounting\VoucherLine;
+use App\Models\ClientRaBill;
 use App\Models\Company;
 use App\Models\Party;
 use App\Models\PurchaseBill;
 use App\Models\PurchaseOrder;
 use App\Models\Project;
+use App\Models\SubcontractorRaBill;
+use App\Models\SubcontractorWorkOrder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
@@ -56,7 +60,8 @@ class LedgerReportController extends Controller
 
         $accountId = $request->integer('account_id') ?: ($accounts->first()?->id ?? null);
         $account   = $accountId ? $accounts->firstWhere('id', $accountId) : null;
-        $supportsAnalyticalView = $this->supportsAnalyticalSupplierLedger($account);
+        $supportsAnalyticalView = $this->supportsAnalyticalPartyLedger($account);
+        $analyticalViewLabel = $this->analyticalLedgerLabel($account);
         $viewMode = $supportsAnalyticalView
             ? ((string) $request->get('view_mode', 'analytical') === 'standard' ? 'standard' : 'analytical')
             : 'standard';
@@ -74,6 +79,7 @@ class LedgerReportController extends Controller
                 'showBreakdown' => false,
                 'voucherLinesByVoucher' => collect(),
                 'supportsAnalyticalView' => false,
+                'analyticalViewLabel' => null,
                 'viewMode' => 'standard',
                 'analyticalRows' => collect(),
                 'openingBalance' => 0.0,
@@ -171,7 +177,7 @@ class LedgerReportController extends Controller
 
         $analyticalRows = collect();
         if ($viewMode === 'analytical') {
-            $analyticalRows = $this->buildAnalyticalSupplierRows($account, $ledgerEntries, $openingBalance);
+            $analyticalRows = $this->buildAnalyticalPartyRows($account, $ledgerEntries, $openingBalance);
         }
 
         if ($export === 'csv') {
@@ -218,6 +224,7 @@ class LedgerReportController extends Controller
             'showBreakdown' => $showBreakdown,
             'voucherLinesByVoucher' => $voucherLinesByVoucher,
             'supportsAnalyticalView' => $supportsAnalyticalView,
+            'analyticalViewLabel' => $analyticalViewLabel,
             'viewMode' => $viewMode,
             'analyticalRows' => $analyticalRows,
             'openingBalance' => $openingBalance,
@@ -225,40 +232,144 @@ class LedgerReportController extends Controller
         ]);
     }
 
-    protected function supportsAnalyticalSupplierLedger(?Account $account): bool
+    protected function resolveAnalyticalParty(?Account $account): ?Party
     {
         if (! $account || $account->related_model_type !== Party::class || empty($account->related_model_id)) {
-            return false;
+            return null;
         }
 
-        $party = Party::query()->find((int) $account->related_model_id);
-
-        return (bool) ($party?->is_supplier);
+        return Party::query()->find((int) $account->related_model_id);
     }
 
-    protected function buildAnalyticalSupplierRows(Account $account, Collection $ledgerEntries, float $openingBalance): Collection
+    protected function supportsAnalyticalPartyLedger(?Account $account): bool
+    {
+        $party = $this->resolveAnalyticalParty($account);
+
+        return (bool) ($party && ($party->is_supplier || $party->is_client || $party->is_contractor));
+    }
+
+    protected function analyticalLedgerLabel(?Account $account): ?string
+    {
+        $party = $this->resolveAnalyticalParty($account);
+        if (! $party) {
+            return null;
+        }
+
+        $roles = array_filter([
+            $party->is_supplier ? 'supplier' : null,
+            $party->is_client ? 'client' : null,
+            $party->is_contractor ? 'subcontractor' : null,
+        ]);
+
+        if (count($roles) === 1) {
+            return 'Analytical ' . reset($roles) . ' ledger';
+        }
+
+        if (count($roles) > 1) {
+            return 'Analytical party ledger';
+        }
+
+        return null;
+    }
+
+    protected function resolveArBillModelClass(): ?string
+    {
+        $class = Config::get('accounting.ar_bill_model');
+
+        if (is_string($class) && $class !== '' && class_exists($class)) {
+            return $class;
+        }
+
+        return class_exists(ClientRaBill::class) ? ClientRaBill::class : null;
+    }
+
+    protected function analyticalDeltaRow(
+        ?string $date,
+        string $entryType,
+        string $documentNo,
+        string $voucherNo,
+        string $particulars,
+        float $billAmount,
+        float $tdsAmount,
+        float $paymentAmount,
+        float $delta,
+        float $balance,
+    ): array {
+        return [
+            'date' => $date,
+            'entry_type' => $entryType,
+            'document_no' => $documentNo,
+            'voucher_no' => $voucherNo,
+            'particulars' => $particulars,
+            'bill_amount' => $billAmount,
+            'tds_amount' => $tdsAmount,
+            'payment_amount' => $paymentAmount,
+            'debit_amount' => $delta > 0 ? round($delta, 2) : 0.0,
+            'credit_amount' => $delta < 0 ? round(abs($delta), 2) : 0.0,
+            'balance' => $balance,
+            'balance_type' => $balance >= 0 ? 'Dr' : 'Cr',
+        ];
+    }
+
+    protected function analyticalSearchText(array $row): string
+    {
+        return strtolower(trim(implode(' ', [
+            $row['date'] ?? '',
+            $row['entry_type'] ?? '',
+            $row['document_no'] ?? '',
+            $row['voucher_no'] ?? '',
+            $row['particulars'] ?? '',
+        ])));
+    }
+
+    protected function buildAnalyticalPartyRows(Account $account, Collection $ledgerEntries, float $openingBalance): Collection
     {
         if ($ledgerEntries->isEmpty()) {
             return collect();
         }
 
-        $party = Party::query()->find((int) $account->related_model_id);
-        if (! $party || ! $party->is_supplier) {
+        $party = $this->resolveAnalyticalParty($account);
+        if (! $party || (! $party->is_supplier && ! $party->is_client && ! $party->is_contractor)) {
             return collect();
         }
 
+        $companyId = (int) $account->company_id;
         $voucherIds = $ledgerEntries->pluck('voucher_id')->filter()->unique()->values()->all();
         $voucherLineIds = $ledgerEntries->pluck('id')->filter()->unique()->values()->all();
 
-        $purchaseBillsByVoucherId = PurchaseBill::query()
-            ->where('company_id', (int) $account->company_id)
-            ->where('supplier_id', (int) $party->id)
-            ->whereIn('voucher_id', $voucherIds)
-            ->get()
-            ->keyBy('voucher_id');
+        $purchaseBillsByVoucherId = collect();
+        if ($party->is_supplier && ! empty($voucherIds)) {
+            $purchaseBillsByVoucherId = PurchaseBill::query()
+                ->where('company_id', $companyId)
+                ->where('supplier_id', (int) $party->id)
+                ->whereIn('voucher_id', $voucherIds)
+                ->get()
+                ->keyBy('voucher_id');
+        }
+
+        $clientBillsByVoucherId = collect();
+        $clientBillModelClass = $party->is_client ? $this->resolveArBillModelClass() : null;
+        if ($clientBillModelClass && ! empty($voucherIds)) {
+            $clientBillsByVoucherId = $clientBillModelClass::query()
+                ->where('company_id', $companyId)
+                ->where('client_id', (int) $party->id)
+                ->whereIn('voucher_id', $voucherIds)
+                ->get()
+                ->keyBy('voucher_id');
+        }
+
+        $subcontractorBillsByVoucherId = collect();
+        if ($party->is_contractor && ! empty($voucherIds)) {
+            $subcontractorBillsByVoucherId = SubcontractorRaBill::query()
+                ->where('company_id', $companyId)
+                ->where('subcontractor_id', (int) $party->id)
+                ->whereIn('voucher_id', $voucherIds)
+                ->get()
+                ->keyBy('voucher_id');
+        }
 
         $allocationsByVoucherLineId = AccountBillAllocation::query()
-            ->where('company_id', (int) $account->company_id)
+            ->where('company_id', $companyId)
             ->where('account_id', (int) $account->id)
             ->whereIn('voucher_line_id', $voucherLineIds)
             ->whereHas('voucher', function ($query) {
@@ -269,28 +380,61 @@ class LedgerReportController extends Controller
             ->get()
             ->groupBy('voucher_line_id');
 
+        $flatAllocations = $allocationsByVoucherLineId->flatten(1);
+
         $purchaseBillRefs = PurchaseBill::query()
-            ->whereIn('id', $allocationsByVoucherLineId->flatten(1)->where('bill_type', PurchaseBill::class)->pluck('bill_id')->unique()->values())
+            ->whereIn('id', $flatAllocations->where('bill_type', PurchaseBill::class)->pluck('bill_id')->unique()->values())
+            ->get()
+            ->keyBy('id');
+
+        $clientBillRefs = collect();
+        if ($clientBillModelClass) {
+            $clientBillRefs = $clientBillModelClass::query()
+                ->whereIn('id', $flatAllocations->where('bill_type', $clientBillModelClass)->pluck('bill_id')->unique()->values())
+                ->get()
+                ->keyBy('id');
+        }
+
+        $subcontractorBillRefs = SubcontractorRaBill::query()
+            ->whereIn('id', $flatAllocations->where('bill_type', SubcontractorRaBill::class)->pluck('bill_id')->unique()->values())
             ->get()
             ->keyBy('id');
 
         $purchaseOrderRefs = PurchaseOrder::query()
-            ->whereIn('id', $allocationsByVoucherLineId->flatten(1)->where('bill_type', PurchaseOrder::class)->pluck('bill_id')->unique()->values())
+            ->whereIn('id', $flatAllocations->where('bill_type', PurchaseOrder::class)->pluck('bill_id')->unique()->values())
+            ->get()
+            ->keyBy('id');
+
+        $workOrderRefs = SubcontractorWorkOrder::query()
+            ->whereIn('id', $flatAllocations->where('bill_type', SubcontractorWorkOrder::class)->pluck('bill_id')->unique()->values())
             ->get()
             ->keyBy('id');
 
         $rows = collect();
         $running = round($openingBalance, 2);
+        $processedSourceVouchers = [];
+        $entryDeltaByVoucherId = $ledgerEntries
+            ->groupBy('voucher_id')
+            ->map(fn (Collection $voucherRows) => round($voucherRows->sum(fn ($voucherRow) => (float) $voucherRow->debit - (float) $voucherRow->credit), 2));
 
         foreach ($ledgerEntries as $entry) {
             $entryDate = optional($entry->voucher?->voucher_date)->format('d-m-Y');
             $entryDelta = round((float) $entry->debit - (float) $entry->credit, 2);
+            $effectiveEntryDelta = $entryDelta;
             $representedDelta = 0.0;
             $entryRows = [];
+            $voucherNo = (string) ($entry->voucher?->voucher_no ?? '');
+            $sourceVoucherKey = null;
 
             /** @var PurchaseBill|null $purchaseBill */
             $purchaseBill = $purchaseBillsByVoucherId->get((int) $entry->voucher_id);
             if ($purchaseBill) {
+                $sourceVoucherKey = 'purchase:' . (int) $entry->voucher_id;
+                if (isset($processedSourceVouchers[$sourceVoucherKey])) {
+                    continue;
+                }
+                $effectiveEntryDelta = (float) ($entryDeltaByVoucherId->get($entry->voucher_id) ?? $entryDelta);
+
                 $grossBillAmount = round(
                     (float) ($purchaseBill->total_amount ?? 0) + (float) ($purchaseBill->tcs_amount ?? 0),
                     2
@@ -301,36 +445,168 @@ class LedgerReportController extends Controller
                     $delta = round(-1 * $grossBillAmount, 2);
                     $representedDelta += $delta;
                     $running = round($running + $delta, 2);
-                    $entryRows[] = [
-                        'date' => $entryDate,
-                        'entry_type' => 'Bill',
-                        'document_no' => (string) ($purchaseBill->reference_no ?: $purchaseBill->bill_number ?: ''),
-                        'voucher_no' => (string) ($entry->voucher?->voucher_no ?? ''),
-                        'particulars' => 'Purchase Bill',
-                        'bill_amount' => $grossBillAmount,
-                        'tds_amount' => 0.0,
-                        'payment_amount' => 0.0,
-                        'balance' => $running,
-                        'balance_type' => $running >= 0 ? 'Dr' : 'Cr',
-                    ];
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'Bill',
+                        (string) ($purchaseBill->reference_no ?: $purchaseBill->bill_number ?: ''),
+                        $voucherNo,
+                        'Purchase Bill',
+                        $grossBillAmount,
+                        0.0,
+                        0.0,
+                        $delta,
+                        $running,
+                    );
                 }
 
                 if ($tdsAmount > 0) {
                     $delta = $tdsAmount;
                     $representedDelta += $delta;
                     $running = round($running + $delta, 2);
-                    $entryRows[] = [
-                        'date' => $entryDate,
-                        'entry_type' => 'TDS',
-                        'document_no' => (string) ($purchaseBill->reference_no ?: $purchaseBill->bill_number ?: ''),
-                        'voucher_no' => (string) ($entry->voucher?->voucher_no ?? ''),
-                        'particulars' => trim('TDS ' . (string) ($purchaseBill->tds_section ?? '')),
-                        'bill_amount' => 0.0,
-                        'tds_amount' => $tdsAmount,
-                        'payment_amount' => 0.0,
-                        'balance' => $running,
-                        'balance_type' => $running >= 0 ? 'Dr' : 'Cr',
-                    ];
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'TDS',
+                        (string) ($purchaseBill->reference_no ?: $purchaseBill->bill_number ?: ''),
+                        $voucherNo,
+                        trim('TDS ' . (string) ($purchaseBill->tds_section ?? '')),
+                        0.0,
+                        $tdsAmount,
+                        0.0,
+                        $delta,
+                        $running,
+                    );
+                }
+            } elseif (($clientBill = $clientBillsByVoucherId->get((int) $entry->voucher_id)) instanceof Model) {
+                $sourceVoucherKey = 'client:' . (int) $entry->voucher_id;
+                if (isset($processedSourceVouchers[$sourceVoucherKey])) {
+                    continue;
+                }
+                $effectiveEntryDelta = (float) ($entryDeltaByVoucherId->get($entry->voucher_id) ?? $entryDelta);
+
+                $invoiceAmount = round((float) ($clientBill->total_amount ?? 0), 2);
+                if ($invoiceAmount <= 0) {
+                    $invoiceAmount = round((float) ($clientBill->receivable_amount ?? 0) + (float) ($clientBill->tds_amount ?? 0), 2);
+                }
+                $tdsAmount = round((float) ($clientBill->tds_amount ?? 0), 2);
+                $documentNo = (string) ($clientBill->invoice_number ?? $clientBill->ra_number ?? ('Bill #' . $clientBill->id));
+
+                if ($invoiceAmount > 0) {
+                    $delta = $invoiceAmount;
+                    $representedDelta += $delta;
+                    $running = round($running + $delta, 2);
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'Bill',
+                        $documentNo,
+                        $voucherNo,
+                        'Sales Invoice',
+                        $invoiceAmount,
+                        0.0,
+                        0.0,
+                        $delta,
+                        $running,
+                    );
+                }
+
+                if ($tdsAmount > 0) {
+                    $delta = round(-1 * $tdsAmount, 2);
+                    $representedDelta += $delta;
+                    $running = round($running + $delta, 2);
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'TDS',
+                        $documentNo,
+                        $voucherNo,
+                        trim('TDS ' . (string) ($clientBill->tds_section ?? '')),
+                        0.0,
+                        $tdsAmount,
+                        0.0,
+                        $delta,
+                        $running,
+                    );
+                }
+            } elseif (($subcontractorBill = $subcontractorBillsByVoucherId->get((int) $entry->voucher_id)) instanceof SubcontractorRaBill) {
+                $sourceVoucherKey = 'subcontractor:' . (int) $entry->voucher_id;
+                if (isset($processedSourceVouchers[$sourceVoucherKey])) {
+                    continue;
+                }
+                $effectiveEntryDelta = (float) ($entryDeltaByVoucherId->get($entry->voucher_id) ?? $entryDelta);
+
+                $documentNo = (string) ($subcontractorBill->bill_number ?: $subcontractorBill->ra_number ?: ('RA #' . $subcontractorBill->id));
+                $grossBillAmount = round(
+                    (float) ($subcontractorBill->current_amount ?? 0)
+                    + (float) ($subcontractorBill->total_gst ?? 0)
+                    + (float) ($subcontractorBill->round_off ?? 0),
+                    2
+                );
+                $advanceRecovery = round((float) ($subcontractorBill->advance_recovery ?? 0), 2);
+                if ($advanceRecovery > 0) {
+                    $grossBillAmount = round($grossBillAmount - $advanceRecovery, 2);
+                }
+                $deductionRows = [
+                    ['type' => 'TDS', 'particulars' => trim('TDS ' . (string) ($subcontractorBill->tds_section ?? '')), 'tds' => (float) ($subcontractorBill->tds_amount ?? 0)],
+                    ['type' => 'Retention', 'particulars' => 'Retention', 'amount' => (float) ($subcontractorBill->retention_amount ?? 0)],
+                    ['type' => 'Security', 'particulars' => 'Security Deposit', 'amount' => (float) ($subcontractorBill->security_deposit_amount ?? 0)],
+                    ['type' => 'Other', 'particulars' => 'Other Deductions', 'amount' => (float) ($subcontractorBill->other_deductions ?? 0)],
+                ];
+
+                if ($grossBillAmount > 0) {
+                    $delta = round(-1 * $grossBillAmount, 2);
+                    $representedDelta += $delta;
+                    $running = round($running + $delta, 2);
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'Bill',
+                        $documentNo,
+                        $voucherNo,
+                        'Subcontractor RA Bill',
+                        $grossBillAmount,
+                        0.0,
+                        0.0,
+                        $delta,
+                        $running,
+                    );
+                }
+
+                foreach ($deductionRows as $deductionRow) {
+                    $amount = round((float) ($deductionRow['amount'] ?? $deductionRow['tds'] ?? 0), 2);
+                    if ($amount <= 0) {
+                        continue;
+                    }
+
+                    $delta = $amount;
+                    $representedDelta += $delta;
+                    $running = round($running + $delta, 2);
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        (string) $deductionRow['type'],
+                        $documentNo,
+                        $voucherNo,
+                        (string) $deductionRow['particulars'],
+                        0.0,
+                        isset($deductionRow['tds']) ? $amount : 0.0,
+                        isset($deductionRow['tds']) ? 0.0 : $amount,
+                        $delta,
+                        $running,
+                    );
+                }
+
+                if ($advanceRecovery > 0) {
+                    $delta = round(-1 * $advanceRecovery, 2);
+                    $representedDelta += $delta;
+                    $running = round($running + $delta, 2);
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        'Advance',
+                        $documentNo,
+                        $voucherNo,
+                        'Advance Recovery',
+                        0.0,
+                        0.0,
+                        $advanceRecovery,
+                        $delta,
+                        $running,
+                    );
                 }
             } else {
                 $allocations = $allocationsByVoucherLineId->get((int) $entry->id, collect());
@@ -346,65 +622,80 @@ class LedgerReportController extends Controller
                     $running = round($running + $delta, 2);
 
                     $documentNo = '';
-                    $particulars = 'Settlement';
+                    $particulars = $entryDelta >= 0 ? 'Payment Adjustment' : 'Receipt Adjustment';
+                    $entryType = $entryDelta >= 0 ? 'Payment' : 'Receipt';
 
                     if ($allocation->mode === 'against' && $allocation->bill_type === PurchaseBill::class) {
                         $refBill = $purchaseBillRefs->get((int) $allocation->bill_id);
                         $documentNo = (string) ($refBill?->reference_no ?: $refBill?->bill_number ?: ('Bill #' . $allocation->bill_id));
                         $particulars = 'Payment Against Bill';
+                        $entryType = 'Payment';
+                    } elseif ($allocation->mode === 'against' && $clientBillModelClass && $allocation->bill_type === $clientBillModelClass) {
+                        $refBill = $clientBillRefs->get((int) $allocation->bill_id);
+                        $documentNo = (string) ($refBill->invoice_number ?? $refBill->ra_number ?? ('Bill #' . $allocation->bill_id));
+                        $particulars = 'Receipt Against Bill';
+                        $entryType = 'Receipt';
+                    } elseif ($allocation->mode === 'against' && $allocation->bill_type === SubcontractorRaBill::class) {
+                        $refBill = $subcontractorBillRefs->get((int) $allocation->bill_id);
+                        $documentNo = (string) ($refBill?->bill_number ?: $refBill?->ra_number ?: ('RA #' . $allocation->bill_id));
+                        $particulars = 'Payment Against RA Bill';
+                        $entryType = 'Payment';
                     } elseif ($allocation->mode === 'advance' && $allocation->bill_type === PurchaseOrder::class) {
                         $purchaseOrder = $purchaseOrderRefs->get((int) $allocation->bill_id);
                         $documentNo = (string) ($purchaseOrder->code ?? ('PO #' . $allocation->bill_id));
                         $particulars = 'Advance Against PO';
+                        $entryType = 'Advance';
+                    } elseif ($allocation->mode === 'advance' && $allocation->bill_type === SubcontractorWorkOrder::class) {
+                        $workOrder = $workOrderRefs->get((int) $allocation->bill_id);
+                        $documentNo = (string) ($workOrder->work_order_number ?? ('WO #' . $allocation->bill_id));
+                        $particulars = 'Advance Against Work Order';
+                        $entryType = 'Advance';
                     } elseif ($allocation->mode === 'on_account') {
-                        $particulars = 'On Account Payment';
+                        $particulars = $entryDelta >= 0 ? 'On Account Payment' : 'On Account Receipt';
+                        $entryType = 'On Account';
                     } else {
                         $documentNo = class_basename((string) $allocation->bill_type) . ' #' . (int) $allocation->bill_id;
-                        $particulars = 'Payment Adjustment';
+                        $particulars = $entryDelta >= 0 ? 'Payment Adjustment' : 'Receipt Adjustment';
                     }
 
-                    $entryRows[] = [
-                        'date' => $entryDate,
-                        'entry_type' => 'Payment',
-                        'document_no' => $documentNo,
-                        'voucher_no' => (string) ($entry->voucher?->voucher_no ?? ''),
-                        'particulars' => $particulars,
-                        'bill_amount' => 0.0,
-                        'tds_amount' => 0.0,
-                        'payment_amount' => $amount,
-                        'balance' => $running,
-                        'balance_type' => $running >= 0 ? 'Dr' : 'Cr',
-                    ];
+                    $entryRows[] = $this->analyticalDeltaRow(
+                        $entryDate,
+                        $entryType,
+                        $documentNo,
+                        $voucherNo,
+                        $particulars,
+                        0.0,
+                        0.0,
+                        $amount,
+                        $delta,
+                        $running,
+                    );
                 }
             }
 
-            $residualDelta = round($entryDelta - $representedDelta, 2);
+            if ($sourceVoucherKey && ! empty($entryRows)) {
+                $processedSourceVouchers[$sourceVoucherKey] = true;
+            }
+
+            $residualDelta = round($effectiveEntryDelta - $representedDelta, 2);
             if (abs($residualDelta) > 0.01 || empty($entryRows)) {
                 $running = round($running + $residualDelta, 2);
-                $entryRows[] = [
-                    'date' => $entryDate,
-                    'entry_type' => 'Other',
-                    'document_no' => (string) ($entry->voucher?->reference ?? ''),
-                    'voucher_no' => (string) ($entry->voucher?->voucher_no ?? ''),
-                    'particulars' => (string) ($entry->description ?: ($entry->voucher?->narration ?: 'Ledger Entry')),
-                    'bill_amount' => $residualDelta < 0 ? abs($residualDelta) : 0.0,
-                    'tds_amount' => 0.0,
-                    'payment_amount' => $residualDelta > 0 ? abs($residualDelta) : 0.0,
-                    'balance' => $running,
-                    'balance_type' => $running >= 0 ? 'Dr' : 'Cr',
-                ];
+                $entryRows[] = $this->analyticalDeltaRow(
+                    $entryDate,
+                    'Other',
+                    (string) ($entry->voucher?->reference ?? ''),
+                    $voucherNo,
+                    (string) ($entry->description ?: ($entry->voucher?->narration ?: 'Ledger Entry')),
+                    $residualDelta < 0 ? abs($residualDelta) : 0.0,
+                    0.0,
+                    $residualDelta > 0 ? abs($residualDelta) : 0.0,
+                    $residualDelta,
+                    $running,
+                );
             }
 
             foreach ($entryRows as $row) {
-                $searchable = strtolower(trim(implode(' ', [
-                    $row['date'],
-                    $row['entry_type'],
-                    $row['document_no'],
-                    $row['voucher_no'],
-                    $row['particulars'],
-                ])));
-
-                $rows->push($row + ['search_text' => $searchable]);
+                $rows->push($row + ['search_text' => $this->analyticalSearchText($row)]);
             }
         }
 
@@ -493,33 +784,17 @@ class LedgerReportController extends Controller
 
         foreach ($analyticalRows as $row) {
             $particulars = match ($row['entry_type'] ?? '') {
-                'Bill' => trim('Purchase Bill' . (! empty($row['document_no']) ? (' - ' . $row['document_no']) : '')),
-                'TDS' => trim(($row['particulars'] ?? 'TDS') . (! empty($row['document_no']) ? (' on Bill ' . $row['document_no']) : '')),
-                'Payment' => trim(($row['particulars'] ?? 'Payment') . (! empty($row['document_no']) ? (' - ' . $row['document_no']) : '')),
-                default => (string) ($row['particulars'] ?? ''),
+                'TDS' => trim((string) ($row['particulars'] ?? 'TDS') . (! empty($row['document_no']) ? (' on Bill ' . $row['document_no']) : '')),
+                default => trim((string) ($row['particulars'] ?? '') . (! empty($row['document_no']) ? (' - ' . $row['document_no']) : '')),
             };
-
-            $debit = '';
-            $credit = '';
-
-            if (($row['entry_type'] ?? '') === 'Bill') {
-                $credit = number_format((float) ($row['bill_amount'] ?? 0), 2, '.', '');
-            } elseif (($row['entry_type'] ?? '') === 'TDS') {
-                $debit = number_format((float) ($row['tds_amount'] ?? 0), 2, '.', '');
-            } elseif (($row['entry_type'] ?? '') === 'Payment') {
-                $debit = number_format((float) ($row['payment_amount'] ?? 0), 2, '.', '');
-            } else {
-                $debit = (float) ($row['payment_amount'] ?? 0) > 0 ? number_format((float) $row['payment_amount'], 2, '.', '') : '';
-                $credit = (float) ($row['bill_amount'] ?? 0) > 0 ? number_format((float) $row['bill_amount'], 2, '.', '') : '';
-            }
 
             $rows->push([
                 'date' => (string) ($row['date'] ?? ''),
                 'particulars' => $particulars,
                 'voucher_type' => strtoupper((string) ($row['entry_type'] ?? '')),
                 'voucher_no' => (string) ($row['voucher_no'] ?? ''),
-                'debit' => $debit,
-                'credit' => $credit,
+                'debit' => (float) ($row['debit_amount'] ?? 0) > 0 ? number_format((float) $row['debit_amount'], 2, '.', '') : '',
+                'credit' => (float) ($row['credit_amount'] ?? 0) > 0 ? number_format((float) $row['credit_amount'], 2, '.', '') : '',
             ]);
         }
 

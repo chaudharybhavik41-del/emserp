@@ -125,12 +125,12 @@ class HrLeaveApplication extends Model
 
     public function scopePending($query)
     {
-        return $query->where('status', LeaveStatus::Pending);
+        return $query->where('status', LeaveStatus::PENDING);
     }
 
     public function scopeApproved($query)
     {
-        return $query->where('status', LeaveStatus::Approved);
+        return $query->where('status', LeaveStatus::APPROVED);
     }
 
     public function scopeForEmployee($query, $employeeId)
@@ -159,7 +159,7 @@ class HrLeaveApplication extends Model
     {
         return $query->where('from_date', '<=', $date)
                      ->where('to_date', '>=', $date)
-                     ->where('status', LeaveStatus::Approved);
+                     ->where('status', LeaveStatus::APPROVED);
     }
 
     // ==================== ACCESSORS ====================
@@ -189,17 +189,17 @@ class HrLeaveApplication extends Model
 
     public function getIsActiveAttribute(): bool
     {
-        return in_array($this->status, [LeaveStatus::Pending, LeaveStatus::Approved]);
+        return in_array($this->status, [LeaveStatus::PENDING, LeaveStatus::APPROVED]);
     }
 
     public function getCanCancelAttribute(): bool
     {
         // Can cancel if pending or approved and leave hasn't started
-        if ($this->status === LeaveStatus::Pending) {
+        if ($this->status === LeaveStatus::PENDING) {
             return true;
         }
 
-        if ($this->status === LeaveStatus::Approved && $this->from_date > now()) {
+        if ($this->status === LeaveStatus::APPROVED && $this->from_date > now()) {
             return true;
         }
 
@@ -288,7 +288,7 @@ class HrLeaveApplication extends Model
     {
         return static::where('hr_employee_id', $this->hr_employee_id)
             ->where('id', '!=', $this->id ?? 0)
-            ->whereIn('status', [LeaveStatus::Pending, LeaveStatus::Approved])
+            ->whereIn('status', [LeaveStatus::PENDING, LeaveStatus::APPROVED])
             ->where(function ($query) {
                 $query->whereBetween('from_date', [$this->from_date, $this->to_date])
                       ->orWhereBetween('to_date', [$this->from_date, $this->to_date])
@@ -306,7 +306,7 @@ class HrLeaveApplication extends Model
     public function approve(int $userId, ?string $remarks = null): bool
     {
         $this->update([
-            'status' => LeaveStatus::Approved,
+            'status' => LeaveStatus::APPROVED,
             'approved_by' => $userId,
             'approved_at' => now(),
             'approval_remarks' => $remarks,
@@ -329,7 +329,7 @@ class HrLeaveApplication extends Model
     public function reject(int $userId, string $reason): bool
     {
         $this->update([
-            'status' => LeaveStatus::Rejected,
+            'status' => LeaveStatus::REJECTED,
             'rejection_reason' => $reason,
         ]);
 
@@ -349,10 +349,10 @@ class HrLeaveApplication extends Model
      */
     public function cancel(int $userId, string $reason): bool
     {
-        $wasApproved = $this->status === LeaveStatus::Approved;
+        $wasApproved = $this->status === LeaveStatus::APPROVED;
 
         $this->update([
-            'status' => LeaveStatus::Cancelled,
+            'status' => LeaveStatus::CANCELLED,
             'cancelled_by' => $userId,
             'cancelled_at' => now(),
             'cancellation_reason' => $reason,

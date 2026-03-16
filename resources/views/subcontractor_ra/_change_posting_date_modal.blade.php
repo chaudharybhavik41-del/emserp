@@ -16,6 +16,8 @@
                             id="posting_date"
                             name="posting_date"
                             value="{{ old('posting_date', optional($subcontractorRa->posting_date ?: $subcontractorRa->bill_date)->format('Y-m-d')) }}"
+                            min="{{ optional($subcontractorRa->bill_date)->format('Y-m-d') }}"
+                            max="{{ now()->toDateString() }}"
                             required
                         >
                         @error('posting_date')

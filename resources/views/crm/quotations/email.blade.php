@@ -67,7 +67,7 @@
                     </select>
                     @error('template_code')
                         <div class="invalid-feedback">{{ $message }}</div>
-                    @enderror>
+                    @enderror
                     <div class="form-text">
                         Configure templates in Core → Mail Templates.
                         Available placeholders from this screen:

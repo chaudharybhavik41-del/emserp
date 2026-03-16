@@ -169,6 +169,10 @@
                                 <form method="POST" action="{{ route('accounting.client-ra.reverse', $clientRa) }}" class="d-flex gap-2 align-items-end">
                                     @csrf
                                     <div>
+                                        <label class="form-label mb-1">Reversal Date</label>
+                                        <input type="date" name="reversal_date" class="form-control form-control-sm" value="{{ old('reversal_date', now()->toDateString()) }}" required>
+                                    </div>
+                                    <div>
                                         <label class="form-label mb-1">Reversal Reason</label>
                                         <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason" required>
                                     </div>

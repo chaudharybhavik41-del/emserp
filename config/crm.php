@@ -32,4 +32,53 @@ return [
         ['code' => 'OTHER',     'name' => 'Other'],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | CRM Lead Scoring
+    |--------------------------------------------------------------------------
+    |
+    | Lightweight, derived scoring so the CRM can prioritise follow-up without
+    | introducing a separate scoring engine or changing persisted lead logic.
+    |
+    */
+    'lead_scoring' => [
+        'large_value_threshold' => 500000,
+        'recent_activity_days' => 14,
+        'expected_close_window_days' => 30,
+        'due_soon_hours' => 24,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CRM Activity SLAs
+    |--------------------------------------------------------------------------
+    |
+    | When users do not provide a due date, CRM activities get a default SLA
+    | target so follow-ups remain actionable and can participate in reminders.
+    |
+    */
+    'activity_slas' => [
+        'call' => 24,
+        'meeting' => 48,
+        'email' => 8,
+        'note' => 72,
+        'task' => 24,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CRM Follow-up Reminders
+    |--------------------------------------------------------------------------
+    |
+    | The reminder job only targets overdue, open CRM activities and throttles
+    | repeat reminders per activity.
+    |
+    */
+    'follow_up_reminders' => [
+        'daily_at' => '09:30',
+        'repeat_after_hours' => 24,
+        'escalate_after_hours' => 48,
+        'escalation_repeat_after_hours' => 48,
+    ],
+
 ];

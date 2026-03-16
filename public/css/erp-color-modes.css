@@ -12,10 +12,18 @@
 
 /* Provide a few ERP-specific variables */
 :root[data-bs-theme="dark"] {
+  --erp-shell-bg: #0f1318;
   --erp-card-bg: #161a1f;
+  --erp-surface-bg: rgba(22, 26, 31, 0.92);
+  --erp-surface-muted: rgba(30, 41, 59, 0.72);
+  --erp-surface-strong: #161a1f;
   --erp-sidebar-bg: #111418;
   --erp-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
   --erp-sidebar-active-bg: rgba(13, 110, 253, 0.18); /* Bootstrap primary with alpha */
+  --erp-border-color: rgba(255, 255, 255, 0.08);
+  --erp-border-strong: rgba(255, 255, 255, 0.14);
+  --erp-text-muted: #94a3b8;
+  --erp-title-color: #f8fafc;
   --erp-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
 }
 
@@ -24,11 +32,18 @@
   background-color: var(--bs-body-bg) !important;
 }
 
+:root[data-bs-theme="dark"] body.erp-shell {
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 26%),
+    linear-gradient(180deg, #11161c 0%, var(--erp-shell-bg) 100%);
+}
+
 /* Fix ERP main card (hardcoded white in resources/css/app.css) */
 :root[data-bs-theme="dark"] .erp-main-card {
   background-color: var(--erp-card-bg) !important;
   color: var(--bs-body-color);
   box-shadow: var(--erp-shadow);
+  border-color: var(--erp-border-color);
 }
 
 /* Sidebar + header (hardcoded white in resources/css/app.css / blade) */
@@ -37,6 +52,63 @@
 :root[data-bs-theme="dark"] .erp-sidebar-brand,
 :root[data-bs-theme="dark"] .erp-sidebar-search-wrap {
   background-color: var(--erp-sidebar-bg) !important;
+}
+
+:root[data-bs-theme="dark"] .erp-surface,
+:root[data-bs-theme="dark"] .erp-kpi,
+:root[data-bs-theme="dark"] .erp-table-card {
+  background-color: var(--erp-surface-strong) !important;
+  border-color: var(--erp-border-color) !important;
+  color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .erp-surface-subtle,
+:root[data-bs-theme="dark"] .erp-toolbar,
+:root[data-bs-theme="dark"] .erp-filter-bar,
+:root[data-bs-theme="dark"] .erp-empty-state {
+  background-color: var(--erp-surface-muted) !important;
+  border-color: var(--erp-border-color) !important;
+  color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .erp-kpi {
+  background:
+    linear-gradient(180deg, rgba(22, 26, 31, 0.98), rgba(15, 23, 42, 0.92)) !important;
+}
+
+:root[data-bs-theme="dark"] .erp-page-header h1,
+:root[data-bs-theme="dark"] .erp-page-header .h1,
+:root[data-bs-theme="dark"] .erp-page-header .h2,
+:root[data-bs-theme="dark"] .erp-page-header .h3,
+:root[data-bs-theme="dark"] .erp-page-header .h4,
+:root[data-bs-theme="dark"] .erp-page-header .h5,
+:root[data-bs-theme="dark"] .erp-kpi-value,
+:root[data-bs-theme="dark"] .erp-section-title {
+  color: var(--erp-title-color);
+}
+
+:root[data-bs-theme="dark"] .erp-page-header small,
+:root[data-bs-theme="dark"] .erp-page-header .text-muted,
+:root[data-bs-theme="dark"] .erp-page-header .text-body-secondary,
+:root[data-bs-theme="dark"] .erp-kpi-label,
+:root[data-bs-theme="dark"] .erp-kpi-meta {
+  color: var(--erp-text-muted) !important;
+}
+
+:root[data-bs-theme="dark"] .erp-kpi-pill {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--erp-text-muted);
+}
+
+:root[data-bs-theme="dark"] .erp-kpi-pill strong,
+:root[data-bs-theme="dark"] .erp-kpi-unit {
+  color: var(--erp-title-color);
+}
+
+:root[data-bs-theme="dark"] .erp-kpi-icon,
+:root[data-bs-theme="dark"] .erp-empty-state-icon {
+  background-color: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
 }
 
 /* Sidebar links */
@@ -72,6 +144,11 @@
 :root[data-bs-theme="dark"] .table-light {
   --bs-table-bg: var(--bs-tertiary-bg);
   --bs-table-color: var(--bs-body-color);
+}
+
+:root[data-bs-theme="dark"] .erp-table-card thead th {
+  background-color: rgba(30, 41, 59, 0.78) !important;
+  color: var(--erp-text-muted) !important;
 }
 
 /* Badge "light" becomes unreadable in dark mode */

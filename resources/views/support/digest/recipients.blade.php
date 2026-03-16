@@ -15,6 +15,12 @@
 
 @include('partials.alerts')
 
+@if(!empty($configMissing))
+    <div class="alert alert-warning">
+        Recipient management is unavailable until the support digest tables are installed.
+    </div>
+@endif
+
 <div class="card">
     <div class="card-body">
         <form method="POST" action="{{ route('support.digest.recipients.update') }}">
@@ -38,18 +44,34 @@
                             </thead>
                             <tbody>
                                 @foreach($users as $u)
+                                    @php
+                                        $hasValidEmail = !empty($u->email) && filter_var($u->email, FILTER_VALIDATE_EMAIL);
+                                        $isSelectable = $u->is_active && $hasValidEmail;
+                                    @endphp
                                     <tr>
                                         <td>
                                             <input class="form-check-input" type="checkbox" name="user_ids[]" value="{{ $u->id }}"
-                                                   @checked(in_array($u->id, $activeUserIds, true))>
+                                                   @checked(in_array($u->id, $activeUserIds, true))
+                                                   @disabled(!$isSelectable)>
                                         </td>
-                                        <td class="fw-semibold">{{ $u->name }}</td>
-                                        <td class="text-muted">{{ $u->email ?? '-' }}</td>
+                                        <td class="fw-semibold">
+                                            {{ $u->name }}
+                                            @unless($u->is_active)
+                                                <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1">Inactive</span>
+                                            @endunless
+                                        </td>
+                                        <td class="text-muted">
+                                            {{ $u->email ?? '-' }}
+                                            @unless($hasValidEmail)
+                                                <span class="badge bg-warning-subtle text-warning-emphasis ms-1">No valid email</span>
+                                            @endunless
+                                        </td>
                                     </tr>
                                 @endforeach
                             </tbody>
                         </table>
                     </div>
+                    <div class="form-text mt-2">Only active users with a valid email address can be selected.</div>
                 </div>
 
                 <div class="col-lg-4">

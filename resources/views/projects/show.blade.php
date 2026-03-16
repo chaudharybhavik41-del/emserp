@@ -14,18 +14,8 @@
         return null;
     };
 
-    // BOM route name can differ across builds
-    $bomIndexRoute = $pickRoute([
-        'projects.boms.index', // project-scoped
-        'boms.index',          // global (fallback)
-    ]);
-
-    // Production routes (project-scoped preferred)
-    $prodDashRoute = $pickRoute(['projects.production-dashboard.index', 'production-dashboard.index']);
-    $prodPlansRoute = $pickRoute(['projects.production-plans.index', 'production.production-plans.index', 'production-plans.index']);
-    $prodDprRoute = $pickRoute(['projects.production-dprs.index', 'production.production-dprs.index', 'production-dprs.index']);
-    $prodQcRoute = $pickRoute(['projects.production-qc.index', 'production.production-qc.index', 'production-qc.index']);
-    $prodBillingRoute = $pickRoute(['projects.production-billing.index', 'production.production-billing.index', 'production-billing.index']);
+    $designV2Route = $pickRoute(['production-v2.project.design']);
+    $productionV2Route = $pickRoute(['production-v2.project']);
     $taskIndexRoute = $pickRoute(['tasks.index']);
     $taskBoardRoute = $pickRoute(['task-board.index']);
     $taskCreateRoute = $pickRoute(['tasks.create']);
@@ -57,49 +47,17 @@
             @endif
         @endcan
 
-        {{-- Project BOMs button (route-safe, supports different route names) --}}
-        @if($bomIndexRoute)
-            @php
-                // If route is global boms.index, it likely doesn't accept $project param.
-                $bomParams = ($bomIndexRoute === 'boms.index') ? [] : $project;
-            @endphp
-            <a href="{{ route($bomIndexRoute, $bomParams) }}" class="btn btn-outline-primary btn-sm">
-                <i class="bi bi-diagram-3 me-1"></i> Project BOMs
+        @if($designV2Route && auth()->user()?->canAny(['production.plan.view','production.plan.create','production.plan.update']))
+            <a href="{{ route($designV2Route, $project) }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-diagram-3 me-1"></i> Design V2 Module
             </a>
         @endif
 
-        {{-- Production shortcuts (Phase B–G) --}}
-        @canany(['production.report.view','production.plan.view','production.dpr.view','production.qc.perform','production.billing.view'])
-            @if($prodDashRoute && auth()->user()->can('production.report.view'))
-                <a href="{{ route($prodDashRoute, $project) }}" class="btn btn-outline-dark btn-sm">
-                    <i class="bi bi-speedometer2 me-1"></i> Prod Dashboard
-                </a>
-            @endif
-
-            @if($prodPlansRoute && auth()->user()->can('production.plan.view'))
-                <a href="{{ route($prodPlansRoute, $project) }}" class="btn btn-outline-dark btn-sm">
-                    <i class="bi bi-clipboard2-check me-1"></i> Prod Plans
-                </a>
-            @endif
-
-            @if($prodDprRoute && auth()->user()->can('production.dpr.view'))
-                <a href="{{ route($prodDprRoute, $project) }}" class="btn btn-outline-dark btn-sm">
-                    <i class="bi bi-journal-check me-1"></i> DPR
-                </a>
-            @endif
-
-            @if($prodQcRoute && auth()->user()->can('production.qc.perform'))
-                <a href="{{ route($prodQcRoute, $project) }}" class="btn btn-outline-warning btn-sm">
-                    <i class="bi bi-shield-check me-1"></i> QC Pending
-                </a>
-            @endif
-
-            @if($prodBillingRoute && auth()->user()->can('production.billing.view'))
-                <a href="{{ route($prodBillingRoute, $project) }}" class="btn btn-outline-success btn-sm">
-                    <i class="bi bi-receipt me-1"></i> Billing
-                </a>
-            @endif
-        @endcanany
+        @if($productionV2Route && auth()->user()?->canAny(['production.plan.update','production.dpr.view','production.dpr.create','production.qc.perform']))
+            <a href="{{ route($productionV2Route, $project) }}" class="btn btn-outline-dark btn-sm">
+                <i class="bi bi-hammer me-1"></i> Production V2 Module
+            </a>
+        @endif
 
         @can('tasks.view')
             @if($taskIndexRoute)

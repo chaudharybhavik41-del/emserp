@@ -4,11 +4,19 @@ namespace App\Listeners;
 
 use App\Jobs\DispatchWebPushNotification;
 use App\Models\User;
+use App\Services\NotificationPayloadService;
+use App\Services\NotificationPreferenceService;
 use App\Services\WebPushService;
 use Illuminate\Notifications\Events\NotificationSent;
 
 class QueueWebPushForDatabaseNotification
 {
+    public function __construct(
+        protected NotificationPayloadService $payloads,
+        protected NotificationPreferenceService $preferences
+    ) {
+    }
+
     public function handle(NotificationSent $event): void
     {
         if ($event->channel !== 'database') {
@@ -24,13 +32,11 @@ class QueueWebPushForDatabaseNotification
             return;
         }
 
-        $data = [];
-        if (method_exists($event->notification, 'toArray')) {
-            try {
-                $data = (array) $event->notification->toArray($notifiable);
-            } catch (\Throwable $e) {
-                $data = [];
-            }
+        $data = $this->payloads->extract($event->notification, $notifiable);
+        $type = (string) ($data['type'] ?? 'system_alert');
+
+        if (! $this->preferences->channelEnabled($notifiable, $type, 'push')) {
+            return;
         }
 
         $title = trim((string) ($data['title'] ?? 'ERP Alert'));

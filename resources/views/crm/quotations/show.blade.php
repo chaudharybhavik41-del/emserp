@@ -59,14 +59,16 @@
         @endcan
 
         @can('crm.quotation.update')
-            <a href="{{ route('crm.quotations.edit', $quotation) }}"
-               class="btn btn-sm btn-outline-primary ms-1">
-                Edit
-            </a>
+            @if(in_array($quotation->status, ['draft', 'sent'], true))
+                <a href="{{ route('crm.quotations.edit', $quotation) }}"
+                   class="btn btn-sm btn-outline-primary ms-1">
+                    Edit
+                </a>
+            @endif
         @endcan
 
         @can('crm.quotation.update')
-            @if(!in_array($quotation->status, ['accepted']))
+            @if(in_array($quotation->status, ['draft', 'sent'], true))
                 <form action="{{ route('crm.quotations.revise', $quotation) }}"
                       method="POST"
                       class="d-inline"
@@ -200,6 +202,122 @@
                         {!! nl2br(e($quotation->project_special_notes ?? '—')) !!}
                     </dd>
                 </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">
+                Revision History
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                        <tr>
+                            <th>Revision</th>
+                            <th>Status</th>
+                            <th class="text-end">Value</th>
+                            <th>Created</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach($revisionHistory as $revision)
+                            <tr>
+                                <td>
+                                    @if((int) $revision->id === (int) $quotation->id)
+                                        <span class="fw-semibold">Rev {{ $revision->revision_no }}</span>
+                                        <span class="badge text-bg-dark ms-1">Current</span>
+                                    @else
+                                        <a href="{{ route('crm.quotations.show', $revision) }}">Rev {{ $revision->revision_no }}</a>
+                                    @endif
+                                    @if($revision->revision_reason)
+                                        <div class="small text-muted">{{ $revision->revision_reason }}</div>
+                                    @endif
+                                </td>
+                                <td>{{ ucfirst($revision->status) }}</td>
+                                <td class="text-end">{{ $currencySymbol }} {{ number_format((float) ($revision->grand_total ?? 0), 2) }}</td>
+                                <td>{{ optional($revision->created_at)->format('d-m-Y') }}</td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header">
+                Changes From Previous Revision
+            </div>
+            <div class="card-body">
+                @if(! $previousRevision)
+                    <div class="text-muted small">This is the first revision for this quotation code.</div>
+                @else
+                    <div class="small text-muted mb-3">
+                        Comparing Rev {{ $quotation->revision_no }} against Rev {{ $previousRevision->revision_no }}.
+                    </div>
+
+                    @if(empty($revisionComparison['field_changes']) && empty($revisionComparison['item_changes']))
+                        <div class="text-muted small">No material differences detected in tracked commercial fields or line snapshots.</div>
+                    @endif
+
+                    @if(! empty($revisionComparison['field_changes']))
+                        <h6 class="small text-uppercase text-muted">Commercial Changes</h6>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm align-middle">
+                                <thead class="table-light">
+                                <tr>
+                                    <th>Field</th>
+                                    <th>Previous</th>
+                                    <th>Current</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                @foreach($revisionComparison['field_changes'] as $change)
+                                    <tr>
+                                        <td class="fw-semibold">{{ $change['label'] }}</td>
+                                        <td style="white-space: pre-wrap;">{{ $change['before'] }}</td>
+                                        <td style="white-space: pre-wrap;">{{ $change['after'] }}</td>
+                                    </tr>
+                                @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
+
+                    @if(! empty($revisionComparison['item_changes']))
+                        <h6 class="small text-uppercase text-muted">Line Snapshot Changes</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                <tr>
+                                    <th>Line</th>
+                                    <th>Previous</th>
+                                    <th>Current</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                @foreach($revisionComparison['item_changes'] as $change)
+                                    <tr>
+                                        <td>
+                                            <span class="fw-semibold">{{ $change['label'] }}</span>
+                                            <div class="small text-muted text-uppercase">{{ $change['type'] }}</div>
+                                        </td>
+                                        <td style="white-space: pre-wrap;">{{ $change['before'] }}</td>
+                                        <td style="white-space: pre-wrap;">{{ $change['after'] }}</td>
+                                    </tr>
+                                @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
+                @endif
             </div>
         </div>
     </div>

@@ -27,7 +27,8 @@ use RuntimeException;
 class VoucherReversalService
 {
     public function __construct(
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected AccountingDateControlService $accountingDateControlService
     ) {
     }
 
@@ -45,6 +46,7 @@ class VoucherReversalService
             : Carbon::parse($reversalDate);
 
         $userId = $userId ?? auth()->id();
+        $companyId = (int) $original->company_id;
 
         if (! $original->isPosted()) {
             throw new RuntimeException('Only posted vouchers can be reversed.');
@@ -75,9 +77,21 @@ class VoucherReversalService
             throw new RuntimeException('Cannot reverse a voucher without lines.');
         }
 
-        return DB::transaction(function () use ($original, $reversalDate, $reason, $userId) {
-            $companyId = (int) $original->company_id;
+        $originalVoucherDate = $original->voucher_date
+            ? Carbon::parse((string) $original->voucher_date)->startOfDay()
+            : null;
 
+        if ($originalVoucherDate && $reversalDate->copy()->startOfDay()->lt($originalVoucherDate)) {
+            throw new RuntimeException('Reversal date cannot be earlier than the original voucher date.');
+        }
+
+        $this->accountingDateControlService->assertDateOpenForRuntime(
+            $reversalDate,
+            $companyId,
+            'Reversal date'
+        );
+
+        return DB::transaction(function () use ($original, $reversalDate, $reason, $userId) {
             // Create reversal voucher as DRAFT first, insert lines, then POST.
             $reversal = new Voucher();
             $reversal->company_id   = $companyId;

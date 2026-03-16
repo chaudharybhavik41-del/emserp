@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Tasks;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Tasks\Concerns\InteractsWithTaskModule;
 use App\Models\Project;
 use App\Models\Tasks\Task;
 use App\Models\Tasks\TaskList;
@@ -17,6 +18,8 @@ use Illuminate\View\View;
 
 class TaskListController extends Controller
 {
+    use InteractsWithTaskModule;
+
     public function __construct()
     {
         $this->middleware('auth');
@@ -24,11 +27,6 @@ class TaskListController extends Controller
         $this->middleware('permission:tasks.list.create')->only(['create', 'store']);
         $this->middleware('permission:tasks.list.update')->only(['edit', 'update']);
         $this->middleware('permission:tasks.list.delete')->only(['destroy']);
-    }
-
-    protected function getCompanyId(): int
-    {
-        return auth()->user()->company_id ?? 1;
     }
 
     public function index(Request $request): View
@@ -43,7 +41,8 @@ class TaskListController extends Controller
                     $q->whereHas('status', fn($s) => $s->where('is_closed', true));
                 },
             ])
-            ->forCompany($this->getCompanyId());
+            ->forCompany($this->getCompanyId())
+            ->visibleTo($this->taskUser());
 
         if ($projectId = $request->get('project')) {
             $query->forProject($projectId);
@@ -87,10 +86,10 @@ class TaskListController extends Controller
         }
 
         $projects = Project::where('status', 'active')->orderBy('name')->get();
-        $statuses = TaskStatus::active()->ordered()->get();
-        $priorities = TaskPriority::active()->ordered()->get();
+        $statuses = TaskStatus::forCompany($this->getCompanyId())->active()->ordered()->get();
+        $priorities = TaskPriority::forCompany($this->getCompanyId())->active()->ordered()->get();
         $users = User::where('is_active', true)->orderBy('name')->get();
-        $parentLists = TaskList::active()->rootLists()->orderBy('name')->get();
+        $parentLists = $this->visibleTaskListsQuery()->rootLists()->orderBy('name')->get();
 
         return view('tasks.lists.create', compact(
             'taskList', 'projects', 'statuses', 'priorities', 'users', 'parentLists'
@@ -129,6 +128,8 @@ class TaskListController extends Controller
 
     public function show(TaskList $taskList, Request $request): View
     {
+        $this->authorizeTaskListView($taskList);
+
         $taskList->load([
             'project',
             'owner',
@@ -143,6 +144,7 @@ class TaskListController extends Controller
         // Get tasks for this list
         $query = Task::with(['status', 'priority', 'assignee', 'labels'])
             ->forList($taskList->id)
+            ->visibleToUser($this->taskUser())
             ->notArchived()
             ->rootTasks();
 
@@ -182,13 +184,14 @@ class TaskListController extends Controller
         // Group by status for board view (get all for grouping)
         $allTasks = Task::with(['status'])
             ->forList($taskList->id)
+            ->visibleToUser($this->taskUser())
             ->notArchived()
             ->rootTasks()
             ->get();
         $tasksByStatus = $allTasks->groupBy('status_id');
 
-        $statuses = TaskStatus::active()->ordered()->get();
-        $priorities = TaskPriority::active()->ordered()->get();
+        $statuses = TaskStatus::forCompany($this->getCompanyId())->active()->ordered()->get();
+        $priorities = TaskPriority::forCompany($this->getCompanyId())->active()->ordered()->get();
         $users = User::where('is_active', true)->orderBy('name')->get();
 
         $viewType = $request->get('view', 'list'); // list, board, table
@@ -200,11 +203,13 @@ class TaskListController extends Controller
 
     public function edit(TaskList $taskList): View
     {
+        $this->authorizeTaskListEdit($taskList);
+
         $projects = Project::where('status', 'active')->orderBy('name')->get();
-        $statuses = TaskStatus::active()->ordered()->get();
-        $priorities = TaskPriority::active()->ordered()->get();
+        $statuses = TaskStatus::forCompany($this->getCompanyId())->active()->ordered()->get();
+        $priorities = TaskPriority::forCompany($this->getCompanyId())->active()->ordered()->get();
         $users = User::where('is_active', true)->orderBy('name')->get();
-        $parentLists = TaskList::active()
+        $parentLists = $this->visibleTaskListsQuery()
             ->rootLists()
             ->where('id', '!=', $taskList->id)
             ->orderBy('name')
@@ -217,6 +222,8 @@ class TaskListController extends Controller
 
     public function update(Request $request, TaskList $taskList): RedirectResponse
     {
+        $this->authorizeTaskListEdit($taskList);
+
         $data = $request->validate([
             'name' => 'required|string|max:150',
             'description' => 'nullable|string|max:1000',
@@ -244,6 +251,7 @@ class TaskListController extends Controller
 
     public function archive(TaskList $taskList): RedirectResponse
     {
+        $this->authorizeTaskListEdit($taskList);
         $taskList->update(['is_archived' => true]);
 
         return redirect()
@@ -253,6 +261,7 @@ class TaskListController extends Controller
 
     public function unarchive(TaskList $taskList): RedirectResponse
     {
+        $this->authorizeTaskListEdit($taskList);
         $taskList->update(['is_archived' => false]);
 
         return back()->with('success', "List '{$taskList->name}' restored.");
@@ -260,6 +269,8 @@ class TaskListController extends Controller
 
     public function destroy(TaskList $taskList): RedirectResponse
     {
+        $this->authorizeTaskListEdit($taskList);
+
         if ($taskList->tasks()->count() > 0) {
             return back()->with('error', 'Cannot delete list with tasks. Archive it instead or move tasks first.');
         }
@@ -277,6 +288,7 @@ class TaskListController extends Controller
      */
     public function board(TaskList $taskList): View
     {
+        $this->authorizeTaskListView($taskList);
         $taskList->load(['project', 'owner']);
 
         $tasks = Task::with(['status', 'priority', 'assignee', 'labels', 'children'])
@@ -286,6 +298,7 @@ class TaskListController extends Controller
                 'children as completed_subtask_count' => fn($q) => $q->whereHas('status', fn($s) => $s->where('is_closed', true)),
             ])
             ->forList($taskList->id)
+            ->visibleToUser($this->taskUser())
             ->notArchived()
             ->rootTasks()
             ->orderBy('position')
@@ -293,8 +306,8 @@ class TaskListController extends Controller
 
         $tasksByStatus = $tasks->groupBy('status_id');
 
-        $statuses = TaskStatus::active()->ordered()->get();
-        $priorities = TaskPriority::active()->ordered()->get();
+        $statuses = TaskStatus::forCompany($this->getCompanyId())->active()->ordered()->get();
+        $priorities = TaskPriority::forCompany($this->getCompanyId())->active()->ordered()->get();
         $users = User::where('is_active', true)->orderBy('name')->get();
 
         return view('tasks.lists.board', compact(
@@ -307,6 +320,8 @@ class TaskListController extends Controller
      */
     public function updatePositions(Request $request, TaskList $taskList): JsonResponse
     {
+        $this->authorizeTaskListEdit($taskList);
+
         $request->validate([
             'tasks' => 'required|array',
             'tasks.*.id' => 'required|exists:tasks,id',
@@ -317,9 +332,12 @@ class TaskListController extends Controller
         DB::beginTransaction();
         try {
             foreach ($request->tasks as $taskData) {
-                $task = Task::find($taskData['id']);
-                
-                if ($task->task_list_id !== $taskList->id) {
+                $task = Task::query()
+                    ->forCompany($this->getCompanyId())
+                    ->visibleToUser($this->taskUser())
+                    ->find($taskData['id']);
+
+                if (!$task || $task->task_list_id !== $taskList->id) {
                     continue;
                 }
 
@@ -346,6 +364,8 @@ class TaskListController extends Controller
      */
     public function addMember(Request $request, TaskList $taskList): JsonResponse
     {
+        $this->authorizeTaskListEdit($taskList);
+
         $request->validate([
             'user_id' => 'required|exists:users,id',
             'role' => 'required|in:admin,member,viewer',
@@ -363,6 +383,8 @@ class TaskListController extends Controller
      */
     public function removeMember(TaskList $taskList, User $user): JsonResponse
     {
+        $this->authorizeTaskListEdit($taskList);
+
         if ($taskList->owner_id === $user->id) {
             return response()->json(['success' => false, 'message' => 'Cannot remove owner'], 422);
         }

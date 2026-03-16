@@ -4,9 +4,16 @@ use App\Http\Controllers\Tasks\TaskBoardController;
 use App\Http\Controllers\Tasks\TaskChecklistController;
 use App\Http\Controllers\Tasks\TaskCommentController;
 use App\Http\Controllers\Tasks\TaskController;
+use App\Http\Controllers\Tasks\TaskDependencyController;
+use App\Http\Controllers\Tasks\TaskInsightsController;
+use App\Http\Controllers\Tasks\TaskIntakeFormController;
 use App\Http\Controllers\Tasks\TaskLabelController;
 use App\Http\Controllers\Tasks\TaskListController;
+use App\Http\Controllers\Tasks\TaskAutomationRuleController;
+use App\Http\Controllers\Tasks\TaskPlanningController;
 use App\Http\Controllers\Tasks\TaskPriorityController;
+use App\Http\Controllers\Tasks\TaskRecurringScheduleController;
+use App\Http\Controllers\Tasks\TaskSavedFilterController;
 use App\Http\Controllers\Tasks\TaskStatusController;
 use App\Http\Controllers\Tasks\TaskTemplateController;
 use App\Http\Controllers\Tasks\TaskTimeEntryController;
@@ -21,6 +28,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth'])->prefix('tasks')->name('tasks.')->group(function () {
     Route::get('my-tasks', [TaskController::class, 'myTasks'])->name('my-tasks');
+    Route::get('calendar', [TaskPlanningController::class, 'calendar'])->name('calendar');
+    Route::get('timeline', [TaskPlanningController::class, 'timeline'])->name('timeline');
+    Route::get('workload', [TaskPlanningController::class, 'workload'])->name('workload');
+    Route::get('insights', [TaskInsightsController::class, 'dashboard'])->name('insights');
     
     Route::get('/', [TaskController::class, 'index'])->name('index');
     Route::get('/create', [TaskController::class, 'create'])->name('create');
@@ -32,6 +43,7 @@ Route::middleware(['auth'])->prefix('tasks')->name('tasks.')->group(function () 
 
     Route::patch('/{task}/status', [TaskController::class, 'updateStatus'])->name('update-status');
     Route::patch('/{task}/assignee', [TaskController::class, 'updateAssignee'])->name('update-assignee');
+    Route::patch('/{task}/schedule', [TaskController::class, 'updateSchedule'])->name('update-schedule');
     Route::post('/{task}/duplicate', [TaskController::class, 'duplicate'])->name('duplicate');
     Route::post('/{task}/watch', [TaskController::class, 'watch'])->name('watch');
     Route::post('/{task}/unwatch', [TaskController::class, 'unwatch'])->name('unwatch');
@@ -40,17 +52,34 @@ Route::middleware(['auth'])->prefix('tasks')->name('tasks.')->group(function () 
     Route::post('/bulk-update', [TaskController::class, 'bulkUpdate'])->name('bulk-update');
 
     // Comments
+    Route::get('/{task}/comments', [TaskCommentController::class, 'index'])->name('comments.index');
     Route::post('/{task}/comments', [TaskCommentController::class, 'store'])->name('comments.store');
     Route::put('/{task}/comments/{comment}', [TaskCommentController::class, 'update'])->name('comments.update');
+    Route::post('/{task}/comments/{comment}/toggle-pin', [TaskCommentController::class, 'togglePin'])->name('comments.toggle-pin');
     Route::delete('/{task}/comments/{comment}', [TaskCommentController::class, 'destroy'])->name('comments.destroy');
 
     // Time Entries
     Route::post('/{task}/time-entries', [TaskTimeEntryController::class, 'store'])->name('time-entries.store');
+    Route::post('/{task}/time-entries/start', [TaskTimeEntryController::class, 'startTimer'])->name('time-entries.start');
+    Route::post('/{task}/time-entries/{timeEntry}/stop', [TaskTimeEntryController::class, 'stopTimer'])->name('time-entries.stop');
     Route::delete('/{task}/time-entries/{timeEntry}', [TaskTimeEntryController::class, 'destroy'])->name('time-entries.destroy');
 
     // Checklists
     Route::post('/{task}/checklists/{checklist}/items/{item}/toggle', [TaskChecklistController::class, 'toggleItem'])
         ->name('checklists.items.toggle');
+
+    // Dependencies
+    Route::post('/{task}/dependencies', [TaskDependencyController::class, 'store'])->name('dependencies.store');
+    Route::delete('/{task}/dependencies/{dependency}', [TaskDependencyController::class, 'destroy'])->name('dependencies.destroy');
+
+    // Saved views
+    Route::post('/saved-views', [TaskSavedFilterController::class, 'store'])->name('saved-views.store');
+    Route::delete('/saved-views/{savedFilter}', [TaskSavedFilterController::class, 'destroy'])->name('saved-views.destroy');
+});
+
+Route::prefix('task-intake')->name('tasks.intake.')->group(function () {
+    Route::get('/{taskIntakeForm:slug}', [TaskIntakeFormController::class, 'show'])->name('show');
+    Route::post('/{taskIntakeForm:slug}', [TaskIntakeFormController::class, 'submit'])->name('submit');
 });
 
 Route::middleware(['auth'])->prefix('task-lists')->name('task-lists.')->group(function () {
@@ -73,6 +102,8 @@ Route::middleware(['auth'])->prefix('task-board')->name('task-board.')->group(fu
     Route::get('/', [TaskBoardController::class, 'index'])->name('index');
     Route::post('/move', [TaskBoardController::class, 'moveTask'])->name('move');
     Route::post('/quick-create', [TaskBoardController::class, 'quickCreate'])->name('quick-create');
+    Route::patch('/{task}/quick-update', [TaskBoardController::class, 'quickUpdate'])->name('quick-update');
+    Route::get('/columns/{status}', [TaskBoardController::class, 'getColumnTasks'])->name('columns.show');
     Route::get('/stats', [TaskBoardController::class, 'stats'])->name('stats');
 });
 
@@ -117,5 +148,36 @@ Route::middleware(['auth'])->prefix('task-settings')->name('task-settings.')->gr
         Route::get('/{taskTemplate}/edit', [TaskTemplateController::class, 'edit'])->name('edit');
         Route::put('/{taskTemplate}', [TaskTemplateController::class, 'update'])->name('update');
         Route::delete('/{taskTemplate}', [TaskTemplateController::class, 'destroy'])->name('destroy');
+    });
+
+    // Automation rules
+    Route::prefix('automations')->name('automations.')->group(function () {
+        Route::get('/', [TaskAutomationRuleController::class, 'index'])->name('index');
+        Route::get('/create', [TaskAutomationRuleController::class, 'create'])->name('create');
+        Route::post('/', [TaskAutomationRuleController::class, 'store'])->name('store');
+        Route::get('/{taskAutomationRule}/edit', [TaskAutomationRuleController::class, 'edit'])->name('edit');
+        Route::put('/{taskAutomationRule}', [TaskAutomationRuleController::class, 'update'])->name('update');
+        Route::delete('/{taskAutomationRule}', [TaskAutomationRuleController::class, 'destroy'])->name('destroy');
+    });
+
+    // Recurring schedules
+    Route::prefix('recurring')->name('recurring.')->group(function () {
+        Route::get('/', [TaskRecurringScheduleController::class, 'index'])->name('index');
+        Route::get('/create', [TaskRecurringScheduleController::class, 'create'])->name('create');
+        Route::post('/', [TaskRecurringScheduleController::class, 'store'])->name('store');
+        Route::get('/{taskRecurringSchedule}/edit', [TaskRecurringScheduleController::class, 'edit'])->name('edit');
+        Route::put('/{taskRecurringSchedule}', [TaskRecurringScheduleController::class, 'update'])->name('update');
+        Route::delete('/{taskRecurringSchedule}', [TaskRecurringScheduleController::class, 'destroy'])->name('destroy');
+        Route::post('/{taskRecurringSchedule}/run-now', [TaskRecurringScheduleController::class, 'runNow'])->name('run-now');
+    });
+
+    // Intake forms
+    Route::prefix('intake-forms')->name('intake-forms.')->group(function () {
+        Route::get('/', [TaskIntakeFormController::class, 'index'])->name('index');
+        Route::get('/create', [TaskIntakeFormController::class, 'create'])->name('create');
+        Route::post('/', [TaskIntakeFormController::class, 'store'])->name('store');
+        Route::get('/{taskIntakeForm}/edit', [TaskIntakeFormController::class, 'edit'])->name('edit');
+        Route::put('/{taskIntakeForm}', [TaskIntakeFormController::class, 'update'])->name('update');
+        Route::delete('/{taskIntakeForm}', [TaskIntakeFormController::class, 'destroy'])->name('destroy');
     });
 });

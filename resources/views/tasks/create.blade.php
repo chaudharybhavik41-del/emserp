@@ -22,6 +22,16 @@
         @method('PUT')
         @endif
 
+        @if(!isset($task->id) && (filled(request('title')) || filled(request('description'))))
+        <div class="alert alert-info d-flex align-items-start gap-2">
+            <i class="bi bi-phone"></i>
+            <div>
+                <strong>PWA share import</strong><br>
+                Shared content has been prefilled into this task. Review it before saving.
+            </div>
+        </div>
+        @endif
+
         <div class="row">
             <div class="col-lg-8">
                 <div class="card mb-3">

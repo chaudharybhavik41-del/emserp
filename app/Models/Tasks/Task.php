@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -395,6 +396,11 @@ class Task extends Model
         return $query->whereHas('labels', fn($q) => $q->whereIn('task_labels.id', $ids));
     }
 
+    public function scopeVisibleToUser(Builder $query, User $user)
+    {
+        return $query->whereHas('taskList', fn ($taskListQuery) => $taskListQuery->visibleTo($user));
+    }
+
     // Helpers
     public static function generateTaskNumber(): string
     {
@@ -555,6 +561,75 @@ class Task extends Model
         return $this->dependencies()
             ->whereHas('status', fn($q) => $q->where('is_closed', false))
             ->get();
+    }
+
+    public function canView(User $user, ?int $companyId = null): bool
+    {
+        if ($companyId !== null && (int) $this->company_id !== (int) $companyId) {
+            return false;
+        }
+
+        return $this->taskList !== null && $this->taskList->canView($user);
+    }
+
+    public function canEdit(User $user, ?int $companyId = null): bool
+    {
+        if (!$this->canView($user, $companyId)) {
+            return false;
+        }
+
+        if ($this->taskList && $this->taskList->canEdit($user)) {
+            return true;
+        }
+
+        return in_array($user->id, array_filter([
+            $this->assignee_id,
+            $this->reporter_id,
+            $this->created_by,
+        ]), true);
+    }
+
+    public function dependsOnTask(Task $candidate): bool
+    {
+        if ($this->dependencies->contains('id', $candidate->id)) {
+            return true;
+        }
+
+        return $this->dependencies()
+            ->where('depends_on_task_id', $candidate->id)
+            ->exists();
+    }
+
+    public function wouldCreateDependencyCycle(Task $candidate): bool
+    {
+        if ($this->id === $candidate->id) {
+            return true;
+        }
+
+        return $candidate->dependsOn($this);
+    }
+
+    protected function dependsOn(Task $target, array $visited = []): bool
+    {
+        if (in_array($this->id, $visited, true)) {
+            return false;
+        }
+
+        $visited[] = $this->id;
+
+        $dependencyIds = $this->dependencies()->pluck('tasks.id');
+
+        if ($dependencyIds->contains($target->id)) {
+            return true;
+        }
+
+        foreach ($this->dependencies as $dependency) {
+            if ($dependency->dependsOn($target, $visited)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function logActivity(string $action, ?string $field = null, $oldValue = null, $newValue = null, ?array $metadata = null): TaskActivity

@@ -16,8 +16,12 @@ use App\Http\Controllers\SecuritySettingsController;
 use App\Http\Controllers\MailProfileController;
 use App\Http\Controllers\MailTemplateController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\PwaDiagnosticsController;
 use App\Http\Controllers\PwaPushReportController;
 use App\Http\Controllers\PwaPushSubscriptionController;
+use App\Http\Controllers\PwaStatusController;
+use App\Http\Controllers\PwaFileHandlerController;
+use App\Http\Controllers\PwaShareTargetController;
 use App\Http\Controllers\SessionController;
 
 // Audit & Logs
@@ -31,7 +35,11 @@ use App\Http\Controllers\Storage\StorageAccessController;
 
 // CRM Module
 use App\Http\Controllers\CrmLeadController;
+use App\Http\Controllers\CrmLeadActivityController;
 use App\Http\Controllers\CrmLeadAttachmentController;
+use App\Http\Controllers\CrmLeadSourceController;
+use App\Http\Controllers\CrmLeadStageController;
+use App\Http\Controllers\CrmDashboardController;
 use App\Http\Controllers\CrmQuotationController;
 use App\Http\Controllers\CrmQuotationBreakupTemplateController;
 
@@ -192,6 +200,10 @@ Route::middleware('auth')->group(function () {
    	Route::get('charts/gst-summary', [DashboardController::class, 'chartGstSummary'])->name('charts.gst_summary');
 	Route::get('charts/top-expenses', [DashboardController::class, 'chartTopExpenses'])->name('charts.top_expenses');
 	Route::get('charts/store-stock-mix', [DashboardController::class, 'chartStockMixByCategory'])->name('charts.store_stock_mix');
+    Route::get('charts/crm-pipeline', [DashboardController::class, 'chartCrmPipeline'])->name('charts.crm_pipeline');
+    Route::get('charts/task-status', [DashboardController::class, 'chartTaskStatus'])->name('charts.task_status');
+    Route::get('charts/purchase-throughput', [DashboardController::class, 'chartPurchaseThroughput'])->name('charts.purchase_throughput');
+    Route::get('charts/voucher-mix', [DashboardController::class, 'chartVoucherMix'])->name('charts.voucher_mix');
 
     });
 
@@ -264,8 +276,15 @@ Route::middleware('auth')->group(function () {
     Route::post('notifications/push-report/test-user/{user}', [PwaPushReportController::class, 'testUser'])->name('notifications.push-report.test-user');
     Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.read');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.read_all');
+    Route::post('notifications/clear-read', [NotificationController::class, 'clearRead'])->name('notifications.clear_read');
+    Route::post('notifications/preferences', [NotificationController::class, 'updatePreferences'])->name('notifications.preferences.update');
+    Route::delete('notifications/{id}', [NotificationController::class, 'destroy'])->name('notifications.destroy');
     Route::post('notifications/test', [NotificationController::class, 'sendTest'])->name('notifications.test');
     Route::prefix('pwa')->name('pwa.')->group(function () {
+        Route::get('diagnostics', [PwaDiagnosticsController::class, 'show'])->name('diagnostics');
+        Route::get('status', [PwaStatusController::class, 'show'])->name('status');
+        Route::get('file-handler', [PwaFileHandlerController::class, 'show'])->name('file-handler.show');
+        Route::post('file-handler/import', [PwaFileHandlerController::class, 'import'])->name('file-handler.import');
         Route::post('push-subscriptions', [PwaPushSubscriptionController::class, 'store'])->name('push-subscriptions.store');
         Route::delete('push-subscriptions', [PwaPushSubscriptionController::class, 'destroy'])->name('push-subscriptions.destroy');
     });
@@ -281,7 +300,17 @@ Route::middleware('auth')->group(function () {
         Route::get('export/csv', [ActivityLogController::class, 'export'])->name('export');
         Route::post('clear', [ActivityLogController::class, 'clear'])->name('clear');
         Route::get('{activityLog}', [ActivityLogController::class, 'show'])->name('show');
+});
+
+Route::prefix('pwa')->name('pwa.')->group(function () {
+    Route::get('share-target', [PwaShareTargetController::class, 'receive'])->name('share-target.receive');
+
+    Route::middleware('auth')->group(function () {
+        Route::get('share-target/compose', [PwaShareTargetController::class, 'compose'])->name('share-target.compose');
+        Route::get('share-target/to-task', [PwaShareTargetController::class, 'toTask'])->name('share-target.to-task');
+        Route::get('share-target/to-crm-lead', [PwaShareTargetController::class, 'toCrmLead'])->name('share-target.to-crm-lead');
     });
+});
 
     // Login logs
     Route::prefix('login-logs')->name('login-logs.')->group(function () {
@@ -548,6 +577,15 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
     |--------------------------------------------------------------------------
     */
     Route::prefix('crm')->as('crm.')->group(function () {
+        Route::get('dashboard', [CrmDashboardController::class, 'index'])->name('dashboard');
+
+        Route::resource('lead-stages', CrmLeadStageController::class)
+            ->except(['show'])
+            ->parameters(['lead-stages' => 'lead_stage']);
+        Route::resource('lead-sources', CrmLeadSourceController::class)
+            ->except(['show'])
+            ->parameters(['lead-sources' => 'lead_source']);
+
         // Leads
         Route::resource('leads', CrmLeadController::class);
         Route::post('leads/{lead}/mark-won', [CrmLeadController::class, 'markWon'])->name('leads.mark-won');
@@ -557,6 +595,11 @@ Route::get('/get-item-brands/{id}', [StoreStockAdjustmentController::class, 'get
         Route::post('leads/{lead}/attachments', [CrmLeadAttachmentController::class, 'store'])->name('leads.attachments.store');
         Route::get('leads/{lead}/attachments/{attachment}/download', [CrmLeadAttachmentController::class, 'download'])->name('leads.attachments.download');
         Route::delete('leads/{lead}/attachments/{attachment}', [CrmLeadAttachmentController::class, 'destroy'])->name('leads.attachments.destroy');
+
+        // Lead activities / follow-ups
+        Route::post('leads/{lead}/activities', [CrmLeadActivityController::class, 'store'])->name('leads.activities.store');
+        Route::post('leads/{lead}/activities/{activity}/complete', [CrmLeadActivityController::class, 'complete'])->name('leads.activities.complete');
+        Route::delete('leads/{lead}/activities/{activity}', [CrmLeadActivityController::class, 'destroy'])->name('leads.activities.destroy');
 
         
       	// Quotations

@@ -1,15 +1,21 @@
 @extends('layouts.erp')
 
-@section('title', 'Create Voucher')
+@section('title', $pageTitle ?? 'Create Voucher')
 
 @section('content')
-    @php $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? [])); @endphp
+    @php
+        $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? []));
+        $fixedVoucherType = $fixedVoucherType ?? null;
+        $effectiveVoucherType = $fixedVoucherType ?? old('voucher_type', 'journal');
+        $formAction = $formAction ?? route('accounting.vouchers.store');
+        $cancelRoute = $cancelRoute ?? route('accounting.vouchers.index');
+    @endphp
     <div class="container-fluid">
-        <h1 class="h4 mb-3">Create Voucher</h1>
+        <h1 class="h4 mb-3">{{ $pageTitle ?? 'Create Voucher' }}</h1>
 
         <div class="card">
             <div class="card-body">
-                <form method="POST" action="{{ route('accounting.vouchers.store') }}" data-prevent-enter-submit="1">
+                <form method="POST" action="{{ $formAction }}" data-prevent-enter-submit="1">
                     @csrf
 
                     <div class="row g-3 mb-3">
@@ -26,13 +32,18 @@
                         </div>
                         <div class="col-md-3">
                             <label class="form-label form-label-sm">Type</label>
-                            <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
-                                @foreach($voucherTypes as $key => $label)
-                                    <option value="{{ $key }}" @selected(old('voucher_type', 'journal') === $key)>
-                                        {{ $label }}
-                                    </option>
-                                @endforeach
-                            </select>
+                            @if($fixedVoucherType)
+                                <input type="hidden" name="voucher_type" id="voucher_type" value="{{ $effectiveVoucherType }}">
+                                <input type="text" class="form-control form-control-sm" value="{{ $voucherTypes[$effectiveVoucherType] ?? ucfirst($effectiveVoucherType) }}" disabled>
+                            @else
+                                <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
+                                    @foreach($voucherTypes as $key => $label)
+                                        <option value="{{ $key }}" @selected($effectiveVoucherType === $key)>
+                                            {{ $label }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            @endif
                         </div>
                         <div class="col-md-2">
                             <label class="form-label form-label-sm">Date</label>
@@ -521,7 +532,7 @@
 
                     </script>
 
-                    <a href="{{ route('accounting.vouchers.index') }}" class="btn btn-secondary btn-sm mt-3">Cancel</a>
+                    <a href="{{ $cancelRoute }}" class="btn btn-secondary btn-sm mt-3">Cancel</a>
                 </form>
             </div>
         </div>
