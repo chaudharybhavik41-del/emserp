@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateCrmLeadRequest extends FormRequest
 {
@@ -20,9 +21,11 @@ class UpdateCrmLeadRequest extends FormRequest
      */
     public function rules(): array
     {
+        $lead = $this->route('lead');
+
         return [
             // We don't change code in the controller, so it’s optional
-            'code'                => ['sometimes', 'string', 'max:50'],
+            'code'                => ['sometimes', 'string', 'max:50', Rule::unique('crm_leads', 'code')->ignore($lead?->id)],
             'title'               => ['required', 'string', 'max:255'],
             'party_id'            => ['nullable', 'integer', 'exists:parties,id'],
             'contact_name'        => ['nullable', 'string', 'max:255'],
@@ -33,7 +36,7 @@ class UpdateCrmLeadRequest extends FormRequest
             'expected_value'      => ['nullable', 'numeric', 'min:0'],
             'probability'         => ['nullable', 'integer', 'min:0', 'max:100'],
             'lead_date'           => ['nullable', 'date'],
-            'expected_close_date' => ['nullable', 'date'],
+            'expected_close_date' => ['nullable', 'date', 'after_or_equal:lead_date'],
             'owner_id'            => ['nullable', 'integer', 'exists:users,id'],
             'department_id'       => ['nullable', 'integer', 'exists:departments,id'],
             'notes'               => ['nullable', 'string'],

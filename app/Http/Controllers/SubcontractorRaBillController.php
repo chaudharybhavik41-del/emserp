@@ -15,6 +15,7 @@ use App\Models\SubcontractorRaBill;
 use App\Models\SubcontractorRaBillLine;
 use App\Models\SubcontractorWorkOrder;
 use App\Models\Uom;
+use App\Services\Accounting\AccountingDateControlService;
 use App\Services\Accounting\SubcontractorRaPostingService;
 use App\Services\Subcontractor\SubcontractorRaTotalsCalculator;
 use Illuminate\Http\Request;
@@ -622,12 +623,13 @@ class SubcontractorRaBillController extends Controller
      */
     public function reverse(Request $request, SubcontractorRaBill $subcontractorRa, SubcontractorRaPostingService $postingService)
     {
-        $request->validate([
+        $data = $request->validate([
+            'reversal_date' => 'required|date',
             'reason' => 'required|string|max:500',
         ]);
 
         try {
-            $reversalVoucher = $postingService->reverse($subcontractorRa, $request->reason);
+            $reversalVoucher = $postingService->reverse($subcontractorRa, $data['reversal_date'], $data['reason']);
 
             return redirect()
                 ->route('accounting.subcontractor-ra.show', $subcontractorRa)
@@ -651,8 +653,13 @@ class SubcontractorRaBillController extends Controller
                 ->with('error', 'Cannot change posting date because linked accounting voucher is missing.');
         }
 
+        $postingDateRules = ['required', 'date', 'before_or_equal:today'];
+        if ($subcontractorRa->bill_date) {
+            $postingDateRules[] = 'after_or_equal:' . $subcontractorRa->bill_date->toDateString();
+        }
+
         $data = $request->validate([
-            'posting_date' => ['required', 'date'],
+            'posting_date' => $postingDateRules,
             'reason' => ['required', 'string', 'max:500'],
         ]);
 
@@ -665,6 +672,13 @@ class SubcontractorRaBillController extends Controller
                 ->route('accounting.subcontractor-ra.show', ['subcontractorRa' => $subcontractorRa])
                 ->with('info', 'Posting date is already set to the selected date.');
         }
+
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $newPostingDate,
+            (int) ($subcontractorRa->company_id ?: config('accounting.default_company_id', 1)),
+            'posting_date',
+            'Posting date'
+        );
 
         try {
             DB::transaction(function () use ($subcontractorRa, $newPostingDate, $reason) {

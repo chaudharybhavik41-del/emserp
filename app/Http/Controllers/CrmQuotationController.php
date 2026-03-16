@@ -12,6 +12,7 @@ use App\Models\CrmQuotationBreakupTemplate;
 use App\Models\Item;
 use App\Models\MailTemplate;
 use App\Models\Party;
+use App\Models\Project;
 use App\Models\Uom;
 use App\Models\StandardTerm;
 use App\Services\CrmQuotationPricingService;
@@ -201,7 +202,20 @@ class CrmQuotationController extends Controller
     /**
      * Core store logic for a lead's quotation.
      */
-    public function store(StoreCrmQuotationRequest $request, CrmLead $lead)
+    public function store(StoreCrmQuotationRequest $request)
+    {
+        $lead = $request->route('lead');
+
+        if (! $lead instanceof CrmLead) {
+            return redirect()
+                ->route('crm.leads.index')
+                ->with('error', 'Please open a Lead to create a quotation.');
+        }
+
+        return $this->storeForLeadValidated($request, $lead);
+    }
+
+    protected function storeForLeadValidated(StoreCrmQuotationRequest $request, CrmLead $lead)
     {
         $data = $request->validated();
 
@@ -354,7 +368,7 @@ class CrmQuotationController extends Controller
      */
     public function storeForLead(StoreCrmQuotationRequest $request, CrmLead $lead)
     {
-        return $this->store($request, $lead);
+        return $this->storeForLeadValidated($request, $lead);
     }
 
     public function show(CrmQuotation $quotation)
@@ -385,7 +399,167 @@ class CrmQuotationController extends Controller
             );
         }
 
-        return view('crm.quotations.show', compact('quotation', 'itemCalcs'));
+        $revisionHistory = CrmQuotation::query()
+            ->where('code', $quotation->code)
+            ->orderByDesc('revision_no')
+            ->orderByDesc('id')
+            ->get([
+                'id',
+                'code',
+                'revision_no',
+                'status',
+                'grand_total',
+                'valid_till',
+                'revision_reason',
+                'created_at',
+            ]);
+
+        $previousRevision = CrmQuotation::query()
+            ->where('code', $quotation->code)
+            ->where('revision_no', '<', $quotation->revision_no)
+            ->with(['items.item', 'items.uom'])
+            ->orderByDesc('revision_no')
+            ->orderByDesc('id')
+            ->first();
+
+        $revisionComparison = $this->buildRevisionComparison($quotation, $previousRevision);
+
+        return view('crm.quotations.show', compact(
+            'quotation',
+            'itemCalcs',
+            'revisionHistory',
+            'previousRevision',
+            'revisionComparison'
+        ));
+    }
+
+    protected function buildRevisionComparison(CrmQuotation $quotation, ?CrmQuotation $previousRevision): array
+    {
+        if (! $previousRevision) {
+            return [
+                'field_changes' => [],
+                'item_changes' => [],
+            ];
+        }
+
+        $fieldLabels = [
+            'project_name' => 'Project Name',
+            'client_po_number' => 'Client PO',
+            'quote_mode' => 'Quote Mode',
+            'is_rate_only' => 'Rate Only',
+            'profit_percent' => 'Profit %',
+            'valid_till' => 'Valid Till',
+            'grand_total' => 'Grand Total',
+            'scope_of_work' => 'Scope Of Work',
+            'exclusions' => 'Exclusions',
+            'payment_terms' => 'Payment Terms',
+            'delivery_terms' => 'Delivery Terms',
+            'freight_terms' => 'Freight Terms',
+            'other_terms' => 'Other Terms',
+            'project_special_notes' => 'Special Notes',
+            'revision_reason' => 'Revision Reason',
+        ];
+
+        $fieldChanges = [];
+        foreach ($fieldLabels as $field => $label) {
+            $before = $this->formatRevisionValue($field, $previousRevision->{$field} ?? null);
+            $after = $this->formatRevisionValue($field, $quotation->{$field} ?? null);
+
+            if ($before !== $after) {
+                $fieldChanges[] = [
+                    'label' => $label,
+                    'before' => $before,
+                    'after' => $after,
+                ];
+            }
+        }
+
+        $itemChanges = [];
+        $currentItems = $quotation->items->values();
+        $previousItems = $previousRevision->items->values();
+        $itemRowCount = max($currentItems->count(), $previousItems->count());
+
+        for ($index = 0; $index < $itemRowCount; $index++) {
+            $current = $currentItems->get($index);
+            $previous = $previousItems->get($index);
+
+            if (! $previous && $current) {
+                $itemChanges[] = [
+                    'type' => 'added',
+                    'label' => $this->quotationItemLabel($current, $index),
+                    'before' => '—',
+                    'after' => $this->formatQuotationItemSnapshot($current),
+                ];
+
+                continue;
+            }
+
+            if ($previous && ! $current) {
+                $itemChanges[] = [
+                    'type' => 'removed',
+                    'label' => $this->quotationItemLabel($previous, $index),
+                    'before' => $this->formatQuotationItemSnapshot($previous),
+                    'after' => '—',
+                ];
+
+                continue;
+            }
+
+            if (! $previous || ! $current) {
+                continue;
+            }
+
+            $before = $this->formatQuotationItemSnapshot($previous);
+            $after = $this->formatQuotationItemSnapshot($current);
+
+            if ($before !== $after) {
+                $itemChanges[] = [
+                    'type' => 'changed',
+                    'label' => $this->quotationItemLabel($current, $index),
+                    'before' => $before,
+                    'after' => $after,
+                ];
+            }
+        }
+
+        return [
+            'field_changes' => $fieldChanges,
+            'item_changes' => $itemChanges,
+        ];
+    }
+
+    protected function formatRevisionValue(string $field, mixed $value): string
+    {
+        return match ($field) {
+            'quote_mode' => ($value ?? 'item') === 'rate_per_kg' ? 'Rate per KG' : 'Item-wise',
+            'is_rate_only' => $value ? 'Yes' : 'No',
+            'profit_percent', 'grand_total' => number_format((float) ($value ?? 0), 2),
+            'valid_till' => $value ? $value->format('d-m-Y') : '—',
+            default => filled($value) ? trim((string) $value) : '—',
+        };
+    }
+
+    protected function quotationItemLabel($item, int $index): string
+    {
+        $itemCode = $item->item?->code;
+
+        if ($itemCode) {
+            return $itemCode . ' (Line ' . ($index + 1) . ')';
+        }
+
+        return 'Line ' . ($index + 1);
+    }
+
+    protected function formatQuotationItemSnapshot($item): string
+    {
+        $parts = [
+            trim((string) ($item->description ?? '')),
+            'Qty ' . number_format((float) ($item->quantity ?? 0), 3),
+            'Price ' . number_format((float) ($item->unit_price ?? 0), 2),
+            'Total ' . number_format((float) ($item->line_total ?? 0), 2),
+        ];
+
+        return implode(' | ', array_filter($parts));
     }
 
     public function edit(CrmQuotation $quotation)
@@ -690,6 +864,12 @@ class CrmQuotationController extends Controller
 
     public function destroy(CrmQuotation $quotation)
     {
+        if ((string) $quotation->status === 'accepted' || Project::query()->where('quotation_id', $quotation->id)->exists()) {
+            return redirect()
+                ->route('crm.quotations.show', $quotation)
+                ->with('error', 'Accepted or project-linked quotations cannot be deleted.');
+        }
+
         $quotation->delete();
 
         return redirect()

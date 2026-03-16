@@ -6,11 +6,37 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0">CRM Leads</h1>
 
-    @can('crm.lead.create')
-        <a href="{{ route('crm.leads.create') }}" class="btn btn-primary btn-sm">
-            + Add Lead
-        </a>
-    @endcan
+    <div class="d-flex gap-2">
+        @canany(['crm.lead.view', 'crm.quotation.view'])
+            @if(\Illuminate\Support\Facades\Route::has('crm.dashboard'))
+                <a href="{{ route('crm.dashboard') }}" class="btn btn-outline-dark btn-sm">
+                    CRM Dashboard
+                </a>
+            @endif
+        @endcanany
+
+        @can('crm.lead_source.view')
+            @if(\Illuminate\Support\Facades\Route::has('crm.lead-sources.index'))
+                <a href="{{ route('crm.lead-sources.index') }}" class="btn btn-outline-secondary btn-sm">
+                    Lead Sources
+                </a>
+            @endif
+        @endcan
+
+        @can('crm.lead_stage.view')
+            @if(\Illuminate\Support\Facades\Route::has('crm.lead-stages.index'))
+                <a href="{{ route('crm.lead-stages.index') }}" class="btn btn-outline-secondary btn-sm">
+                    Lead Stages
+                </a>
+            @endif
+        @endcan
+
+        @can('crm.lead.create')
+            <a href="{{ route('crm.leads.create') }}" class="btn btn-primary btn-sm">
+                + Add Lead
+            </a>
+        @endcan
+    </div>
 </div>
 
 <div class="card mb-3">
@@ -26,10 +52,88 @@
                        placeholder="Code / title / contact name">
             </div>
 
+            <div class="col-md-2">
+                <label for="status" class="form-label">Status</label>
+                <select id="status" name="status" class="form-select">
+                    <option value="">All</option>
+                    @foreach(['open', 'won', 'lost'] as $status)
+                        <option value="{{ $status }}" {{ request('status') === $status ? 'selected' : '' }}>
+                            {{ ucfirst($status) }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label for="lead_stage_id" class="form-label">Stage</label>
+                <select id="lead_stage_id" name="lead_stage_id" class="form-select">
+                    <option value="">All</option>
+                    @foreach($stages as $stage)
+                        <option value="{{ $stage->id }}" {{ (string) $stage->id === request('lead_stage_id') ? 'selected' : '' }}>
+                            {{ $stage->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label for="owner_id" class="form-label">Owner</label>
+                <select id="owner_id" name="owner_id" class="form-select">
+                    <option value="">All</option>
+                    @foreach($owners as $owner)
+                        <option value="{{ $owner->id }}" {{ (string) $owner->id === request('owner_id') ? 'selected' : '' }}>
+                            {{ $owner->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label for="priority" class="form-label">Priority</label>
+                <select id="priority" name="priority" class="form-select">
+                    <option value="">All</option>
+                    @foreach(['hot' => 'Hot', 'warm' => 'Warm', 'cold' => 'Cold'] as $value => $label)
+                        <option value="{{ $value }}" {{ request('priority') === $value ? 'selected' : '' }}>
+                            {{ $label }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label for="follow_up_status" class="form-label">Follow-up</label>
+                <select id="follow_up_status" name="follow_up_status" class="form-select">
+                    <option value="">All</option>
+                    @foreach(['overdue' => 'Overdue', 'due_soon' => 'Due Soon', 'scheduled' => 'Scheduled', 'none' => 'None'] as $value => $label)
+                        <option value="{{ $value }}" {{ request('follow_up_status') === $value ? 'selected' : '' }}>
+                            {{ $label }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <label for="sort_by" class="form-label">Sort By</label>
+                <select id="sort_by" name="sort_by" class="form-select">
+                    <option value="">Newest</option>
+                    <option value="score_desc" {{ request('sort_by') === 'score_desc' ? 'selected' : '' }}>Highest Score</option>
+                    <option value="weighted_value_desc" {{ request('sort_by') === 'weighted_value_desc' ? 'selected' : '' }}>Weighted Value</option>
+                    <option value="next_follow_up_asc" {{ request('sort_by') === 'next_follow_up_asc' ? 'selected' : '' }}>Next Follow-up</option>
+                </select>
+            </div>
+
             <div class="col-md-2 d-grid">
                 <button type="submit" class="btn btn-outline-primary">
                     Filter
                 </button>
+            </div>
+
+            <div class="col-md-12">
+                @if(request('q') || request('status') || request('lead_stage_id') || request('owner_id') || request('priority') || request('follow_up_status') || request('sort_by'))
+                    <a href="{{ route('crm.leads.index') }}" class="btn btn-link px-0 text-decoration-none">
+                        Clear Filters
+                    </a>
+                @endif
             </div>
         </form>
     </div>
@@ -70,6 +174,7 @@
                 <th style="width: 18%">Client</th>
                 <th style="width: 15%">Owner</th>
                 <th style="width: 12%">Stage</th>
+                <th style="width: 10%">Score</th>
                 <th style="width: 10%">Status</th>
                 <th style="width: 15%" class="text-end">Actions</th>
             </tr>
@@ -99,10 +204,46 @@
                                 @endif
                             </div>
                         @endif
+                        @if($lead->expected_value)
+                            <div class="text-muted small">
+                                Pipeline ₹ {{ number_format((float) $lead->expected_value, 2) }}
+                                @if($lead->weighted_value > 0)
+                                    · Weighted ₹ {{ number_format($lead->weighted_value, 2) }}
+                                @endif
+                            </div>
+                        @endif
+                        <div class="text-muted small">
+                            @if($lead->next_follow_up_at)
+                                Next follow-up {{ $lead->next_follow_up_at->format('d-m-Y H:i') }}
+                            @else
+                                No open follow-up
+                            @endif
+                        </div>
                     </td>
                     <td>{{ $lead->party?->name }}</td>
                     <td>{{ $lead->owner?->name }}</td>
                     <td>{{ $lead->stage?->name }}</td>
+                    <td>
+                        @php
+                            $scoreClass = match ($lead->lead_temperature) {
+                                'hot' => 'text-bg-danger',
+                                'warm' => 'text-bg-warning',
+                                'won' => 'text-bg-success',
+                                'lost' => 'text-bg-dark',
+                                default => 'text-bg-secondary',
+                            };
+                            $followUpClass = match ($lead->follow_up_status) {
+                                'overdue' => 'text-bg-danger',
+                                'due_soon' => 'text-bg-warning',
+                                'scheduled' => 'text-bg-info',
+                                default => 'text-bg-light',
+                            };
+                        @endphp
+                        <div class="d-flex flex-column align-items-start gap-1">
+                            <span class="badge {{ $scoreClass }}">{{ $lead->lead_score }}/100</span>
+                            <span class="badge {{ $followUpClass }}">{{ strtoupper(str_replace('_', ' ', $lead->follow_up_status)) }}</span>
+                        </div>
+                    </td>
                     <td>
                         @if($lead->status === 'won')
                             <span class="badge text-bg-success">Won</span>
@@ -121,10 +262,12 @@
                         @endcan
 
                         @can('crm.lead.update')
-                            <a href="{{ route('crm.leads.edit', $lead) }}"
-                               class="btn btn-sm btn-outline-primary ms-1">
-                                Edit
-                            </a>
+                            @if($lead->status === 'open')
+                                <a href="{{ route('crm.leads.edit', $lead) }}"
+                                   class="btn btn-sm btn-outline-primary ms-1">
+                                    Edit
+                                </a>
+                            @endif
                         @endcan
 
                         @can('crm.lead.delete')
@@ -191,7 +334,7 @@
                     emptyTable: 'No leads found.'
                 },
                 columnDefs: [
-                    { orderable: false, targets: [0, 7] },
+                    { orderable: false, targets: [0, 8] },
                 ],
                 buttons: [
                     { extend: 'excel', className: 'btn btn-sm btn-outline-secondary', title: 'CRM Leads' },

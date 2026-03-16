@@ -28,8 +28,10 @@ class MachineBreakdownRegister extends Model
         'maintenance_team_assigned',
         'repair_started_at',
         'repair_completed_at',
+        'resolved_by',
         'root_cause',
         'corrective_action',
+        'repair_notes',
         'preventive_measures',
         'production_loss_hours',
         'estimated_cost',
@@ -68,6 +70,11 @@ class MachineBreakdownRegister extends Model
     public function acknowledger(): BelongsTo
     {
         return $this->belongsTo(User::class, 'acknowledged_by');
+    }
+
+    public function resolver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'resolved_by');
     }
 
     public function maintenanceLog(): BelongsTo

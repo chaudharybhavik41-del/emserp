@@ -24,10 +24,15 @@ return new class extends Migration
         $profileId = null;
 
         if (Schema::hasTable('mail_profiles')) {
+            $hasMailProfilesIsActive = Schema::hasColumn('mail_profiles', 'is_active');
+
             // 1) Default profile (prefer a profile that has smtp_host filled)
             if (Schema::hasColumn('mail_profiles', 'is_default') && Schema::hasColumn('mail_profiles', 'smtp_host')) {
-                $profileId = DB::table('mail_profiles')
-                    ->where('is_active', 1)
+                $query = DB::table('mail_profiles');
+                if ($hasMailProfilesIsActive) {
+                    $query->where('is_active', 1);
+                }
+                $profileId = $query
                     ->where('is_default', 1)
                     ->whereNotNull('smtp_host')
                     ->where('smtp_host', '!=', '')
@@ -36,8 +41,11 @@ return new class extends Migration
             }
 
             if (!$profileId && Schema::hasColumn('mail_profiles', 'is_default')) {
-                $profileId = DB::table('mail_profiles')
-                    ->where('is_active', 1)
+                $query = DB::table('mail_profiles');
+                if ($hasMailProfilesIsActive) {
+                    $query->where('is_active', 1);
+                }
+                $profileId = $query
                     ->where('is_default', 1)
                     ->orderBy('id')
                     ->value('id');
@@ -45,8 +53,11 @@ return new class extends Migration
 
             // 2) Dedicated profile code (optional)
             if (!$profileId && Schema::hasColumn('mail_profiles', 'code') && Schema::hasColumn('mail_profiles', 'smtp_host')) {
-                $profileId = DB::table('mail_profiles')
-                    ->where('is_active', 1)
+                $query = DB::table('mail_profiles');
+                if ($hasMailProfilesIsActive) {
+                    $query->where('is_active', 1);
+                }
+                $profileId = $query
                     ->where('code', 'supportDigest')
                     ->whereNotNull('smtp_host')
                     ->where('smtp_host', '!=', '')
@@ -56,8 +67,11 @@ return new class extends Migration
 
             // 3) Any active profile with smtp_host
             if (!$profileId && Schema::hasColumn('mail_profiles', 'smtp_host')) {
-                $profileId = DB::table('mail_profiles')
-                    ->where('is_active', 1)
+                $query = DB::table('mail_profiles');
+                if ($hasMailProfilesIsActive) {
+                    $query->where('is_active', 1);
+                }
+                $profileId = $query
                     ->whereNotNull('smtp_host')
                     ->where('smtp_host', '!=', '')
                     ->orderBy('id')
@@ -66,8 +80,11 @@ return new class extends Migration
 
             // 4) Any legacy host profile (fallback)
             if (!$profileId && Schema::hasColumn('mail_profiles', 'host')) {
-                $profileId = DB::table('mail_profiles')
-                    ->where('is_active', 1)
+                $query = DB::table('mail_profiles');
+                if ($hasMailProfilesIsActive) {
+                    $query->where('is_active', 1);
+                }
+                $profileId = $query
                     ->whereNotNull('host')
                     ->where('host', '!=', '')
                     ->orderBy('id')
@@ -116,12 +133,14 @@ return new class extends Migration
         }
 
         $payload = [
-            'code'      => $code,
-            'is_active' => 1,
+            'code' => $code,
         ];
 
         if (Schema::hasColumn('mail_templates', 'name')) {
             $payload['name'] = 'Daily ERP Digest';
+        }
+        if (Schema::hasColumn('mail_templates', 'is_active')) {
+            $payload['is_active'] = 1;
         }
         if (Schema::hasColumn('mail_templates', 'type')) {
             $payload['type'] = 'support';

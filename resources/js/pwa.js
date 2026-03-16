@@ -17,17 +17,28 @@ const DEFAULT_CRITICAL_PREFIXES = [
     '/store-requisitions',
     '/material-receipts',
     '/purchase-orders',
-    '/purchase-indents'
+    '/purchase-indents',
+    '/crm',
+    '/tasks',
+    '/projects/production-v2',
 ];
 
 const SYNC_DB_NAME = 'ems-pwa-sync';
 const SYNC_STORE_NAME = 'requests';
+const SYNC_META_STORE_NAME = 'meta';
 const SYNC_TAG = 'ems-critical-form-sync-v1';
+const PERIODIC_SYNC_TAG = 'ems-light-status-refresh-v1';
+const AUTH_KEY_META = 'authKey';
+const LAST_SYNC_META = 'lastSyncAt';
+const AUTH_STORAGE_KEY = 'erp-pwa-auth-key';
+const LAST_SYNC_STORAGE_KEY = 'erp-pwa-last-sync-at';
+const CACHE_PREFIX = 'ems-sw-';
 
 let deferredPrompt = null;
 let isRefreshing = false;
 let isQueueFlushInProgress = false;
 let swRegistration = null;
+let pwaUpdateNoticeVisible = false;
 
 function getMetaContent(name) {
     const el = document.querySelector(`meta[name="${name}"]`);
@@ -64,6 +75,18 @@ function resolvePwaConfig() {
         vapidPublicKey: String(runtimeConfig.vapidPublicKey || getMetaContent('pwa-vapid-public-key') || '').trim(),
         syncEnabled: toBoolean(runtimeConfig.syncEnabled, toBoolean(getMetaContent('pwa-sync-enabled'), true)),
         criticalFormPathPrefixes: normalizePrefixes(runtimeConfig.criticalFormPathPrefixes),
+        safeUpdatePrompt: toBoolean(runtimeConfig.safeUpdatePrompt, true),
+        clearRuntimeOnAuthChange: toBoolean(runtimeConfig.clearRuntimeOnAuthChange, true),
+        periodicSyncEnabled: toBoolean(runtimeConfig.periodicSyncEnabled, true),
+        periodicSyncTag: String(runtimeConfig.periodicSyncTag || PERIODIC_SYNC_TAG).trim() || PERIODIC_SYNC_TAG,
+        periodicSyncMinIntervalMinutes: Math.max(15, Number(runtimeConfig.periodicSyncMinIntervalMinutes || 180)),
+        fileHandlingEnabled: toBoolean(runtimeConfig.fileHandlingEnabled, true),
+        authFingerprint: String(runtimeConfig.authFingerprint || 'guest').trim() || 'guest',
+        logoutPath: String(runtimeConfig.logoutPath || '/logout').trim() || '/logout',
+        unreadNotificationCount: Math.max(0, Number(runtimeConfig.unreadNotificationCount || 0)),
+        diagnosticsUrl: runtimeConfig.diagnosticsUrl ? String(runtimeConfig.diagnosticsUrl) : null,
+        statusUrl: runtimeConfig.statusUrl ? String(runtimeConfig.statusUrl) : null,
+        fileHandlerImportUrl: runtimeConfig.fileHandlerImportUrl ? String(runtimeConfig.fileHandlerImportUrl) : null,
     };
 }
 
@@ -135,6 +158,72 @@ function showPwaNotice(message, level = 'info') {
     }, 4200);
 }
 
+function dismissPwaUpdateNotice() {
+    const alert = document.getElementById('pwaUpdateNotice');
+    if (alert) {
+        alert.remove();
+    }
+    pwaUpdateNoticeVisible = false;
+}
+
+function showPwaUpdateNotice(registration) {
+    if (!PWA_CONFIG.safeUpdatePrompt || !registration || pwaUpdateNoticeVisible) return;
+
+    let container = document.getElementById('pwaNoticeStack');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'pwaNoticeStack';
+        container.className = 'position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '1100';
+        container.style.maxWidth = 'min(95vw, 420px)';
+        document.body.appendChild(container);
+    }
+
+    const alert = document.createElement('div');
+    alert.id = 'pwaUpdateNotice';
+    alert.className = 'alert alert-primary shadow-sm mb-2';
+    alert.setAttribute('role', 'status');
+    alert.innerHTML = `
+        <div class="d-flex flex-column gap-2">
+            <div>
+                <div class="fw-semibold small text-uppercase mb-1">New Version Ready</div>
+                <div class="small text-body-secondary">Refresh when convenient to load the latest ERP update.</div>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-primary" data-pwa-update-action="reload">Refresh Now</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-pwa-update-action="later">Later</button>
+            </div>
+        </div>
+    `;
+
+    alert.querySelector('[data-pwa-update-action="reload"]')?.addEventListener('click', async () => {
+        const button = alert.querySelector('[data-pwa-update-action="reload"]');
+        if (button) {
+            button.setAttribute('disabled', 'disabled');
+            button.textContent = 'Refreshing...';
+        }
+
+        const waiting = registration.waiting;
+        if (waiting) {
+            waiting.postMessage({ type: 'SKIP_WAITING' });
+            return;
+        }
+
+        try {
+            await registration.update();
+        } catch (_) {
+            dismissPwaUpdateNotice();
+        }
+    });
+
+    alert.querySelector('[data-pwa-update-action="later"]')?.addEventListener('click', () => {
+        dismissPwaUpdateNotice();
+    });
+
+    container.appendChild(alert);
+    pwaUpdateNoticeVisible = true;
+}
+
 function bindInstallPromptButtons() {
     getInstallButtons().forEach((btn) => {
         if (btn.dataset.pwaBound === '1') return;
@@ -177,7 +266,7 @@ function openSyncDb() {
     }
 
     return new Promise((resolve, reject) => {
-        const request = window.indexedDB.open(SYNC_DB_NAME, 1);
+        const request = window.indexedDB.open(SYNC_DB_NAME, 2);
 
         request.onupgradeneeded = () => {
             const db = request.result;
@@ -185,11 +274,82 @@ function openSyncDb() {
                 const store = db.createObjectStore(SYNC_STORE_NAME, { keyPath: 'id' });
                 store.createIndex('createdAt', 'createdAt', { unique: false });
             }
+            if (!db.objectStoreNames.contains(SYNC_META_STORE_NAME)) {
+                db.createObjectStore(SYNC_META_STORE_NAME, { keyPath: 'key' });
+            }
         };
 
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error('Failed to open sync queue database'));
     });
+}
+
+async function getSyncMeta(key) {
+    const db = await openSyncDb();
+
+    const value = await new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_META_STORE_NAME, 'readonly');
+        const req = tx.objectStore(SYNC_META_STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : null);
+        req.onerror = () => reject(req.error || new Error('Failed to read sync meta'));
+    });
+
+    db.close();
+    return value;
+}
+
+async function putSyncMeta(key, value) {
+    const db = await openSyncDb();
+
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_META_STORE_NAME, 'readwrite');
+        tx.objectStore(SYNC_META_STORE_NAME).put({ key, value });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Failed to persist sync meta'));
+        tx.onabort = () => reject(tx.error || new Error('Sync meta transaction aborted'));
+    });
+
+    db.close();
+}
+
+function getCurrentAuthFingerprint() {
+    return PWA_CONFIG.authFingerprint || 'guest';
+}
+
+function setStoredAuthFingerprint(authKey) {
+    try {
+        window.localStorage.setItem(AUTH_STORAGE_KEY, authKey);
+    } catch (_) {
+        // no-op
+    }
+}
+
+function getStoredAuthFingerprint() {
+    try {
+        return window.localStorage.getItem(AUTH_STORAGE_KEY);
+    } catch (_) {
+        return null;
+    }
+}
+
+function setLastSyncTimestamp(timestamp = Date.now()) {
+    try {
+        window.localStorage.setItem(LAST_SYNC_STORAGE_KEY, String(timestamp));
+    } catch (_) {
+        // no-op
+    }
+}
+
+async function persistRuntimeMeta() {
+    try {
+        await putSyncMeta(AUTH_KEY_META, getCurrentAuthFingerprint());
+        const lastSyncAt = window.localStorage.getItem(LAST_SYNC_STORAGE_KEY);
+        if (lastSyncAt) {
+            await putSyncMeta(LAST_SYNC_META, String(lastSyncAt));
+        }
+    } catch (_) {
+        // no-op
+    }
 }
 
 async function enqueueSyncRequest(payload) {
@@ -254,6 +414,56 @@ async function getQueuedSyncCount() {
     return count;
 }
 
+function deleteSyncDatabase() {
+    if (!('indexedDB' in window)) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+        const request = window.indexedDB.deleteDatabase(SYNC_DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+        request.onblocked = () => resolve();
+    });
+}
+
+async function clearPwaCaches() {
+    if (!('caches' in window)) return;
+
+    const cacheNames = await window.caches.keys();
+    await Promise.all(
+        cacheNames
+            .filter((name) => typeof name === 'string' && name.startsWith(CACHE_PREFIX))
+            .map((name) => window.caches.delete(name))
+    );
+}
+
+async function postServiceWorkerMessage(payload) {
+    if (!('serviceWorker' in navigator)) return false;
+
+    const registration = swRegistration || await navigator.serviceWorker.getRegistration();
+    if (!registration) return false;
+
+    const target = registration.active || registration.waiting || registration.installing;
+    if (!target) return false;
+
+    target.postMessage(payload);
+    return true;
+}
+
+async function clearRuntimeState(reason = 'manual') {
+    await deleteSyncDatabase();
+    await clearPwaCaches();
+
+    try {
+        await postServiceWorkerMessage({ type: 'CLEAR_RUNTIME_STATE', reason });
+    } catch (_) {
+        // no-op
+    }
+
+    await refreshSyncBadge();
+}
+
 function makeQueueId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
         return window.crypto.randomUUID();
@@ -269,6 +479,15 @@ function getFormActionUrl(form) {
     } catch (_) {
         return null;
     }
+}
+
+function isLogoutForm(form) {
+    if (!(form instanceof HTMLFormElement)) return false;
+
+    const actionUrl = getFormActionUrl(form);
+    if (!actionUrl) return false;
+
+    return actionUrl.pathname === PWA_CONFIG.logoutPath;
 }
 
 function shouldQueueForm(form) {
@@ -329,6 +548,74 @@ async function refreshSyncBadge() {
     } catch (_) {
         badge.classList.add('d-none');
     }
+
+    await updateAppBadge();
+}
+
+function supportsAppBadge() {
+    return typeof navigator !== 'undefined'
+        && typeof navigator.setAppBadge === 'function'
+        && typeof navigator.clearAppBadge === 'function';
+}
+
+async function updateAppBadge() {
+    if (!supportsAppBadge()) return;
+
+    try {
+        const pending = await getQueuedSyncCount();
+        const unread = Math.max(0, Number(PWA_CONFIG.unreadNotificationCount || 0));
+        const total = unread + pending;
+
+        if (total > 0) {
+            await navigator.setAppBadge(total);
+        } else {
+            await navigator.clearAppBadge();
+        }
+    } catch (_) {
+        // no-op
+    }
+}
+
+async function fetchPwaStatus() {
+    if (!PWA_CONFIG.statusUrl) return null;
+
+    try {
+        const response = await fetch(PWA_CONFIG.statusUrl, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        return await response.json();
+    } catch (_) {
+        return null;
+    }
+}
+
+function applyPwaStatus(status) {
+    if (!status || typeof status !== 'object') return;
+
+    PWA_CONFIG.unreadNotificationCount = Math.max(0, Number(status.unread_notifications || 0));
+    updateAppBadge();
+
+    const dropdownBadges = document.querySelectorAll('[data-pwa-unread-count]');
+    dropdownBadges.forEach((badge) => {
+        const count = PWA_CONFIG.unreadNotificationCount;
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.classList.toggle('d-none', count < 1);
+    });
+}
+
+async function refreshPwaStatus() {
+    const status = await fetchPwaStatus();
+    applyPwaStatus(status);
 }
 
 function buildReplayOptions(item) {
@@ -357,20 +644,25 @@ function buildReplayOptions(item) {
 }
 
 async function replaySingleQueuedRequest(item) {
+    const authKey = String(item.authKey || '').trim();
+    if (authKey !== '' && authKey !== getCurrentAuthFingerprint()) {
+        return { done: true, retry: false, skipped: true };
+    }
+
     try {
         const response = await fetch(item.url, buildReplayOptions(item));
 
         if (response.ok) {
-            return { done: true, retry: false };
+            return { done: true, retry: false, skipped: false };
         }
 
         if (response.status >= 400 && response.status < 500 && ![408, 425, 429].includes(response.status)) {
-            return { done: true, retry: false };
+            return { done: true, retry: false, skipped: false };
         }
 
-        return { done: false, retry: true };
+        return { done: false, retry: true, skipped: false };
     } catch (_) {
-        return { done: false, retry: true };
+        return { done: false, retry: true, skipped: false };
     }
 }
 
@@ -382,6 +674,7 @@ async function flushSyncQueue(trigger = 'manual') {
 
     let succeeded = 0;
     let failed = 0;
+    let skipped = 0;
 
     try {
         const items = await getQueuedSyncRequests();
@@ -389,7 +682,11 @@ async function flushSyncQueue(trigger = 'manual') {
             const result = await replaySingleQueuedRequest(item);
 
             if (result.done) {
-                succeeded += 1;
+                if (result.skipped) {
+                    skipped += 1;
+                } else {
+                    succeeded += 1;
+                }
                 await removeQueuedSyncRequest(item.id);
                 continue;
             }
@@ -407,7 +704,13 @@ async function flushSyncQueue(trigger = 'manual') {
     await refreshSyncBadge();
 
     if (succeeded > 0) {
+        setLastSyncTimestamp(Date.now());
+        await persistRuntimeMeta();
         showPwaNotice(`${succeeded} queued action${succeeded === 1 ? '' : 's'} synced.`, 'success');
+    }
+
+    if (skipped > 0) {
+        showPwaNotice(`${skipped} queued action${skipped === 1 ? '' : 's'} cleared after account change.`, 'info');
     }
 
     if (failed > 0 && trigger !== 'online') {
@@ -429,6 +732,20 @@ async function scheduleBackgroundSync() {
 
     if (window.navigator.onLine) {
         await flushSyncQueue('fallback');
+    }
+}
+
+async function registerPeriodicSync() {
+    if (!PWA_CONFIG.periodicSyncEnabled) return;
+    if (!swRegistration) return;
+    if (!('periodicSync' in swRegistration)) return;
+
+    try {
+        await swRegistration.periodicSync.register(PWA_CONFIG.periodicSyncTag || PERIODIC_SYNC_TAG, {
+            minInterval: Math.max(15, Number(PWA_CONFIG.periodicSyncMinIntervalMinutes || 180)) * 60 * 1000,
+        });
+    } catch (_) {
+        // Best effort only.
     }
 }
 
@@ -462,11 +779,12 @@ function bindCriticalFormQueueing() {
 
         event.preventDefault();
 
-        const payload = {
-            id: makeQueueId(),
-            method,
-            url: actionUrl.toString(),
-            path: actionUrl.pathname,
+            const payload = {
+                id: makeQueueId(),
+                authKey: getCurrentAuthFingerprint(),
+                method,
+                url: actionUrl.toString(),
+                path: actionUrl.pathname,
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
@@ -516,7 +834,7 @@ function refreshPushButtonVisibility() {
         return;
     }
 
-    setPushButtonsVisible(Notification.permission === 'default');
+    setPushButtonsVisible(Notification.permission !== 'granted');
 }
 
 async function persistPushSubscription(subscription) {
@@ -536,6 +854,31 @@ async function persistPushSubscription(subscription) {
             body: JSON.stringify({
                 subscription: subscription.toJSON(),
                 user_agent: window.navigator.userAgent || null,
+            }),
+        });
+
+        return response.ok;
+    } catch (_) {
+        return false;
+    }
+}
+
+async function removePushSubscription(endpoint = null) {
+    const csrfToken = getCsrfToken();
+    if (!csrfToken) return false;
+
+    try {
+        const response = await fetch('/pwa/push-subscriptions', {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({
+                endpoint,
             }),
         });
 
@@ -589,9 +932,18 @@ function bindPushButtons() {
             if (!swRegistration) return;
 
             try {
+                if (Notification.permission === 'denied') {
+                    showPwaNotice('Browser alerts are blocked. Re-enable notifications for this site in browser settings.', 'warning');
+                    refreshPushButtonVisibility();
+                    return;
+                }
+
                 if (Notification.permission === 'default') {
                     const permission = await Notification.requestPermission();
                     if (permission !== 'granted') {
+                        if (permission === 'denied') {
+                            showPwaNotice('Browser alerts were blocked. Update browser settings to enable them later.', 'warning');
+                        }
                         refreshPushButtonVisibility();
                         return;
                     }
@@ -630,6 +982,79 @@ function bindPushButtons() {
     });
 }
 
+async function syncAuthContextWithServiceWorker() {
+    await persistRuntimeMeta();
+
+    try {
+        await postServiceWorkerMessage({
+            type: 'SET_AUTH_CONTEXT',
+            authKey: getCurrentAuthFingerprint(),
+            lastSyncAt: window.localStorage.getItem(LAST_SYNC_STORAGE_KEY) || null,
+        });
+    } catch (_) {
+        // no-op
+    }
+}
+
+async function handleAuthBoundaryChange() {
+    const currentAuthKey = getCurrentAuthFingerprint();
+    const previousAuthKey = getStoredAuthFingerprint();
+
+    if (previousAuthKey && previousAuthKey !== currentAuthKey && PWA_CONFIG.clearRuntimeOnAuthChange) {
+        await clearRuntimeState('auth-change');
+        showPwaNotice('Local offline data was reset after account change for safety.', 'info');
+    }
+
+    setStoredAuthFingerprint(currentAuthKey);
+    await persistRuntimeMeta();
+}
+
+async function cleanupPushSubscriptionForLogout() {
+    if (!('serviceWorker' in navigator)) return;
+
+    const registration = swRegistration || await navigator.serviceWorker.getRegistration();
+    if (!registration || !registration.pushManager) return;
+
+    try {
+        const subscription = await registration.pushManager.getSubscription();
+        if (!subscription) return;
+
+        await removePushSubscription(subscription.endpoint || null);
+        await subscription.unsubscribe();
+    } catch (_) {
+        // no-op
+    }
+}
+
+function bindLogoutCleanup() {
+    if (document.documentElement.dataset.pwaLogoutBound === '1') return;
+    document.documentElement.dataset.pwaLogoutBound = '1';
+
+    document.addEventListener('submit', async (event) => {
+        const form = event.target instanceof HTMLFormElement
+            ? event.target
+            : event.target?.closest?.('form');
+
+        if (!isLogoutForm(form) || form.dataset.pwaLogoutHandled === '1') {
+            return;
+        }
+
+        event.preventDefault();
+        form.dataset.pwaLogoutHandled = '1';
+
+        try {
+            await cleanupPushSubscriptionForLogout();
+            await clearRuntimeState('logout');
+        } catch (_) {
+            // no-op
+        }
+
+        setStoredAuthFingerprint('guest');
+
+        HTMLFormElement.prototype.submit.call(form);
+    });
+}
+
 async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return null;
     if (!window.isSecureContext) return null;
@@ -643,7 +1068,7 @@ async function registerServiceWorker() {
         swRegistration = registration;
 
         if (registration.waiting) {
-            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            showPwaUpdateNotice(registration);
         }
 
         registration.addEventListener('updatefound', () => {
@@ -652,7 +1077,7 @@ async function registerServiceWorker() {
 
             installing.addEventListener('statechange', () => {
                 if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                    installing.postMessage({ type: 'SKIP_WAITING' });
+                    showPwaUpdateNotice(registration);
                 }
             });
         });
@@ -660,24 +1085,39 @@ async function registerServiceWorker() {
         navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (isRefreshing) return;
             isRefreshing = true;
+            dismissPwaUpdateNotice();
             window.location.reload();
         });
 
         navigator.serviceWorker.addEventListener('message', (event) => {
             const data = event.data || {};
-            if (data.type !== 'PWA_SYNC_RESULT') return;
+            if (data.type === 'PWA_SYNC_RESULT') {
+                refreshSyncBadge();
 
-            refreshSyncBadge();
-
-            const succeeded = Number(data.succeeded || 0);
-            const failed = Number(data.failed || 0);
-            if (succeeded > 0) {
-                showPwaNotice(`${succeeded} queued action${succeeded === 1 ? '' : 's'} synced.`, 'success');
+                const succeeded = Number(data.succeeded || 0);
+                const failed = Number(data.failed || 0);
+                const skipped = Number(data.skipped || 0);
+                if (succeeded > 0) {
+                    setLastSyncTimestamp(data.at || Date.now());
+                    persistRuntimeMeta();
+                    showPwaNotice(`${succeeded} queued action${succeeded === 1 ? '' : 's'} synced.`, 'success');
+                }
+                if (skipped > 0) {
+                    showPwaNotice(`${skipped} queued action${skipped === 1 ? '' : 's'} cleared after account change.`, 'info');
+                }
+                if (failed > 0) {
+                    showPwaNotice(`${failed} queued action${failed === 1 ? '' : 's'} still pending sync.`, 'warning');
+                }
+                return;
             }
-            if (failed > 0) {
-                showPwaNotice(`${failed} queued action${failed === 1 ? '' : 's'} still pending sync.`, 'warning');
+
+            if (data.type === 'PWA_STATUS_REFRESH') {
+                applyPwaStatus(data.status || null);
             }
         });
+
+        await syncAuthContextWithServiceWorker();
+        await registerPeriodicSync();
 
         return registration;
     } catch (_) {
@@ -687,14 +1127,19 @@ async function registerServiceWorker() {
 }
 
 async function initPwa() {
+    await handleAuthBoundaryChange();
+
     bindInstallPromptButtons();
     bindPushButtons();
     bindCriticalFormQueueing();
+    bindLogoutCleanup();
 
     initNetworkBadge();
     setInstallButtonsVisible(false);
     refreshPushButtonVisibility();
     await refreshSyncBadge();
+    await updateAppBadge();
+    await refreshPwaStatus();
 
     if (inStandaloneMode()) {
         setInstallButtonsVisible(false);
@@ -714,15 +1159,22 @@ async function initPwa() {
     });
 
     window.addEventListener('online', () => {
+        setLastSyncTimestamp(Date.now());
+        persistRuntimeMeta();
         flushSyncQueue('online');
         scheduleBackgroundSync();
+        refreshPwaStatus();
     });
 
     await registerServiceWorker();
+    await syncAuthContextWithServiceWorker();
     await initPushSubscriptionSync();
 
     if (window.navigator.onLine) {
+        setLastSyncTimestamp(Date.now());
+        await persistRuntimeMeta();
         flushSyncQueue('startup');
+        refreshPwaStatus();
     }
 }
 

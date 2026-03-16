@@ -38,6 +38,22 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->job(new \App\Jobs\SendDailyDigestJob)
             ->dailyAt('09:20');
 
+        // CRM overdue follow-up reminders.
+        $schedule->job(new \App\Jobs\SendCrmFollowUpReminderNotifications)
+            ->dailyAt(config('crm.follow_up_reminders.daily_at', '09:30'));
+
+        // Recurring task generation.
+        $schedule->command('tasks:run-recurring')
+            ->everyFifteenMinutes();
+
+        // Task overdue automation.
+        $schedule->command('tasks:run-overdue-automation')
+            ->dailyAt('08:45');
+
+        // Notification inbox retention cleanup.
+        $schedule->command('notifications:prune-read')
+            ->dailyAt(config('erp_notifications.retention.daily_at', '03:45'));
+
         // Keep push subscriptions healthy.
         $schedule->command('pwa:subscriptions:prune')
             ->dailyAt('03:30');
@@ -56,4 +72,3 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
-

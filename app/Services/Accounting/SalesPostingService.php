@@ -8,6 +8,7 @@ use App\Models\Accounting\VoucherLine;
 use App\Models\ActivityLog;
 use App\Models\ClientRaBill;
 use App\Models\Party;
+use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
@@ -31,7 +32,8 @@ class SalesPostingService
 {
     public function __construct(
         protected PartyAccountService $partyAccountService,
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected AccountingDateControlService $accountingDateControlService
     ) {
     }
 
@@ -136,6 +138,11 @@ class SalesPostingService
         ) {
             $companyId = $raBill->company_id ?: Config::get('accounting.default_company_id', 1);
             $voucherDate = $raBill->bill_date;
+            $this->accountingDateControlService->assertDateOpenForRuntime(
+                $voucherDate,
+                (int) $companyId,
+                'Bill date'
+            );
 
             // Resolve project cost center (Project = Cost Center)
             $costCenterId = ProjectCostCenterResolver::resolveId($companyId, (int) $project->id);
@@ -321,7 +328,7 @@ class SalesPostingService
     /**
      * Reverse a posted Client RA Bill (create reversal voucher)
      */
-    public function reverse(ClientRaBill $raBill, string $reason = ''): Voucher
+    public function reverse(ClientRaBill $raBill, Carbon|string $reversalDate, string $reason = ''): Voucher
     {
         if ($raBill->status !== 'posted' || !$raBill->voucher_id) {
             throw new RuntimeException('Only posted RA Bills can be reversed.');
@@ -332,9 +339,26 @@ class SalesPostingService
             throw new RuntimeException('Original voucher not found.');
         }
 
-        return DB::transaction(function () use ($raBill, $originalVoucher, $reason) {
-            $companyId = (int) ($raBill->company_id ?: Config::get('accounting.default_company_id', 1));
-            $voucherDate = now();
+        $reversalDate = $reversalDate instanceof Carbon
+            ? $reversalDate->copy()->startOfDay()
+            : Carbon::parse((string) $reversalDate)->startOfDay();
+        $originalVoucherDate = $originalVoucher->voucher_date
+            ? Carbon::parse((string) $originalVoucher->voucher_date)->startOfDay()
+            : null;
+
+        if ($originalVoucherDate && $reversalDate->lt($originalVoucherDate)) {
+            throw new RuntimeException('Reversal date cannot be earlier than the original posting date.');
+        }
+
+        $companyId = (int) ($raBill->company_id ?: Config::get('accounting.default_company_id', 1));
+        $this->accountingDateControlService->assertDateOpenForRuntime(
+            $reversalDate,
+            $companyId,
+            'Reversal date'
+        );
+
+        return DB::transaction(function () use ($raBill, $originalVoucher, $reason, $reversalDate, $companyId) {
+            $voucherDate = $reversalDate;
 
             // Create reversal voucher
             $reversalVoucher = new Voucher();

@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Accounting\AccountController;
 use App\Http\Controllers\Accounting\AccountGroupController;
+use App\Http\Controllers\Accounting\AccountingHealthCheckController;
+use App\Http\Controllers\Accounting\AccountingPeriodLockController;
+use App\Http\Controllers\Accounting\AccountingYearEndCloseController;
 use App\Http\Controllers\Accounting\AccountTypeController;
 use App\Http\Controllers\Accounting\BalanceSheetReportController;
 use App\Http\Controllers\Accounting\BankCashVoucherController;
@@ -68,6 +71,9 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::get('vouchers', [VoucherController::class, 'index'])->name('vouchers.index');
     Route::get('vouchers/create', [VoucherController::class, 'create'])->name('vouchers.create');
     Route::post('vouchers', [VoucherController::class, 'store'])->name('vouchers.store');
+    Route::get('contra-vouchers', [VoucherController::class, 'indexContra'])->name('contra-vouchers.index');
+    Route::get('contra-vouchers/create', [VoucherController::class, 'createContra'])->name('contra-vouchers.create');
+    Route::post('contra-vouchers', [VoucherController::class, 'storeContra'])->name('contra-vouchers.store');
 
     // Phase 6: Manual voucher drilldown + workflow (draft → post, and reversal)
     Route::get('vouchers/{voucher}', [VoucherController::class, 'show'])->name('vouchers.show');
@@ -80,6 +86,11 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
 
     // Voucher Series (centralised numbering)
     Route::resource('voucher-series', VoucherSeriesController::class)->except(['show']);
+    Route::get('period-locks', [AccountingPeriodLockController::class, 'index'])->name('period-locks.index');
+    Route::post('period-locks', [AccountingPeriodLockController::class, 'store'])->name('period-locks.store');
+    Route::post('period-locks/quick-close', [AccountingPeriodLockController::class, 'quickStore'])->name('period-locks.quick-store');
+    Route::patch('period-locks/{periodLock}/toggle', [AccountingPeriodLockController::class, 'toggle'])->name('period-locks.toggle');
+    Route::delete('period-locks/{periodLock}', [AccountingPeriodLockController::class, 'destroy'])->name('period-locks.destroy');
 
     // TDS Sections (Master)
     Route::resource('tds-sections', TdsSectionController::class)->except(['show']);
@@ -88,6 +99,10 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     Route::get('payments', [BankCashVoucherController::class, 'indexPayment'])->name('payments.index');
     Route::get('payments/create', [BankCashVoucherController::class, 'createPayment'])->name('payments.create');
     Route::post('payments', [BankCashVoucherController::class, 'storePayment'])->name('payments.store');
+
+    Route::get('cash-payments', [BankCashVoucherController::class, 'indexCashPayment'])->name('cash-payments.index');
+    Route::get('cash-payments/create', [BankCashVoucherController::class, 'createCashPayment'])->name('cash-payments.create');
+    Route::post('cash-payments', [BankCashVoucherController::class, 'storeCashPayment'])->name('cash-payments.store');
 
     Route::get('receipts', [BankCashVoucherController::class, 'indexReceipt'])->name('receipts.index');
     Route::get('receipts/create', [BankCashVoucherController::class, 'createReceipt'])->name('receipts.create');
@@ -132,6 +147,9 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     // Core Reports
     Route::get('reports/supplier-outstanding', [SupplierOutstandingReportController::class, 'index'])->name('reports.supplier-outstanding');
     Route::get('reports/client-outstanding', [ClientOutstandingReportController::class, 'index'])->name('reports.client-outstanding');
+    Route::get('reports/health-check', [AccountingHealthCheckController::class, 'index'])->name('reports.health-check');
+    Route::get('reports/year-end-close', [AccountingYearEndCloseController::class, 'index'])->name('reports.year-end-close');
+    Route::get('reports/year-end-close/carry-forward', [AccountingYearEndCloseController::class, 'exportCarryForward'])->name('reports.year-end-close.carry-forward');
     Route::get('reports/trial-balance', [TrialBalanceReportController::class, 'index'])->name('reports.trial-balance');
     Route::get('reports/ledger', [LedgerReportController::class, 'index'])->name('reports.ledger');
     Route::get('reports/machine-expense-ledger', [MachineExpenseLedgerReportController::class, 'index'])->name('reports.machine-expense-ledger');

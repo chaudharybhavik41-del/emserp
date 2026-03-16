@@ -16,33 +16,33 @@
 @endsection
 
 @section('content')
-    {{-- Filters row (simple search, can be extended later) --}}
-    <form method="GET" action="{{ route('projects.index') }}" class="row g-2 align-items-end mb-3">
-        <div class="col-sm-4">
+    <form method="GET" action="{{ route('projects.index') }}" class="erp-filter-bar">
+        <div class="flex-grow-1" style="min-width: min(100%, 320px);">
             <label for="q" class="form-label small mb-1">Search</label>
             <input type="text"
                    name="q"
                    id="q"
                    value="{{ request('q') }}"
-                   class="form-control form-control-sm"
+                   class="form-control"
                    placeholder="Search by code or name">
         </div>
 
-        <div class="col-sm-3">
-            <button type="submit" class="btn btn-sm btn-outline-primary mt-sm-3">
+        <div class="d-flex align-items-end gap-2 ms-sm-auto">
+            <button type="submit" class="btn btn-primary">
                 <i class="bi bi-search me-1"></i> Filter
             </button>
             @if(request()->has('q') && request('q') !== null && request('q') !== '')
-                <a href="{{ route('projects.index') }}" class="btn btn-sm btn-link text-decoration-none">
+                <a href="{{ route('projects.index') }}" class="btn btn-outline-secondary">
                     Clear
                 </a>
             @endif
         </div>
     </form>
 
-    <div class="table-responsive">
+    <div class="erp-table-card">
+        <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
+            <thead>
                 <tr>
                     <th style="width: 120px;">Code</th>
                     <th>Name</th>
@@ -92,20 +92,27 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="5" class="text-center text-muted py-4">
-                        No projects found.
+                    <td colspan="5" class="py-4">
+                        <div class="erp-empty-state">
+                            <div class="erp-empty-state-icon">
+                                <i class="bi bi-kanban"></i>
+                            </div>
+                            <div class="fw-semibold text-body mb-1">No projects found</div>
+                            <div class="small mb-3">Try adjusting your search or create a new project.</div>
                         @can('project.project.create')
-                            <div class="mt-2">
-                                <a href="{{ route('projects.create') }}" class="btn btn-sm btn-primary">
+                            <div>
+                                <a href="{{ route('projects.create') }}" class="btn btn-primary">
                                     <i class="bi bi-plus-lg me-1"></i> Create your first project
                                 </a>
                             </div>
                         @endcan
+                        </div>
                     </td>
                 </tr>
             @endforelse
             </tbody>
         </table>
+        </div>
     </div>
 
     @if($projects instanceof \Illuminate\Contracts\Pagination\Paginator && $projects->hasPages())

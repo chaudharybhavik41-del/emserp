@@ -196,6 +196,28 @@ return [
         'start_month' => 4,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Date Controls
+    |--------------------------------------------------------------------------
+    | max_backdate_days:
+    | - null => disabled
+    | - 0    => only today allowed
+    | - N    => allow today and N previous days
+    | max_future_days:
+    | - null => disabled
+    | - 0    => no future dates allowed
+    | - N    => allow up to N future days
+    | enforce_current_financial_year:
+    | - false => disabled
+    | - true  => block dates outside current financial year
+    */
+    'date_controls' => [
+        'max_backdate_days' => env('ACCOUNTING_MAX_BACKDATE_DAYS'),
+        'max_future_days' => env('ACCOUNTING_MAX_FUTURE_DAYS'),
+        'enforce_current_financial_year' => env('ACCOUNTING_ENFORCE_CURRENT_FINANCIAL_YEAR', false),
+    ],
+
   
   	'enable_store_issue_posting' => true,
     'enable_fuel_issue_posting'  => true,

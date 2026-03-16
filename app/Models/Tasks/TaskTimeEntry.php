@@ -40,14 +40,31 @@ class TaskTimeEntry extends Model
         });
 
         static::created(function (TaskTimeEntry $entry) {
-            // Update task logged minutes
-            $entry->task->increment('logged_minutes', $entry->duration_minutes);
+            if ($entry->duration_minutes > 0) {
+                // Update task logged minutes
+                $entry->task->increment('logged_minutes', $entry->duration_minutes);
 
-            // Log activity
-            $entry->task->logActivity('time_logged', null, null, $entry->duration_minutes, [
-                'time_entry_id' => $entry->id,
-                'duration_formatted' => $entry->duration_formatted,
-            ]);
+                // Log activity
+                $entry->task->logActivity('time_logged', null, null, $entry->duration_minutes, [
+                    'time_entry_id' => $entry->id,
+                    'duration_formatted' => $entry->duration_formatted,
+                ]);
+            }
+        });
+
+        static::updated(function (TaskTimeEntry $entry) {
+            if ($entry->wasChanged('duration_minutes')) {
+                $delta = (int) $entry->duration_minutes - (int) $entry->getOriginal('duration_minutes');
+
+                if ($delta !== 0) {
+                    $entry->task->increment('logged_minutes', $delta);
+                    $entry->task->logActivity('time_logged', null, $entry->getOriginal('duration_minutes'), $entry->duration_minutes, [
+                        'time_entry_id' => $entry->id,
+                        'duration_formatted' => $entry->duration_formatted,
+                        'source' => 'timer_stop',
+                    ]);
+                }
+            }
         });
 
         static::deleted(function (TaskTimeEntry $entry) {

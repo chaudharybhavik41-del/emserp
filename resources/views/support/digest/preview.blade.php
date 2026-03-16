@@ -56,26 +56,90 @@
             <div class="col-md-8 text-md-end">
                 <div class="d-flex flex-wrap gap-2 justify-content-md-end">
                     @can('support.digest.send')
-                        <form action="{{ route('support.digest.send') }}" method="POST">
+                        <form action="{{ route('support.digest.send') }}" method="POST" class="d-flex flex-wrap align-items-center gap-2">
                             @csrf
                             <input type="hidden" name="date" value="{{ request('date', $digestDate->toDateString()) }}">
+                            <div class="form-check form-check-inline mb-0">
+                                <input class="form-check-input" type="checkbox" name="force" value="1" id="digest-force-send">
+                                <label class="form-check-label small text-muted" for="digest-force-send">Force resend</label>
+                            </div>
                             <button type="submit" class="btn btn-primary" onclick="return confirm('Send digest to all configured recipients?');">
                                 <i class="bi bi-envelope-paper me-1"></i> Send to Recipients
                             </button>
                         </form>
-                    @endcan
 
-                    <form action="{{ route('support.digest.send_test') }}" method="POST">
-                        @csrf
-                        <input type="hidden" name="date" value="{{ request('date', $digestDate->toDateString()) }}">
-                        <button type="submit" class="btn btn-outline-secondary">
-                            <i class="bi bi-send me-1"></i> Send Test to Me
-                        </button>
-                    </form>
+                        <form action="{{ route('support.digest.send_test') }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="date" value="{{ request('date', $digestDate->toDateString()) }}">
+                            <button type="submit" class="btn btn-outline-secondary">
+                                <i class="bi bi-send me-1"></i> Send Test to Me
+                            </button>
+                        </form>
+                    @endcan
                 </div>
                 <div class="text-muted small mt-2">Digest covers activities on <strong>{{ $digestDate->format('d M Y') }}</strong>.</div>
+                <div class="text-muted small mt-1">
+                    Active recipients: <strong>{{ $fmtInt($recipientHealth['active_total'] ?? 0) }}</strong>
+                    | Deliverable: <strong>{{ $fmtInt($recipientHealth['deliverable_total'] ?? 0) }}</strong>
+                    | Needs attention: <strong>{{ $fmtInt($recipientHealth['invalid_total'] ?? 0) }}</strong>
+                </div>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>Delivery History</strong>
+        <span class="text-muted small">Last 10 runs</span>
+    </div>
+    <div class="card-body">
+        @if($recentLogs->isEmpty())
+            <div class="text-muted">No digest delivery history recorded yet.</div>
+        @else
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Digest Date</th>
+                            <th>Status</th>
+                            <th class="text-end">Sent</th>
+                            <th class="text-end">Failed</th>
+                            <th class="text-end">Skipped</th>
+                            <th>Triggered By</th>
+                            <th>Last Attempt</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($recentLogs as $log)
+                            @php
+                                $meta = $log->summary['meta'] ?? [];
+                                $statusClass = match ($log->status) {
+                                    'sent' => 'success',
+                                    'partial' => 'warning',
+                                    'failed' => 'danger',
+                                    default => 'secondary',
+                                };
+                            @endphp
+                            <tr>
+                                <td class="fw-semibold">{{ optional($log->digest_date)->format('d-m-Y') }}</td>
+                                <td><span class="badge text-bg-{{ $statusClass }}">{{ ucfirst($log->status) }}</span></td>
+                                <td class="text-end">{{ $fmtInt($meta['sent_count'] ?? count($log->recipients ?? [])) }}</td>
+                                <td class="text-end">{{ $fmtInt($meta['failed_count'] ?? 0) }}</td>
+                                <td class="text-end">{{ $fmtInt($meta['skipped_count'] ?? 0) }}</td>
+                                <td>{{ $log->triggeredBy?->name ?? 'Scheduler' }}</td>
+                                <td>
+                                    <div>{{ optional($log->sent_at)->format('d-m-Y H:i') ?? '-' }}</div>
+                                    @if(!empty($log->error))
+                                        <div class="small text-muted text-truncate" style="max-width: 320px;" title="{{ $log->error }}">{{ $log->error }}</div>
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
     </div>
 </div>
 

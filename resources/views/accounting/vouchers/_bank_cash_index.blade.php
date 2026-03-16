@@ -1,11 +1,15 @@
 <div class="container-fluid">
+    @php
+        $counterpartyLabel = $counterpartyLabel ?? 'Counterparty';
+        $createButtonLabel = $createButtonLabel ?? 'Create New Voucher';
+    @endphp
     <div class="d-flex justify-content-between align-items-start mb-3">
         <div>
             <h1 class="h4 mb-1">{{ $pageTitle }}</h1>
             <div class="text-muted small">Review existing vouchers first, then create a new one from here.</div>
         </div>
         @can('accounting.vouchers.create')
-            <a href="{{ $createRoute }}" class="btn btn-primary btn-sm">Create New Voucher</a>
+            <a href="{{ $createRoute }}" class="btn btn-primary btn-sm">{{ $createButtonLabel }}</a>
         @endcan
     </div>
 
@@ -41,7 +45,7 @@
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label form-label-sm">Counterparty</label>
+                    <label class="form-label form-label-sm">{{ $counterpartyLabel }}</label>
                     <select name="party_account_id" class="form-select form-select-sm">
                         <option value="">All</option>
                         @foreach($counterpartyAccounts as $account)
@@ -72,7 +76,7 @@
                             <th>Voucher No</th>
                             <th>Date</th>
                             <th>Bank / Cash</th>
-                            <th>Counterparty</th>
+                            <th>{{ $counterpartyLabel }}</th>
                             <th>Reference</th>
                             <th>Narration</th>
                             <th class="text-end">Amount</th>

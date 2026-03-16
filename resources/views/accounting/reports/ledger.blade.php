@@ -58,7 +58,7 @@
                     <div class="col-md-3">
                         <label class="form-label form-label-sm">View mode</label>
                         <select name="view_mode" class="form-select form-select-sm">
-                            <option value="analytical" @selected(($viewMode ?? 'standard') === 'analytical')>Analytical Party Ledger</option>
+                            <option value="analytical" @selected(($viewMode ?? 'standard') === 'analytical')>{{ $analyticalViewLabel ?? 'Analytical party ledger' }}</option>
                             <option value="standard" @selected(($viewMode ?? 'standard') === 'standard')>Standard Ledger</option>
                         </select>
                     </div>
@@ -140,7 +140,7 @@
                 <div class="fw-semibold small">
                     Period: {{ $displayFrom }} to {{ $displayTo }}
                     @if(($viewMode ?? 'standard') === 'analytical')
-                        <span class="text-muted">· Analytical supplier ledger</span>
+                        <span class="text-muted">· {{ $analyticalViewLabel ?? 'Analytical party ledger' }}</span>
                     @endif
                 </div>
                 <div class="small text-muted">
@@ -162,7 +162,7 @@
                                 <th>Particulars</th>
                                 <th style="width: 10%" class="text-end">Bill Amt</th>
                                 <th style="width: 8%" class="text-end">TDS</th>
-                                <th style="width: 10%" class="text-end">Payment / Adj</th>
+                                <th style="width: 10%" class="text-end">Settlement / Adj</th>
                                 <th style="width: 10%" class="text-end">Balance</th>
                                 <th style="width: 6%" class="text-center">Dr/Cr</th>
                             </tr>

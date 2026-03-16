@@ -1,6 +1,15 @@
 <?php
 
 return [
+    'runtime' => [
+        'safe_update_prompt' => (bool) env('PWA_SAFE_UPDATE_PROMPT', true),
+        'clear_runtime_on_auth_change' => (bool) env('PWA_CLEAR_RUNTIME_ON_AUTH_CHANGE', true),
+        'periodic_sync_enabled' => (bool) env('PWA_PERIODIC_SYNC_ENABLED', true),
+        'periodic_sync_tag' => (string) env('PWA_PERIODIC_SYNC_TAG', 'ems-light-status-refresh-v1'),
+        'periodic_sync_min_interval_minutes' => (int) env('PWA_PERIODIC_SYNC_MIN_INTERVAL_MINUTES', 180),
+        'file_handling_enabled' => (bool) env('PWA_FILE_HANDLING_ENABLED', true),
+    ],
+
     'push' => [
         'enabled' => (bool) env('PWA_PUSH_ENABLED', true),
         // Server dispatch uses minishlink/web-push when present in vendor.
@@ -32,6 +41,9 @@ return [
             '/material-receipts',
             '/purchase-orders',
             '/purchase-indents',
+            '/crm',
+            '/tasks',
+            '/projects/production-v2',
         ],
     ],
 ];

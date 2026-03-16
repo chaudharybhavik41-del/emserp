@@ -21,7 +21,13 @@ const CACHE_LIMITS = {
 const OFFLINE_URL = '/offline.html';
 const SYNC_DB_NAME = 'ems-pwa-sync';
 const SYNC_STORE_NAME = 'requests';
+const SYNC_META_STORE_NAME = 'meta';
 const SYNC_TAG = 'ems-critical-form-sync-v1';
+const PERIODIC_SYNC_TAG = 'ems-light-status-refresh-v1';
+const AUTH_KEY_META = 'authKey';
+const LAST_SYNC_META = 'lastSyncAt';
+
+let currentAuthKey = 'guest';
 
 const PRECACHE_ASSETS = [
     OFFLINE_URL,
@@ -69,6 +75,7 @@ self.addEventListener('activate', (event) => {
                 .map((key) => caches.delete(key))
         );
 
+        currentAuthKey = String(await getMetaValue(AUTH_KEY_META) || 'guest') || 'guest';
         await self.clients.claim();
     })());
 });
@@ -82,6 +89,30 @@ self.addEventListener('message', (event) => {
 
     if (data.type === 'REPLAY_SYNC_QUEUE') {
         const task = replayQueuedRequests('message');
+        if (typeof event.waitUntil === 'function') {
+            event.waitUntil(task);
+        }
+        return;
+    }
+
+    if (data.type === 'SET_AUTH_CONTEXT') {
+        currentAuthKey = String(data.authKey || 'guest') || 'guest';
+
+        const task = (async () => {
+            await putMetaValue(AUTH_KEY_META, currentAuthKey);
+            if (data.lastSyncAt) {
+                await putMetaValue(LAST_SYNC_META, String(data.lastSyncAt));
+            }
+        })();
+
+        if (typeof event.waitUntil === 'function') {
+            event.waitUntil(task);
+        }
+        return;
+    }
+
+    if (data.type === 'CLEAR_RUNTIME_STATE') {
+        const task = clearRuntimeState();
         if (typeof event.waitUntil === 'function') {
             event.waitUntil(task);
         }
@@ -110,13 +141,40 @@ function isCacheableResponse(response) {
     return !!response && response.ok;
 }
 
+function shouldCacheResponse(request, response) {
+    if (!isCacheableResponse(response)) {
+        return false;
+    }
+
+    if (request.mode === 'navigate') {
+        try {
+            const finalUrl = response.url ? new URL(response.url) : null;
+            const finalPath = finalUrl ? finalUrl.pathname.toLowerCase() : '';
+            if (
+                finalPath === '/login' ||
+                finalPath === '/register' ||
+                finalPath.startsWith('/password') ||
+                finalPath.startsWith('/forgot-password') ||
+                finalPath.startsWith('/reset-password') ||
+                finalPath.startsWith('/verify-email')
+            ) {
+                return false;
+            }
+        } catch (_) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 async function staleWhileRevalidate(request, cacheName) {
     const cache = await caches.open(cacheName);
     const cached = await cache.match(request);
 
     const networkPromise = fetch(request)
         .then(async (response) => {
-            if (isCacheableResponse(response)) {
+            if (shouldCacheResponse(request, response)) {
                 await cache.put(request, response.clone());
                 await trimCache(cacheName, CACHE_LIMITS[cacheName]);
             }
@@ -144,7 +202,7 @@ async function networkFirst(request, cacheName, options = {}) {
 
     try {
         const response = await fetchWithTimeout(request, timeoutMs);
-        if (isCacheableResponse(response)) {
+        if (shouldCacheResponse(request, response)) {
             await cache.put(request, response.clone());
             await trimCache(cacheName, CACHE_LIMITS[cacheName]);
         }
@@ -302,7 +360,7 @@ function openSyncDb() {
     }
 
     return new Promise((resolve, reject) => {
-        const request = self.indexedDB.open(SYNC_DB_NAME, 1);
+        const request = self.indexedDB.open(SYNC_DB_NAME, 2);
 
         request.onupgradeneeded = () => {
             const db = request.result;
@@ -310,11 +368,73 @@ function openSyncDb() {
                 const store = db.createObjectStore(SYNC_STORE_NAME, { keyPath: 'id' });
                 store.createIndex('createdAt', 'createdAt', { unique: false });
             }
+            if (!db.objectStoreNames.contains(SYNC_META_STORE_NAME)) {
+                db.createObjectStore(SYNC_META_STORE_NAME, { keyPath: 'key' });
+            }
         };
 
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error('Failed to open sync database'));
     });
+}
+
+async function getMetaValue(key) {
+    const db = await openSyncDb();
+
+    const value = await new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_META_STORE_NAME, 'readonly');
+        const req = tx.objectStore(SYNC_META_STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : null);
+        req.onerror = () => reject(req.error || new Error('Failed to read sync meta'));
+    });
+
+    db.close();
+    return value;
+}
+
+async function putMetaValue(key, value) {
+    const db = await openSyncDb();
+
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_META_STORE_NAME, 'readwrite');
+        tx.objectStore(SYNC_META_STORE_NAME).put({ key, value });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Failed to persist sync meta'));
+        tx.onabort = () => reject(tx.error || new Error('Sync meta transaction aborted'));
+    });
+
+    db.close();
+}
+
+function deleteSyncDatabase() {
+    if (!('indexedDB' in self)) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+        const request = self.indexedDB.deleteDatabase(SYNC_DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+        request.onblocked = () => resolve();
+    });
+}
+
+async function clearRuntimeState() {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+        cacheNames
+            .filter((name) => typeof name === 'string' && name.startsWith('ems-sw-'))
+            .map((name) => caches.delete(name))
+    );
+
+    await deleteSyncDatabase();
+
+    try {
+        const cache = await caches.open(CACHES.static);
+        await cache.addAll(PRECACHE_ASSETS);
+    } catch (_) {
+        // Best effort only; assets will be repopulated on next successful fetch.
+    }
 }
 
 async function getQueuedRequests() {
@@ -416,14 +536,51 @@ async function broadcastToClients(message) {
     }
 }
 
+async function refreshLightweightStatus(trigger = 'periodic-sync') {
+    try {
+        const response = await fetch('/pwa/status', {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const status = await response.json();
+        await broadcastToClients({
+            type: 'PWA_STATUS_REFRESH',
+            status,
+            trigger,
+            at: Date.now(),
+        });
+    } catch (_) {
+        // Best effort only.
+    }
+}
+
 async function replayQueuedRequests(trigger = 'sync') {
     let succeeded = 0;
     let failed = 0;
+    let skipped = 0;
 
     try {
+        const persistedAuthKey = String(await getMetaValue(AUTH_KEY_META) || currentAuthKey || 'guest') || 'guest';
+        currentAuthKey = persistedAuthKey;
         const rows = await getQueuedRequests();
 
         for (const row of rows) {
+            const rowAuthKey = String(row.authKey || '').trim();
+            if (rowAuthKey !== '' && rowAuthKey !== persistedAuthKey) {
+                skipped += 1;
+                await deleteQueuedRequest(row.id);
+                continue;
+            }
+
             const result = await replayQueuedRequest(row);
             if (result.done) {
                 succeeded += 1;
@@ -446,10 +603,15 @@ async function replayQueuedRequests(trigger = 'sync') {
         pending = 0;
     }
 
+    if (succeeded > 0) {
+        await putMetaValue(LAST_SYNC_META, String(Date.now()));
+    }
+
     await broadcastToClients({
         type: 'PWA_SYNC_RESULT',
         succeeded,
         failed,
+        skipped,
         pending,
         trigger,
         at: Date.now(),
@@ -474,4 +636,9 @@ async function replayQueuedRequests(trigger = 'sync') {
 self.addEventListener('sync', (event) => {
     if (event.tag !== SYNC_TAG) return;
     event.waitUntil(replayQueuedRequests('sync'));
+});
+
+self.addEventListener('periodicsync', (event) => {
+    if (event.tag !== PERIODIC_SYNC_TAG) return;
+    event.waitUntil(refreshLightweightStatus('periodic-sync'));
 });

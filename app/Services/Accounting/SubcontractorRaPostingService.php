@@ -9,6 +9,7 @@ use App\Models\ActivityLog;
 use App\Models\Party;
 use App\Models\SubcontractorRaBill;
 use App\Support\MoneyHelper;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +37,8 @@ class SubcontractorRaPostingService
 {
     public function __construct(
         protected PartyAccountService $partyAccountService,
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected AccountingDateControlService $accountingDateControlService
     ) {
     }
 
@@ -79,6 +81,11 @@ class SubcontractorRaPostingService
 
         $companyId   = (int) ($raBill->company_id ?: Config::get('accounting.default_company_id', 1));
         $voucherDate = $raBill->posting_date ?: $raBill->bill_date;
+        $this->accountingDateControlService->assertDateOpenForRuntime(
+            $voucherDate,
+            $companyId,
+            'Posting date'
+        );
 
         // Get or create subcontractor ledger account
         $subcontractorAccount = $this->partyAccountService->syncAccountForParty($subcontractor, $companyId);
@@ -253,6 +260,18 @@ class SubcontractorRaPostingService
             $totalAmount,
             $project
         ) {
+            $lockedRaBill = SubcontractorRaBill::query()
+                ->lockForUpdate()
+                ->findOrFail($raBill->id);
+
+            if (($lockedRaBill->status ?? null) === 'posted' && ! empty($lockedRaBill->voucher_id)) {
+                throw new RuntimeException('Subcontractor RA Bill is already posted.');
+            }
+
+            if (($lockedRaBill->status ?? null) !== 'approved') {
+                throw new RuntimeException('Subcontractor RA Bill must be approved before posting.');
+            }
+
             // Resolve project cost center (Project = Cost Center)
             $costCenterId = ProjectCostCenterResolver::resolveId($companyId, (int) $project->id);
 
@@ -263,8 +282,8 @@ class SubcontractorRaPostingService
             $voucher->voucher_no = $this->voucherNumberService->next('subcontractor_ra', $companyId, $voucherDate);
             $voucher->voucher_type = 'subcontractor_ra';
             $voucher->voucher_date = $voucherDate;
-            $voucher->reference = $raBill->ra_number;
-            $voucher->subcontractor_work_order_id = $raBill->work_order_id;
+            $voucher->reference = $lockedRaBill->ra_number;
+            $voucher->subcontractor_work_order_id = $lockedRaBill->work_order_id;
 
             // Narration
             $narrParts = array_filter([
@@ -283,7 +302,7 @@ class SubcontractorRaPostingService
 
             // IMPORTANT (Phase 5b): create voucher as DRAFT, insert lines, then POST.
             $voucher->status = 'draft';
-            $voucher->created_by = $raBill->created_by;
+            $voucher->created_by = $lockedRaBill->created_by;
 
             // Total voucher amount (sum of debits = sum of credits)
             $totalDebit = $currentAmount + $cgstAmount + $sgstAmount + $igstAmount + max(0, $roundOff);
@@ -474,15 +493,15 @@ class SubcontractorRaPostingService
             $voucher->save();
 
             // Update RA Bill status and link voucher
-            $raBill->voucher_id = $voucher->id;
-            $raBill->status = 'posted';
-            $raBill->save();
+            $lockedRaBill->voucher_id = $voucher->id;
+            $lockedRaBill->status = 'posted';
+            $lockedRaBill->save();
 
             // Audit log
             ActivityLog::logCustom(
                 'posted_to_accounts',
-                'Subcontractor RA Bill ' . $raBill->ra_number . ' posted to accounts as voucher ' . $voucher->voucher_no,
-                $raBill,
+                'Subcontractor RA Bill ' . $lockedRaBill->ra_number . ' posted to accounts as voucher ' . $voucher->voucher_no,
+                $lockedRaBill,
                 [
                     'voucher_id'       => $voucher->id,
                     'voucher_no'       => $voucher->voucher_no,
@@ -507,7 +526,7 @@ class SubcontractorRaPostingService
     /**
      * Reverse a posted RA Bill (create reversal voucher)
      */
-    public function reverse(SubcontractorRaBill $raBill, string $reason = ''): Voucher
+    public function reverse(SubcontractorRaBill $raBill, Carbon|string $reversalDate, string $reason = ''): Voucher
     {
         if ($raBill->status !== 'posted' || ! $raBill->voucher_id) {
             throw new RuntimeException('Only posted RA Bills can be reversed.');
@@ -518,9 +537,26 @@ class SubcontractorRaPostingService
             throw new RuntimeException('Original voucher not found.');
         }
 
-        return DB::transaction(function () use ($raBill, $originalVoucher, $reason) {
+        $reversalDate = $reversalDate instanceof Carbon
+            ? $reversalDate->copy()->startOfDay()
+            : Carbon::parse((string) $reversalDate)->startOfDay();
+        $originalVoucherDate = $originalVoucher->voucher_date
+            ? Carbon::parse((string) $originalVoucher->voucher_date)->startOfDay()
+            : null;
+
+        if ($originalVoucherDate && $reversalDate->lt($originalVoucherDate)) {
+            throw new RuntimeException('Reversal date cannot be earlier than the original posting date.');
+        }
+
+        $this->accountingDateControlService->assertDateOpenForRuntime(
+            $reversalDate,
+            (int) ($raBill->company_id ?: Config::get('accounting.default_company_id', 1)),
+            'Reversal date'
+        );
+
+        return DB::transaction(function () use ($raBill, $originalVoucher, $reason, $reversalDate) {
             $companyId = $raBill->company_id;
-            $voucherDate = now();
+            $voucherDate = $reversalDate;
 
             // Create reversal voucher
             $reversalVoucher = new Voucher();

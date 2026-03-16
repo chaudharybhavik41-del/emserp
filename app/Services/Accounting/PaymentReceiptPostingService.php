@@ -117,6 +117,7 @@ class PaymentReceiptPostingService
         $projectId    = $data['project_id'] ?? null;
         $costCenterId = $data['cost_center_id'] ?? null;
         $currencyId   = $data['currency_id'] ?? null;
+        $paymentType  = $data['payment_type'] ?? null;
         $narration    = trim((string) ($data['narration'] ?? ''));
         $reference    = $data['reference'] ?? null;
         $createdBy    = $data['created_by'] ?? null;
@@ -128,6 +129,7 @@ class PaymentReceiptPostingService
             $projectId,
             $costCenterId,
             $currencyId,
+            $paymentType,
             $narration,
             $reference,
             $createdBy,
@@ -141,6 +143,7 @@ class PaymentReceiptPostingService
             $voucher->cost_center_id = $costCenterId;
             $voucher->voucher_date   = $voucherDate->toDateString();
             $voucher->voucher_type   = $type;
+            $voucher->payment_type   = $type === 'payment' ? $paymentType : null;
             // Centralised voucher numbering (Phase 5a)
             $voucher->voucher_no     = $this->voucherNumberService->next($type, (int) $companyId, $voucherDate);
             $voucher->currency_id    = $currencyId;

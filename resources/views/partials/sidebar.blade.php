@@ -291,6 +291,17 @@
                         </a>
                     </li>
                 @endif
+                @if(\Illuminate\Support\Facades\Route::has('pwa.diagnostics'))
+                    <li class="nav-item">
+                        <a data-erp-menu-item href="{{ route('pwa.diagnostics') }}"
+                           class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                  {{ $isRoute('pwa.diagnostics') ? 'active' : 'text-body-secondary' }}">
+                            <i class="bi bi-phone me-2"></i>
+                            <span>PWA Diagnostics</span>
+                        </a>
+                    </li>
+                @endif
+                @can('notifications.manage')
                 @if(\Illuminate\Support\Facades\Route::has('notifications.push-report'))
                     <li class="nav-item">
                         <a data-erp-menu-item href="{{ route('notifications.push-report') }}"
@@ -301,6 +312,7 @@
                         </a>
                     </li>
                 @endif
+                @endcan
 
                         </ul>
                     </div>
@@ -519,6 +531,19 @@
                     </button>
                     <div id="{{ $secId('crm') }}" class="collapse {{ $openCrm ? 'show' : '' }}">
                         <ul class="nav flex-column small mt-1">
+                    @canany(['crm.lead.view', 'crm.quotation.view'])
+                        @if(\Illuminate\Support\Facades\Route::has('crm.dashboard'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('crm.dashboard') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('crm.dashboard') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-speedometer2 me-2"></i>
+                                    <span>CRM Dashboard</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcanany
+
                     @can('crm.lead.view')
                         @if(\Illuminate\Support\Facades\Route::has('crm.leads.index'))
                             <li class="nav-item">
@@ -527,6 +552,32 @@
                                           {{ $isRoute('crm.leads.*') ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-funnel me-2"></i>
                                     <span>Leads</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('crm.lead_source.view')
+                        @if(\Illuminate\Support\Facades\Route::has('crm.lead-sources.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('crm.lead-sources.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('crm.lead-sources.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-broadcast me-2"></i>
+                                    <span>Lead Sources</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('crm.lead_stage.view')
+                        @if(\Illuminate\Support\Facades\Route::has('crm.lead-stages.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('crm.lead-stages.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('crm.lead-stages.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-signpost-split me-2"></i>
+                                    <span>Lead Stages</span>
                                 </a>
                             </li>
                         @endif
@@ -1582,6 +1633,19 @@
                             @endcan
                         @endif
 
+                        @if(\Illuminate\Support\Facades\Route::has('accounting.period-locks.index'))
+                            @can('accounting.accounts.view')
+                                <li class="nav-item">
+                                    <a data-erp-menu-item href="{{ route('accounting.period-locks.index') }}"
+                                       class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                              {{ $isRoute('accounting.period-locks.*') ? 'active' : 'text-body-secondary' }}">
+                                        <i class="bi bi-calendar-x me-2"></i>
+                                        <span>Period Locks</span>
+                                    </a>
+                                </li>
+                            @endcan
+                        @endif
+
 
 
                     
@@ -1591,11 +1655,22 @@
                             <li class="nav-item">
                                 <a data-erp-menu-item href="{{ route('accounting.vouchers.index') }}"
                                    class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                          {{ $isRoute('accounting.vouchers.*') && !request()->boolean('wip_to_cogs') ? 'active' : 'text-body-secondary' }}">
+                                          {{ $isRoute('accounting.vouchers.*') && !$isRoute('accounting.contra-vouchers.*') && !request()->boolean('wip_to_cogs') ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-receipt me-2"></i>
                                     <span>Vouchers</span>
                                 </a>
                             </li>
+
+                            @if(\Illuminate\Support\Facades\Route::has('accounting.contra-vouchers.index'))
+                                <li class="nav-item">
+                                    <a data-erp-menu-item href="{{ route('accounting.contra-vouchers.index') }}"
+                                       class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                              {{ $isRoute('accounting.contra-vouchers.*') ? 'active' : 'text-body-secondary' }}">
+                                        <i class="bi bi-arrow-left-right me-2"></i>
+                                        <span>Contra Entries</span>
+                                    </a>
+                                </li>
+                            @endif
 
                             <li class="nav-item">
                                 <a href="{{ route('accounting.vouchers.index', ['wip_to_cogs' => 1]) }}"
@@ -1676,12 +1751,13 @@
                     {{-- Bank/Cash Vouchers (Payment/Receipt) --}}
                     @php
                         $paymentIndexRoute = $pickRoute(['accounting.payments.index', 'accounting.payments.create', 'payments.create']);
+                        $cashPaymentIndexRoute = $pickRoute(['accounting.cash-payments.index', 'accounting.cash-payments.create']);
                         $receiptIndexRoute = $pickRoute(['accounting.receipts.index', 'accounting.receipts.create', 'receipts.create']);
                         $onAccountRoute     = $pickRoute(['accounting.receipts.on-account.index', 'receipts.on-account.index']);
                     @endphp
 
                     @canany(['accounting.vouchers.view', 'accounting.vouchers.create'])
-                        @if($paymentIndexRoute || $receiptIndexRoute || $onAccountRoute)
+                        @if($paymentIndexRoute || $cashPaymentIndexRoute || $receiptIndexRoute || $onAccountRoute)
                             <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
                                 Bank &amp; Cash
                             </li>
@@ -1694,6 +1770,17 @@
                                           {{ $isRoute(['accounting.payments.*', 'payments.*']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-arrow-up-right-circle me-2"></i>
                                     <span>Payments</span>
+                                </a>
+                            </li>
+                        @endif
+
+                        @if($cashPaymentIndexRoute)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($cashPaymentIndexRoute) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.cash-payments.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-cash-coin me-2"></i>
+                                    <span>Cash Payments</span>
                                 </a>
                             </li>
                         @endif
@@ -1740,6 +1827,8 @@
                         $rGstHsnSalesSummary    = $pickRoute(['accounting.reports.gst-hsn-sales-summary', 'reports.gst-hsn-sales-summary']);
                         $rSupplierOutstanding = $pickRoute(['accounting.reports.supplier-outstanding', 'reports.supplier-outstanding']);
                         $rClientOutstanding   = $pickRoute(['accounting.reports.client-outstanding', 'reports.client-outstanding']);
+                        $rHealthCheck         = $pickRoute(['accounting.reports.health-check', 'reports.health-check']);
+                        $rYearEndClose        = $pickRoute(['accounting.reports.year-end-close', 'reports.year-end-close']);
                         $rSupplierAgeing      = $pickRoute(['accounting.reports.supplier-ageing', 'reports.supplier-ageing']);
                         $rClientAgeing        = $pickRoute(['accounting.reports.client-ageing', 'reports.client-ageing']);
                         $rCashFlow            = $pickRoute(['accounting.reports.cash-flow', 'reports.cash-flow']);
@@ -1755,7 +1844,7 @@
                             $rSupplierOutstanding || $rClientOutstanding || $rSupplierAgeing || $rClientAgeing ||
                             $rCashFlow || $rFundFlow || $rUnbalancedVouchers || $rTdsCertificates || $rGstSummary ||
                             $rGstPurchaseRegister || $rGstSalesRegister || $rGstVoucherRegister ||
-                            $rGstHsnPurchaseSummary || $rGstHsnSalesSummary
+                            $rGstHsnPurchaseSummary || $rGstHsnSalesSummary || $rYearEndClose
                         )
                             <li data-erp-menu-item class="nav-item mt-2 mb-1 px-3 text-muted text-uppercase fw-semibold" style="font-size: 0.65rem;">
                                 Reports
@@ -1966,6 +2055,28 @@
                                           {{ $isRoute(['accounting.reports.client-outstanding', 'reports.client-outstanding']) ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-person-up me-2"></i>
                                     <span>Client Outstanding</span>
+                                </a>
+                            </li>
+                        @endif
+
+                        @if($rHealthCheck)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rHealthCheck) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.reports.health-check', 'reports.health-check']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-clipboard2-pulse me-2"></i>
+                                    <span>Accounting Health Check</span>
+                                </a>
+                            </li>
+                        @endif
+
+                        @if($rYearEndClose)
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route($rYearEndClose) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.reports.year-end-close', 'reports.year-end-close']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-calendar2-check me-2"></i>
+                                    <span>Year-End Close</span>
                                 </a>
                             </li>
                         @endif
@@ -2369,6 +2480,58 @@
                         @endif
                     @endcan
 
+                    @can('tasks.view')
+                        @if(\Illuminate\Support\Facades\Route::has('tasks.calendar'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('tasks.calendar') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('tasks.calendar') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-calendar3 me-2"></i>
+                                    <span>Task Calendar</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.view')
+                        @if(\Illuminate\Support\Facades\Route::has('tasks.timeline'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('tasks.timeline') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('tasks.timeline') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-bar-chart-steps me-2"></i>
+                                    <span>Task Timeline</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.view')
+                        @if(\Illuminate\Support\Facades\Route::has('tasks.workload'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('tasks.workload') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('tasks.workload') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-people me-2"></i>
+                                    <span>Workload</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.view')
+                        @if(\Illuminate\Support\Facades\Route::has('tasks.insights'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('tasks.insights') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('tasks.insights') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-graph-up-arrow me-2"></i>
+                                    <span>Task Insights</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
                     @can('tasks.list.view')
                         @if(\Illuminate\Support\Facades\Route::has('task-lists.index'))
                             <li class="nav-item">
@@ -2403,6 +2566,45 @@
                                           {{ $isRoute('task-settings.*') ? 'active' : 'text-body-secondary' }}">
                                     <i class="bi bi-gear me-2"></i>
                                     <span>Task Settings</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.settings.view')
+                        @if(\Illuminate\Support\Facades\Route::has('task-settings.automations.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('task-settings.automations.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('task-settings.automations.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-magic me-2"></i>
+                                    <span>Task Automations</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.settings.view')
+                        @if(\Illuminate\Support\Facades\Route::has('task-settings.recurring.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('task-settings.recurring.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('task-settings.recurring.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-arrow-repeat me-2"></i>
+                                    <span>Recurring Tasks</span>
+                                </a>
+                            </li>
+                        @endif
+                    @endcan
+
+                    @can('tasks.settings.view')
+                        @if(\Illuminate\Support\Facades\Route::has('task-settings.intake-forms.index'))
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('task-settings.intake-forms.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                          {{ $isRoute('task-settings.intake-forms.*') ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-ui-checks-grid me-2"></i>
+                                    <span>Task Intake Forms</span>
                                 </a>
                             </li>
                         @endif

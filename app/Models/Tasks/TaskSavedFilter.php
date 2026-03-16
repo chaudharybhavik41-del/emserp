@@ -56,6 +56,11 @@ class TaskSavedFilter extends Model
         });
     }
 
+    public function scopeForCompany($query, ?int $companyId = null)
+    {
+        return $query->where('company_id', $companyId ?? 1);
+    }
+
     public function applyFilters(Builder $query): Builder
     {
         $filters = $this->filters ?? [];
@@ -76,8 +81,44 @@ class TaskSavedFilter extends Model
             $query->whereHas('labels', fn($q) => $q->whereIn('task_labels.id', $filters['label_ids']));
         }
 
+        if (!empty($filters['task_list_id'])) {
+            $query->where('task_list_id', $filters['task_list_id']);
+        }
+
+        if (!empty($filters['project_id'])) {
+            $query->where('project_id', $filters['project_id']);
+        }
+
+        if (!empty($filters['bom_id'])) {
+            $query->where('bom_id', $filters['bom_id']);
+        }
+
         if (!empty($filters['task_types'])) {
             $query->whereIn('task_type', $filters['task_types']);
+        }
+
+        if (!empty($filters['search'])) {
+            $query->where(function ($searchQuery) use ($filters) {
+                $searchQuery->where('title', 'like', '%' . $filters['search'] . '%')
+                    ->orWhere('task_number', 'like', '%' . $filters['search'] . '%')
+                    ->orWhere('description', 'like', '%' . $filters['search'] . '%');
+            });
+        }
+
+        if (!empty($filters['overdue'])) {
+            $query->whereNotNull('due_date')
+                ->where('due_date', '<', now()->startOfDay())
+                ->whereHas('status', fn ($statusQuery) => $statusQuery->where('is_closed', false));
+        }
+
+        if (!empty($filters['due_today'])) {
+            $query->whereDate('due_date', today())
+                ->whereHas('status', fn ($statusQuery) => $statusQuery->where('is_closed', false));
+        }
+
+        if (!empty($filters['due_this_week'])) {
+            $query->whereBetween('due_date', [now()->startOfWeek(), now()->endOfWeek()])
+                ->whereHas('status', fn ($statusQuery) => $statusQuery->where('is_closed', false));
         }
 
         if (!empty($filters['due_date_from'])) {
@@ -101,5 +142,15 @@ class TaskSavedFilter extends Model
             'unassigned' => ['name' => 'Unassigned', 'icon' => 'bi-person-x'],
             'high_priority' => ['name' => 'High Priority', 'icon' => 'bi-flag'],
         ];
+    }
+
+    public function targetRouteName(): string
+    {
+        return match ($this->view_type) {
+            'board' => 'task-board.index',
+            'calendar' => 'tasks.calendar',
+            'gantt' => 'tasks.timeline',
+            default => 'tasks.index',
+        };
     }
 }

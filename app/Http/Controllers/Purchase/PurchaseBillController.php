@@ -21,6 +21,7 @@ use App\Models\Machine;
 use App\Models\Company;
 use App\Models\Attachment;
 use App\Services\Accounting\PurchaseBillPostingService;
+use App\Services\Accounting\AccountingDateControlService;
 use App\Support\GstHelper;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -53,6 +54,17 @@ class PurchaseBillController extends Controller
     protected function makeCreateSubmissionToken(): string
     {
         return (string) Str::uuid();
+    }
+
+    protected function expenseLedgerAccounts()
+    {
+        return Account::query()
+            ->where('is_active', true)
+            ->whereHas('group', function ($query) {
+                $query->where('nature', 'expense');
+            })
+            ->orderBy('name')
+            ->get();
     }
 
     // public function index(Request $request)
@@ -227,7 +239,7 @@ public function index(Request $request)
         ->get();
     $items      = Item::orderBy('code')->get();
     $uoms       = Uom::orderBy('code')->get();
-    $accounts   = Account::orderBy('name')->get();
+	    $accounts   = $this->expenseLedgerAccounts();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -419,7 +431,7 @@ public function index(Request $request)
             : null;
     }
 
-    protected function ensureCreateItemLinesAreGrnLinked(array $lines): void
+    protected function ensureItemLinesAreGrnLinked(array $lines, ?PurchaseBill $bill = null): void
     {
         foreach ($lines as $index => $lineInput) {
             $itemId = $lineInput['item_id'] ?? null;
@@ -429,9 +441,23 @@ public function index(Request $request)
                 continue;
             }
 
-            if (empty($lineInput['material_receipt_id']) || empty($lineInput['material_receipt_line_id'])) {
+            $existingLine = null;
+            $lineId = (int) ($lineInput['id'] ?? 0);
+            if ($bill && $lineId > 0) {
+                $existingLine = $bill->lines()->whereKey($lineId)->first();
+                if (! $existingLine) {
+                    throw ValidationException::withMessages([
+                        'lines.' . $index . '.id' => 'Invalid purchase bill line selected for update.',
+                    ]);
+                }
+            }
+
+            $materialReceiptId = $lineInput['material_receipt_id'] ?? $existingLine?->material_receipt_id;
+            $materialReceiptLineId = $lineInput['material_receipt_line_id'] ?? $existingLine?->material_receipt_line_id;
+
+            if (empty($materialReceiptId) || empty($materialReceiptLineId)) {
                 throw ValidationException::withMessages([
-                    'lines.' . $index . '.item_id' => 'Item lines can only be added from fetched GRN rows on purchase bill creation.',
+                    'lines.' . $index . '.item_id' => 'Item lines can only be added from fetched GRN rows on purchase bills.',
                 ]);
             }
         }
@@ -487,7 +513,7 @@ public function index(Request $request)
             }
         }
 
-        $this->ensureCreateItemLinesAreGrnLinked($data['lines'] ?? []);
+        $this->ensureItemLinesAreGrnLinked($data['lines'] ?? []);
 
 	    // Only GRN-linked item lines are checked; expense lines are ignored by this
 	    $this->validateGrnBalances($data['lines'] ?? []);
@@ -816,7 +842,7 @@ public function index(Request $request)
             ->get();
         $items      = Item::orderBy('code')->get();
         $uoms       = Uom::orderBy('code')->get();
-        $accounts   = Account::orderBy('name')->get();
+	        $accounts   = $this->expenseLedgerAccounts();
 
     $projects   = Project::query()->orderBy('code')->orderBy('name')->get();
 
@@ -870,7 +896,8 @@ public function index(Request $request)
 	            ->with('error', 'Only draft bills can be edited.');
 	    }
 
-	    $this->validateGrnBalances($data['lines'] ?? [], $bill);
+        $this->ensureItemLinesAreGrnLinked($data['lines'] ?? [], $bill);
+        $this->validateGrnBalances($data['lines'] ?? [], $bill);
 
 	    $bill = DB::transaction(function () use ($data, $bill, $itemGstResolver, $accountGstResolver) {
 	        $userId  = Auth::id();
@@ -1025,16 +1052,20 @@ public function index(Request $request)
 	                'line_no'                  => $lineNo++,
 	            ];
 
-	            if ($lineId) {
-	                $line = PurchaseBillLine::find($lineId);
-	                if ($line) {
-	                    $line->update($payload);
-	                    $keptIds[] = $line->id;
-	                }
-	            } else {
-	                $line      = $bill->lines()->create($payload);
-	                $keptIds[] = $line->id;
-	            }
+                    if ($lineId) {
+                        $line = $bill->lines()->whereKey($lineId)->first();
+                        if (! $line) {
+                            throw ValidationException::withMessages([
+                                'lines' => ['Invalid purchase bill line selected for update.'],
+                            ]);
+                        }
+
+                        $line->update($payload);
+                        $keptIds[] = $line->id;
+                    } else {
+                        $line      = $bill->lines()->create($payload);
+                        $keptIds[] = $line->id;
+                    }
 	        }
 
 	        // Delete removed ITEM lines
@@ -1601,15 +1632,17 @@ public function index(Request $request)
 
     public function changePostingDate(Request $request, PurchaseBill $bill)
     {
+        $showRoute = ['bill' => $bill->getKey()];
+
         if (($bill->status ?? null) !== 'posted') {
             return redirect()
-                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->route('purchase.bills.show', $showRoute)
                 ->with('error', 'Only posted bills can have posting date corrected.');
         }
 
         if (! $bill->voucher_id) {
             return redirect()
-                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->route('purchase.bills.show', $showRoute)
                 ->with('error', 'Cannot change posting date because linked accounting voucher is missing.');
         }
 
@@ -1629,9 +1662,16 @@ public function index(Request $request)
 
         if ($currentPostingDate === $newPostingDate) {
             return redirect()
-                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->route('purchase.bills.show', $showRoute)
                 ->with('info', 'Posting date is already set to the selected date.');
         }
+
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $newPostingDate,
+            (int) ($bill->company_id ?: config('accounting.default_company_id', 1)),
+            'posting_date',
+            'Posting date'
+        );
 
         try {
             DB::transaction(function () use ($bill, $newPostingDate, $reason) {
@@ -1707,12 +1747,12 @@ public function index(Request $request)
             throw $e;
         } catch (\Throwable $e) {
             return redirect()
-                ->route('purchase.bills.show', ['bill' => $bill->id])
+                ->route('purchase.bills.show', $showRoute)
                 ->with('error', 'Failed to change posting date: ' . $e->getMessage());
         }
 
         return redirect()
-            ->route('purchase.bills.show', ['bill' => $bill->id])
+            ->route('purchase.bills.show', $showRoute)
             ->with('success', 'Purchase bill posting date updated successfully.');
     }
 
@@ -1842,12 +1882,18 @@ public function index(Request $request)
   
   
   
-  	public function post(PurchaseBill $bill, PurchaseBillPostingService $postingService)
+	public function post(PurchaseBill $bill, PurchaseBillPostingService $postingService)
     {
         if ($bill->status === 'posted') {
             return redirect()
-                ->route('purchase.bills.edit', $bill)
+                ->route('purchase.bills.show', $bill)
                 ->with('info', 'Bill is already posted.');
+        }
+
+        if ($bill->status !== 'draft') {
+            return redirect()
+                ->route('purchase.bills.show', $bill)
+                ->with('error', 'Only draft bills can be posted to accounting.');
         }
 
         try {

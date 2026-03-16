@@ -6,6 +6,7 @@ use App\Models\Accounting\AccountBillAllocation;
 use App\Models\Accounting\Voucher;
 use App\Models\Accounting\VoucherLine;
 use App\Models\PurchaseBill;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -20,11 +21,14 @@ use RuntimeException;
 class PurchaseBillReversalService
 {
     public function __construct(
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected AccountingDateControlService $accountingDateControlService
     ) {}
 
     public function reverseBill(PurchaseBill $bill, string $reversalDate, ?string $reason = null): Voucher
     {
+        $reversalDate = Carbon::parse($reversalDate)->startOfDay();
+
         if (($bill->status ?? null) !== 'posted' || ! $bill->voucher_id) {
             throw new RuntimeException('Only posted purchase bills can be reversed.');
         }
@@ -50,7 +54,29 @@ class PurchaseBillReversalService
         $reason = $reason !== '' ? $reason : 'Reversal requested';
 
         return DB::transaction(function () use ($bill, $reversalDate, $reason) {
-            $originalVoucher = Voucher::with('lines')->lockForUpdate()->findOrFail($bill->voucher_id);
+            $lockedBill = PurchaseBill::query()->lockForUpdate()->findOrFail($bill->id);
+            if (($lockedBill->status ?? null) !== 'posted' || ! $lockedBill->voucher_id) {
+                throw new RuntimeException('Only posted purchase bills can be reversed.');
+            }
+
+            if (($lockedBill->status ?? null) === 'cancelled' || ! empty($lockedBill->reversal_voucher_id) || ! empty($lockedBill->reversed_at)) {
+                throw new RuntimeException('This purchase bill is already cancelled/reversed.');
+            }
+
+            $originalVoucher = Voucher::with('lines')->lockForUpdate()->findOrFail($lockedBill->voucher_id);
+            $originalVoucherDate = $originalVoucher->voucher_date
+                ? Carbon::parse((string) $originalVoucher->voucher_date)->startOfDay()
+                : null;
+
+            if ($originalVoucherDate && $reversalDate->lt($originalVoucherDate)) {
+                throw new RuntimeException('Reversal date cannot be earlier than the original posting date.');
+            }
+
+            $this->accountingDateControlService->assertDateOpenForRuntime(
+                $reversalDate,
+                (int) $originalVoucher->company_id,
+                'Reversal date'
+            );
 
             // Create reversal voucher as JOURNAL (safe + balanced)
             $rev = new Voucher();
@@ -82,6 +108,7 @@ class PurchaseBillReversalService
                     'credit'         => $l->debit,
                     'reference_type' => $l->reference_type,
                     'reference_id'   => $l->reference_id,
+                    'machine_id'     => $l->machine_id,
                 ]);
             }
 
@@ -92,12 +119,12 @@ class PurchaseBillReversalService
             $rev->save();
 
             // Mark bill cancelled + link reversal voucher
-            $bill->status              = 'cancelled';
-            $bill->reversal_voucher_id = $rev->id;
-            $bill->reversed_at         = now();
-            $bill->reversed_by         = Auth::id();
-            $bill->reversal_reason     = $reason;
-            $bill->save();
+            $lockedBill->status              = 'cancelled';
+            $lockedBill->reversal_voucher_id = $rev->id;
+            $lockedBill->reversed_at         = now();
+            $lockedBill->reversed_by         = Auth::id();
+            $lockedBill->reversal_reason     = $reason;
+            $lockedBill->save();
 
             return $rev;
         });

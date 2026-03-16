@@ -3,7 +3,11 @@
 @section('title', 'Edit Voucher')
 
 @section('content')
-                        @php $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? [])); @endphp
+                        @php
+                            $contraAccountLookup = array_flip(array_map('intval', $contraAccountIds ?? []));
+                            $fixedVoucherType = $fixedVoucherType ?? (($voucher->voucher_type ?? null) === 'contra' ? 'contra' : null);
+                            $effectiveVoucherType = $fixedVoucherType ?? old('voucher_type', $voucher->voucher_type);
+                        @endphp
                         <div class="container-fluid">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h1 class="h4 mb-0">Edit Voucher</h1>
@@ -29,13 +33,18 @@
                                             </div>
                                             <div class="col-md-3">
                                                 <label class="form-label form-label-sm">Type</label>
-                                                <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
-                                                    @foreach($voucherTypes as $key => $label)
-                                                        <option value="{{ $key }}" @selected(old('voucher_type', $voucher->voucher_type) === $key)>
-                                                            {{ $label }}
-                                                        </option>
-                                                    @endforeach
-                                                </select>
+                                                @if($fixedVoucherType)
+                                                    <input type="hidden" name="voucher_type" id="voucher_type" value="{{ $effectiveVoucherType }}">
+                                                    <input type="text" class="form-control form-control-sm" value="{{ $voucherTypes[$effectiveVoucherType] ?? ucfirst($effectiveVoucherType) }}" disabled>
+                                                @else
+                                                    <select name="voucher_type" id="voucher_type" class="form-select form-select-sm">
+                                                        @foreach($voucherTypes as $key => $label)
+                                                            <option value="{{ $key }}" @selected($effectiveVoucherType === $key)>
+                                                                {{ $label }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                @endif
                                             </div>
                                             <div class="col-md-2">
                                                 <label class="form-label form-label-sm">Date</label>

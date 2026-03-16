@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Tasks;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Tasks\Concerns\InteractsWithTaskModule;
 use App\Models\Tasks\Task;
 use App\Models\Tasks\TaskAttachment;
 use App\Models\Tasks\TaskComment;
+use App\Services\Tasks\TaskAutomationService;
+use App\Services\Tasks\TaskMentionService;
+use App\Services\Tasks\TaskNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -13,7 +17,13 @@ use Illuminate\Support\Facades\Storage;
 
 class TaskCommentController extends Controller
 {
-    public function __construct()
+    use InteractsWithTaskModule;
+
+    public function __construct(
+        protected TaskNotificationService $taskNotificationService,
+        protected TaskMentionService $taskMentionService,
+        protected TaskAutomationService $taskAutomationService,
+    )
     {
         $this->middleware('auth');
         $this->middleware('permission:tasks.view');
@@ -24,11 +34,22 @@ class TaskCommentController extends Controller
      */
     public function store(Request $request, Task $task): RedirectResponse|JsonResponse
     {
+        $this->authorizeTaskView($task);
+
         $data = $request->validate([
             'content' => 'required|string|max:10000',
             'parent_id' => 'nullable|exists:task_comments,id',
             'is_internal' => 'boolean',
+            'attachments' => 'nullable|array',
+            'attachments.*' => 'file|max:5120',
         ]);
+
+        if (!empty($data['parent_id'])) {
+            $parentComment = TaskComment::query()
+                ->where('task_id', $task->id)
+                ->findOrFail($data['parent_id']);
+            $data['parent_id'] = $parentComment->id;
+        }
 
         $comment = $task->comments()->create([
             'user_id' => auth()->id(),
@@ -54,6 +75,22 @@ class TaskCommentController extends Controller
             }
         }
 
+        $this->taskNotificationService->notifyComment($task->fresh(['watchers', 'assignee', 'reporter']), $comment);
+        $mentionedUsers = $this->taskMentionService->resolveMentionedUsers($comment->content)
+            ->reject(fn ($user) => (int) $user->id === (int) $comment->user_id)
+            ->values();
+        $this->taskMentionService->notifyMentions(
+            $mentionedUsers,
+            "{$comment->user?->name} mentioned you in {$task->task_number}.",
+            route('tasks.show', $task),
+            [
+                'task_id' => $task->id,
+                'task_number' => $task->task_number,
+                'comment_id' => $comment->id,
+            ]
+        );
+        $this->taskAutomationService->handleTaskEvent($task->fresh(['taskList', 'watchers', 'assignee', 'project']), 'comment_added');
+
         if ($request->expectsJson()) {
             $comment->load('user', 'attachments');
             return response()->json([
@@ -71,8 +108,10 @@ class TaskCommentController extends Controller
      */
     public function update(Request $request, Task $task, TaskComment $comment): RedirectResponse|JsonResponse
     {
+        $this->authorizeTaskView($task);
+
         // Check if user can edit
-        if (!$comment->canEdit(auth()->user())) {
+        if ((int) $comment->task_id !== (int) $task->id || !$comment->canEdit(auth()->user())) {
             if ($request->expectsJson()) {
                 return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
             }
@@ -104,8 +143,10 @@ class TaskCommentController extends Controller
      */
     public function destroy(Request $request, Task $task, TaskComment $comment): RedirectResponse|JsonResponse
     {
+        $this->authorizeTaskView($task);
+
         // Check if user can delete
-        if (!$comment->canDelete(auth()->user()) && !auth()->user()->can('tasks.delete')) {
+        if ((int) $comment->task_id !== (int) $task->id || (!$comment->canDelete(auth()->user()) && !auth()->user()->can('tasks.delete'))) {
             if ($request->expectsJson()) {
                 return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
             }
@@ -135,6 +176,9 @@ class TaskCommentController extends Controller
      */
     public function togglePin(Task $task, TaskComment $comment): JsonResponse
     {
+        $this->authorizeTaskEdit($task);
+        abort_unless((int) $comment->task_id === (int) $task->id, 404);
+
         $comment->togglePin();
 
         return response()->json([
@@ -149,6 +193,8 @@ class TaskCommentController extends Controller
      */
     public function index(Request $request, Task $task): JsonResponse
     {
+        $this->authorizeTaskView($task);
+
         $comments = $task->comments()
             ->with(['user', 'replies.user', 'attachments'])
             ->whereNull('parent_id')

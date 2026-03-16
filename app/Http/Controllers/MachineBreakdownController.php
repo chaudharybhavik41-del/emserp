@@ -28,7 +28,11 @@ class MachineBreakdownController extends Controller
 
     public function create()
     {
-        $machines = Machine::where('is_active', true)->orderBy('name')->get();
+        $machines = Machine::where('is_active', true)
+            ->whereNotIn('status', ['retired', 'disposed'])
+            ->orderBy('name')
+            ->get();
+
         return view('machine_maintenance.breakdowns.create', compact('machines'));
     }
 
@@ -63,7 +67,7 @@ class MachineBreakdownController extends Controller
 
     public function show(MachineBreakdownRegister $breakdown)
     {
-        $breakdown->load(['machine','reporter','acknowledger','maintenanceLog']);
+        $breakdown->load(['machine','reporter','acknowledger','resolver','maintenanceLog']);
 
         $users = User::orderBy('name')->get();
 
@@ -118,6 +122,10 @@ class MachineBreakdownController extends Controller
 
     public function resolve(Request $request, MachineBreakdownRegister $breakdown)
     {
+        if ($breakdown->status !== 'in_progress') {
+            return back()->with('error', 'Only in-progress breakdowns can be resolved.');
+        }
+
         $validated = $request->validate([
             'root_cause' => 'nullable|string',
             'corrective_action' => 'nullable|string',

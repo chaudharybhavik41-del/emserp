@@ -14,6 +14,7 @@ use App\Models\Accounting\PurchaseDebitNote;
 use App\Models\Project;
 use App\Models\Machine;
 use App\Services\Accounting\VoucherNumberService;
+use App\Services\Accounting\AccountingDateControlService;
 use App\Services\Accounting\VoucherReversalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -189,8 +190,44 @@ class VoucherController extends Controller
         }
     }
 
+    protected function manualVoucherTypes(): array
+    {
+        return [
+            'journal' => 'Journal',
+            'contra'  => 'Contra',
+        ];
+    }
 
-    public function index(Request $request)
+    protected function createViewPayload(): array
+    {
+        $accounts    = Account::with('group')->orderBy('name')->get();
+        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
+
+        $costCenters = CostCenter::orderBy('name')->get();
+        $projects    = Project::orderBy('code')->orderBy('name')->get(['id', 'code', 'name']);
+        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
+            && Schema::hasColumn('voucher_lines', 'machine_id')
+            && Schema::hasTable('machines');
+        $machines = $hasMachineLineDimension
+            ? Machine::orderBy('name')->get(['id', 'code', 'name'])
+            : collect();
+        $projectCostCenterMap = $costCenters
+            ->filter(fn (CostCenter $costCenter) => ! empty($costCenter->project_id))
+            ->mapWithKeys(fn (CostCenter $costCenter) => [(int) $costCenter->project_id => (int) $costCenter->id]);
+
+        return [
+            'accounts' => $accounts,
+            'contraAccountIds' => $contraAccountIds,
+            'costCenters' => $costCenters,
+            'projects' => $projects,
+            'voucherTypes' => $this->manualVoucherTypes(),
+            'projectCostCenterMap' => $projectCostCenterMap,
+            'machines' => $machines,
+            'hasMachineLineDimension' => $hasMachineLineDimension,
+        ];
+    }
+
+    protected function indexViewPayload(Request $request, ?string $forcedType = null): array
     {
         $query = Voucher::with(['project', 'costCenter'])
             ->orderByDesc('voucher_date')
@@ -200,7 +237,8 @@ class VoucherController extends Controller
             $query->where('status', $status);
         }
 
-        if ($type = $request->get('type')) {
+        $type = $forcedType ?: $request->get('type');
+        if ($type) {
             $query->where('voucher_type', $type);
         }
 
@@ -225,58 +263,82 @@ class VoucherController extends Controller
         }
 
         $vouchers = $query->paginate($request->get('per_page', 25))->withQueryString();
-
         $docLinks = $this->buildDocLinksForVoucherIds($vouchers->pluck('id')->all());
 
-        $projects    = Project::orderBy('code')->get(['id', 'code', 'name']);
-        $costCenters = CostCenter::orderBy('name')->get(['id', 'name']);
-        $voucherTypes = [
-            'journal' => 'Journal',
-            'contra'  => 'Contra',
+        return [
+            'vouchers' => $vouchers,
+            'docLinks' => $docLinks,
+            'projects' => Project::orderBy('code')->get(['id', 'code', 'name']),
+            'costCenters' => CostCenter::orderBy('name')->get(['id', 'name']),
+            'voucherTypes' => $this->manualVoucherTypes(),
+            'forcedVoucherType' => $forcedType,
         ];
+    }
 
-        return view('accounting.vouchers.index', compact(
-            'vouchers',
-            'docLinks',
-            'projects',
-            'costCenters',
-            'voucherTypes'
+
+    public function index(Request $request)
+    {
+        return view('accounting.vouchers.index', array_merge(
+            $this->indexViewPayload($request),
+            [
+                'pageTitle' => 'Vouchers',
+                'createRoute' => route('accounting.vouchers.create'),
+                'createLabel' => 'Add Voucher',
+                'filterRoute' => route('accounting.vouchers.index'),
+                'resetRoute' => route('accounting.vouchers.index', ['wip_to_cogs' => request()->boolean('wip_to_cogs') ? '1' : '0']),
+                'hideTypeFilter' => false,
+            ]
+        ));
+    }
+
+    public function indexContra(Request $request)
+    {
+        $request->merge(['type' => 'contra']);
+
+        return view('accounting.vouchers.index', array_merge(
+            $this->indexViewPayload($request, 'contra'),
+            [
+                'pageTitle' => 'Contra Entries',
+                'createRoute' => route('accounting.contra-vouchers.create'),
+                'createLabel' => 'Add Contra Entry',
+                'filterRoute' => route('accounting.contra-vouchers.index'),
+                'resetRoute' => route('accounting.contra-vouchers.index'),
+                'hideTypeFilter' => true,
+            ]
         ));
     }
 
     public function create()
     {
-
-        $accounts    = Account::with('group')->orderBy('name')->get();
-        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
-
-        $costCenters = CostCenter::orderBy('name')->get();
-        $projects    = Project::orderBy('code')->orderBy('name')->get(['id','code','name']);
-        $hasMachineLineDimension = Schema::hasTable('voucher_lines')
-            && Schema::hasColumn('voucher_lines', 'machine_id')
-            && Schema::hasTable('machines');
-        $machines = $hasMachineLineDimension
-            ? Machine::orderBy('name')->get(['id', 'code', 'name'])
-            : collect();
-        $projectCostCenterMap = $costCenters
-            ->filter(fn (CostCenter $costCenter) => ! empty($costCenter->project_id))
-            ->mapWithKeys(fn (CostCenter $costCenter) => [(int) $costCenter->project_id => (int) $costCenter->id]);
-
-        // Keep the type set small & controlled for now.
-        $voucherTypes = [
-            'journal' => 'Journal',
-            'contra'  => 'Contra',
-        ];
-
-        return view('accounting.vouchers.create', compact(
-            'accounts',
-            'costCenters',
-            'projects',
-            'voucherTypes',
-            'projectCostCenterMap',
-            'machines',
-            'hasMachineLineDimension'
+        return view('accounting.vouchers.create', array_merge(
+            $this->createViewPayload(),
+            [
+                'pageTitle' => 'Create Voucher',
+                'formAction' => route('accounting.vouchers.store'),
+                'cancelRoute' => route('accounting.vouchers.index'),
+                'fixedVoucherType' => null,
+            ]
         ));
+    }
+
+    public function createContra()
+    {
+        return view('accounting.vouchers.create', array_merge(
+            $this->createViewPayload(),
+            [
+                'pageTitle' => 'Create Contra Entry',
+                'formAction' => route('accounting.contra-vouchers.store'),
+                'cancelRoute' => route('accounting.contra-vouchers.index'),
+                'fixedVoucherType' => 'contra',
+            ]
+        ));
+    }
+
+    public function storeContra(Request $request)
+    {
+        $request->merge(['voucher_type' => 'contra']);
+
+        return $this->store($request);
     }
 
     public function store(Request $request)
@@ -314,6 +376,12 @@ class VoucherController extends Controller
         ]);
 
         $this->validateManualVoucherLines($data['lines']);
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $data['voucher_date'],
+            $companyId,
+            'voucher_date',
+            'Voucher date'
+        );
 
         if (($data['voucher_type'] ?? null) === 'contra') {
             $this->validateContraVoucherAccounts($companyId, $data['lines']);
@@ -508,6 +576,7 @@ class VoucherController extends Controller
         return view('accounting.vouchers.edit', compact(
             'voucher',
             'accounts',
+            'contraAccountIds',
             'costCenters',
             'projects',
             'voucherTypes',
@@ -561,6 +630,12 @@ class VoucherController extends Controller
         ]);
 
         $this->validateManualVoucherLines($data['lines']);
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $data['voucher_date'],
+            $companyId,
+            'voucher_date',
+            'Voucher date'
+        );
 
         if (($data['voucher_type'] ?? null) === 'contra') {
             $this->validateContraVoucherAccounts($companyId, $data['lines']);
@@ -669,6 +744,13 @@ class VoucherController extends Controller
                 ->with('error', 'Reversed vouchers cannot be posted again.');
         }
 
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $voucher->voucher_date ?: now()->toDateString(),
+            (int) $voucher->company_id,
+            'voucher_date',
+            'Voucher date'
+        );
+
         DB::transaction(function () use ($request, $voucher) {
             $voucher->posted_by = $request->user()?->id;
             $voucher->posted_at = now();
@@ -729,6 +811,13 @@ class VoucherController extends Controller
         if ($oldDate === $newDate) {
             return redirect()->back()->with('info', 'No change in date.');
         }
+
+        app(AccountingDateControlService::class)->assertDateOpenForValidation(
+            $newDate,
+            (int) $voucher->company_id,
+            'voucher_date',
+            'Voucher date'
+        );
 
         $old = $voucher->getAttributes();
         $voucher->voucher_date = $newDate;

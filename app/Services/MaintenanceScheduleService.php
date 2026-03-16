@@ -15,7 +15,7 @@ class MaintenanceScheduleService
      *    - min(active plan next_scheduled_date) if any
      *    - else fallback to machine last_maintenance_date + maintenance_frequency_days
      */
-    public function syncMachineNextDueDate(int $machineId): void
+    public static function syncMachineNextDueDate(int $machineId): void
     {
         $machine = Machine::find($machineId);
         if (! $machine) {

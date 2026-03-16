@@ -533,12 +533,13 @@ class ClientRaBillController extends Controller
      */
     public function reverse(Request $request, ClientRaBill $clientRa, SalesPostingService $postingService)
     {
-        $request->validate([
+        $data = $request->validate([
+            'reversal_date' => 'required|date',
             'reason' => 'required|string|max:500',
         ]);
 
         try {
-            $reversalVoucher = $postingService->reverse($clientRa, $request->reason);
+            $reversalVoucher = $postingService->reverse($clientRa, $data['reversal_date'], $data['reason']);
 
             return redirect()
                 ->route('accounting.client-ra.show', $clientRa)

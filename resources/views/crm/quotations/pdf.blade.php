@@ -125,10 +125,40 @@
 
         .prewrap { white-space: pre-wrap; } /* preserve indentation + new lines */
 
+        .line-stack > div { margin-bottom: 2px; }
+
+        .client-block {
+            line-height: 1.45;
+        }
+
+        .subject-prefix {
+            font-weight: 800;
+            display: inline-block;
+            padding-right: 6px;
+        }
+
         .subject {
-            text-align: center;
+            text-align: left;
             font-weight: 800;
             font-size: 14px;
+            line-height: 1.45;
+        }
+
+        .project-detail {
+            border: 1px solid #000;
+            padding: 7px 9px;
+            margin-bottom: 8px;
+        }
+
+        .project-detail-title {
+            font-weight: 800;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+        }
+
+        .salutation {
+            font-weight: 700;
+            margin-bottom: 6px;
         }
 
         .para {
@@ -146,12 +176,78 @@
             font-size: 14px;
         }
 
+        .terms-table td {
+            padding: 3px 0;
+            vertical-align: top;
+        }
+
+        .terms-label {
+            width: 34%;
+            font-weight: 800;
+        }
+
+        .terms-sep {
+            width: 3%;
+            font-weight: 800;
+            text-align: center;
+        }
+
+        .terms-value {
+            width: 63%;
+        }
+
+        .terms-extra {
+            margin-top: 8px;
+        }
+
+        .terms-extra-line {
+            margin-bottom: 3px;
+        }
+
         .terms-block {
             line-height: 1.55;
         }
 
         .signature-block {
             margin-top: 12px;
+        }
+
+        .signature-table td {
+            vertical-align: top;
+        }
+
+        .signature-company {
+            font-weight: 800;
+            font-size: 13px;
+        }
+
+        .stamp-wrap {
+            text-align: right;
+        }
+
+        .desc-line {
+            margin-bottom: 2px;
+        }
+
+        .desc-heading {
+            font-weight: 800;
+        }
+
+        .desc-subline {
+            padding-left: 10px;
+        }
+
+        .rate-value {
+            display: block;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .rate-unit {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            margin-top: 2px;
         }
     </style>
 </head>
@@ -203,6 +299,60 @@
 
     // Rate header unit (best effort)
     $firstUomCode = optional($quotation->items->first()?->uom)->code ?? 'MT';
+
+    $splitLines = static function (?string $text): array {
+        if (! is_string($text)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            static fn ($line) => trim((string) $line),
+            preg_split('/\r\n|\r|\n/', $text) ?: []
+        ), static fn ($line) => $line !== ''));
+    };
+
+    $subjectRaw = trim((string) ($quotation->project_name ?? 'Quotation'));
+    if ($subjectRaw === '') {
+        $subjectRaw = 'Quotation';
+    }
+    if (! preg_match('/^(quotation|offer)\b/i', $subjectRaw)) {
+        $subjectRaw = 'Quotation For ' . $subjectRaw;
+    }
+    $subjectLines = $splitLines($subjectRaw);
+
+    $projectDetailLines = [];
+    if (! empty($quotation->client_po_number)) {
+        $projectDetailLines[] = 'Client Ref.: ' . $quotation->client_po_number;
+    }
+    foreach ($splitLines($quotation->project_special_notes) as $noteLine) {
+        $projectDetailLines[] = $noteLine;
+    }
+
+    $commercialTerms = [];
+    if (! empty($quotation->freight_terms)) {
+        $commercialTerms[] = ['label' => 'TRANSPORTATION', 'value' => $quotation->freight_terms];
+    }
+    if (! empty($quotation->payment_terms) || ! empty($quotation->payment_terms_days)) {
+        $paymentValue = trim(implode(' ', array_filter([
+            $quotation->payment_terms,
+            ! empty($quotation->payment_terms_days) ? '(' . $quotation->payment_terms_days . ' Days)' : null,
+        ])));
+        $commercialTerms[] = ['label' => 'PAYMENT TERMS', 'value' => $paymentValue];
+    }
+    if (! empty($quotation->delivery_terms)) {
+        $commercialTerms[] = ['label' => 'DELIVERY', 'value' => $quotation->delivery_terms];
+    }
+    if (! empty($quotation->valid_till)) {
+        $commercialTerms[] = ['label' => 'VALIDITY', 'value' => 'Valid up to ' . $quotation->valid_till->format('d-m-Y')];
+    }
+
+    $additionalTermLines = [];
+    foreach ($splitLines($quotation->other_terms) as $termLine) {
+        $additionalTermLines[] = $termLine;
+    }
+    foreach ($splitLines($termsText) as $termLine) {
+        $additionalTermLines[] = $termLine;
+    }
 @endphp
 
 {{-- Fixed watermark --}}
@@ -283,28 +433,49 @@
         {{ strtoupper($quotation->party?->legal_name ?? $quotation->party?->name ?? '-') }}
     </div>
 
-    @if($quotation->party?->address_line1)
-        <div>{{ $quotation->party->address_line1 }}</div>
-    @endif
-    @if($quotation->party?->address_line2)
-        <div>{{ $quotation->party->address_line2 }}</div>
-    @endif
-    @if($quotation->party?->city || $quotation->party?->state || $quotation->party?->pincode)
-        <div>
-            {{ trim(implode(', ', array_filter([$quotation->party?->city, $quotation->party?->state]))) }}
-            @if($quotation->party?->pincode)
-                - {{ $quotation->party->pincode }}
-            @endif
+    <div class="client-block">
+        @if($quotation->lead?->contact_name)
+            <div>Kind Attn.: {{ $quotation->lead->contact_name }}</div>
+        @endif
+        @if($quotation->party?->address_line1)
+            <div>{{ $quotation->party->address_line1 }}</div>
+        @endif
+        @if($quotation->party?->address_line2)
+            <div>{{ $quotation->party->address_line2 }}</div>
+        @endif
+        @if($quotation->party?->city || $quotation->party?->state || $quotation->party?->pincode)
+            <div>
+                {{ trim(implode(', ', array_filter([$quotation->party?->city, $quotation->party?->state]))) }}
+                @if($quotation->party?->pincode)
+                    - {{ $quotation->party->pincode }}
+                @endif
+            </div>
+        @endif
+    </div>
+</div>
+
+@if(!empty($projectDetailLines))
+    <div class="project-detail">
+        <div class="project-detail-title">Project Detail</div>
+        <div class="line-stack">
+            @foreach($projectDetailLines as $detailLine)
+                <div>{{ $detailLine }}</div>
+            @endforeach
         </div>
+    </div>
+@endif
+
+<div class="subject mb-2">
+    <span class="subject-prefix">Sub:-</span>
+    @if(!empty($subjectLines))
+        <span>{{ strtoupper($subjectLines[0]) }}</span>
+        @foreach(array_slice($subjectLines, 1) as $subjectLine)
+            <div>{{ strtoupper($subjectLine) }}</div>
+        @endforeach
     @endif
 </div>
 
-<div class="subject mb-2">
-    Sub: - {{ strtoupper($quotation->project_name ?? 'QUOTATION') }}
-    @if(!empty($quotation->project_special_notes))
-        <br>{{ strtoupper($quotation->project_special_notes) }}
-    @endif
-</div>
+<div class="salutation">Dear Sir,</div>
 
 <div class="para mb-2">
     As Per Your Inquiry by Our Discussion, we are Submitting our Best Offer along with Term and Condition.
@@ -346,19 +517,31 @@
             @php
                 $uomCode = $line->uom?->code ?? $firstUomCode;
                 $qty = $line->quantity;
+                $descriptionLines = $splitLines($line->description);
             @endphp
             <tr>
                 <td class="text-center">{{ $i++ }}</td>
-                <td class="prewrap">{{ $line->description }}</td>
+                <td>
+                    @foreach($descriptionLines as $descriptionLine)
+                        @php
+                            $trimmedLine = ltrim($descriptionLine, "- \t");
+                            $isHeadingLine = preg_match('/^(including|excluding|painting|paint system|surface preparation|surface prep|transportation|gst|payment terms?|delivery|validity)\s*:?/i', $trimmedLine) === 1;
+                            $isSubline = preg_match('/^[-•]/', $descriptionLine) === 1 || (! $isHeadingLine && str_starts_with($descriptionLine, '  '));
+                        @endphp
+                        <div class="desc-line {{ $isHeadingLine ? 'desc-heading' : '' }} {{ $isSubline ? 'desc-subline' : '' }}">
+                            {{ $trimmedLine }}
+                        </div>
+                    @endforeach
+                </td>
                 <td class="text-center">
                     {{ $uomCode ? ($uomCode . '.') : '-' }}
                 </td>
                 <td class="text-center prewrap">
                     {{ ($qty === null || (float)$qty == 0.0) ? 'As Per Sectional Weight' : number_format((float)$qty, 3) }}
                 </td>
-                <td class="text-center fw-bold">
-                    {{ number_format((float)$line->unit_price, 0) }}/-<br>
-                    Rs./{{ $uomCode }}.
+                <td class="text-center">
+                    <span class="rate-value">{{ number_format((float)$line->unit_price, 2) }}/-</span>
+                    <span class="rate-unit">Rs./{{ $uomCode }}.</span>
                 </td>
             </tr>
         @endforeach
@@ -379,9 +562,21 @@
         <tbody>
         @php $i = 1; @endphp
         @foreach($quotation->items as $line)
+            @php $descriptionLines = $splitLines($line->description); @endphp
             <tr>
                 <td class="text-center">{{ $i++ }}</td>
-                <td class="prewrap">{{ $line->description }}</td>
+                <td>
+                    @foreach($descriptionLines as $descriptionLine)
+                        @php
+                            $trimmedLine = ltrim($descriptionLine, "- \t");
+                            $isHeadingLine = preg_match('/^(including|excluding|painting|paint system|surface preparation|surface prep|transportation|gst|payment terms?|delivery|validity)\s*:?/i', $trimmedLine) === 1;
+                            $isSubline = preg_match('/^[-•]/', $descriptionLine) === 1 || (! $isHeadingLine && str_starts_with($descriptionLine, '  '));
+                        @endphp
+                        <div class="desc-line {{ $isHeadingLine ? 'desc-heading' : '' }} {{ $isSubline ? 'desc-subline' : '' }}">
+                            {{ $trimmedLine }}
+                        </div>
+                    @endforeach
+                </td>
                 <td class="text-center">{{ $line->uom?->code ?? '-' }}</td>
                 <td class="text-right">{{ number_format((float)$line->quantity, 3) }}</td>
                 <td class="text-right">{{ number_format((float)$line->unit_price, 2) }}</td>
@@ -422,11 +617,25 @@
 
 <div class="terms-title mb-2">[B] TERMS AND CONDITION</div>
 
-@if($termsText)
-    <div class="terms-block prewrap">
-        {!! nl2br(e($termsText)) !!}
+@if(!empty($commercialTerms))
+    <table class="terms-table mb-2">
+        @foreach($commercialTerms as $term)
+            <tr>
+                <td class="terms-label">{{ $term['label'] }}</td>
+                <td class="terms-sep">:</td>
+                <td class="terms-value">{{ $term['value'] }}</td>
+            </tr>
+        @endforeach
+    </table>
+@endif
+
+@if(!empty($additionalTermLines))
+    <div class="terms-block terms-extra">
+        @foreach($additionalTermLines as $termLine)
+            <div class="terms-extra-line">{{ $termLine }}</div>
+        @endforeach
     </div>
-@else
+@elseif(empty($commercialTerms))
     <div class="terms-block prewrap">
 1. GST: As applicable extra.
 2. Payment Terms: As per mutually agreed schedule.
@@ -435,19 +644,21 @@
 @endif
 
 <div class="signature-block mt-3">
-    <div>Yours faithfully,</div>
-    <div class="fw-bold">For</div>
-    <div class="fw-bold">{{ $companyName }}.</div>
-
-    <div style="height: 14mm;"></div>
-
-    @if($stampSrc)
-        <div>
-            <img src="{{ $stampSrc }}" alt="stamp" style="height: 42mm; width: auto;">
-        </div>
-    @endif
-
-    <div class="small">Authorised Signatory</div>
+    <table class="signature-table no-border">
+        <tr>
+            <td style="width: 58%;">
+                <div>Yours faithfully,</div>
+                <div class="signature-company">For {{ $companyName }}</div>
+                <div style="height: 20mm;"></div>
+                <div class="small">Authorised Signatory</div>
+            </td>
+            <td style="width: 42%;" class="stamp-wrap">
+                @if($stampSrc)
+                    <img src="{{ $stampSrc }}" alt="stamp" style="height: 40mm; width: auto;">
+                @endif
+            </td>
+        </tr>
+    </table>
 </div>
 
 </body>

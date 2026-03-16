@@ -28,10 +28,16 @@
         </div>
     </div>
 
+    @include('tasks.partials.planning-nav')
+    @include('tasks.partials.saved-views', ['currentViewType' => 'board'])
+
     {{-- Filters --}}
     <div class="card mb-3">
         <div class="card-body py-2">
             <form method="GET" action="{{ route('task-board.index') }}" class="row g-2 align-items-center">
+                @if(request('saved_view'))
+                <input type="hidden" name="saved_view" value="{{ request('saved_view') }}">
+                @endif
                 <div class="col-auto">
                     <select name="list" class="form-select form-select-sm" onchange="this.form.submit()">
                         <option value="">All Lists</option>
