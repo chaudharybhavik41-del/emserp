@@ -140,6 +140,7 @@
                                                 <th>Component</th>
                                                 <th style="width: 150px;">Calculation</th>
                                                 <th style="width: 120px;">Value</th>
+                                                <th style="width: 180px;">Formula / Limits</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -150,6 +151,11 @@
                                                     $calcType = $existingComp->pivot->calculation_type ?? $comp->calculation_type ?? 'fixed';
                                                     $calcValue = $existingComp->pivot->value ?? $comp->default_value ?? '';
                                                     $percentage = $existingComp->pivot->percentage ?? $comp->percentage ?? '';
+                                                    $formula = $existingComp->pivot->formula ?? '';
+                                                    $minValue = $existingComp->pivot->min_value ?? '';
+                                                    $maxValue = $existingComp->pivot->max_value ?? '';
+                                                    $isMandatory = (bool) ($existingComp->pivot->is_mandatory ?? false);
+                                                    $sortOrder = $existingComp->pivot->sort_order ?? $loop->iteration;
                                                 @endphp
                                                 <tr>
                                                     <td class="text-center">
@@ -174,6 +180,39 @@
                                                                value="{{ str_contains($calcType, 'percent') ? $percentage : $calcValue }}"
                                                                step="0.01" min="0" {{ $isSelected ? '' : 'disabled' }}>
                                                     </td>
+                                                    <td>
+                                                        <input type="text" class="form-control form-control-sm component-formula mb-1"
+                                                               data-component-id="{{ $comp->id }}"
+                                                               value="{{ $formula }}"
+                                                               placeholder="Formula"
+                                                               {{ $isSelected ? '' : 'disabled' }}>
+                                                        <div class="d-flex gap-1 mb-1">
+                                                            <input type="number" class="form-control form-control-sm component-min"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $minValue }}"
+                                                                   step="0.01" min="0" placeholder="Min"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                            <input type="number" class="form-control form-control-sm component-max"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $maxValue }}"
+                                                                   step="0.01" min="0" placeholder="Max"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <div class="form-check">
+                                                                <input type="checkbox" class="form-check-input component-mandatory"
+                                                                       data-component-id="{{ $comp->id }}"
+                                                                       {{ $isMandatory ? 'checked' : '' }}
+                                                                       {{ $isSelected ? '' : 'disabled' }}>
+                                                                <label class="form-check-label small">Mandatory</label>
+                                                            </div>
+                                                            <input type="number" class="form-control form-control-sm component-sort-order"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $sortOrder }}"
+                                                                   min="0" style="width: 72px;"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             @endforeach
                                         </tbody>
@@ -191,6 +230,7 @@
                                                 <th>Component</th>
                                                 <th style="width: 150px;">Calculation</th>
                                                 <th style="width: 120px;">Value</th>
+                                                <th style="width: 180px;">Formula / Limits</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -201,6 +241,11 @@
                                                     $calcType = $existingComp->pivot->calculation_type ?? $comp->calculation_type ?? 'fixed';
                                                     $calcValue = $existingComp->pivot->value ?? $comp->default_value ?? '';
                                                     $percentage = $existingComp->pivot->percentage ?? $comp->percentage ?? '';
+                                                    $formula = $existingComp->pivot->formula ?? '';
+                                                    $minValue = $existingComp->pivot->min_value ?? '';
+                                                    $maxValue = $existingComp->pivot->max_value ?? '';
+                                                    $isMandatory = (bool) ($existingComp->pivot->is_mandatory ?? false);
+                                                    $sortOrder = $existingComp->pivot->sort_order ?? $loop->iteration;
                                                 @endphp
                                                 <tr>
                                                     <td class="text-center">
@@ -225,6 +270,39 @@
                                                                value="{{ str_contains($calcType, 'percent') ? $percentage : $calcValue }}"
                                                                step="0.01" min="0" {{ $isSelected ? '' : 'disabled' }}>
                                                     </td>
+                                                    <td>
+                                                        <input type="text" class="form-control form-control-sm component-formula mb-1"
+                                                               data-component-id="{{ $comp->id }}"
+                                                               value="{{ $formula }}"
+                                                               placeholder="Formula"
+                                                               {{ $isSelected ? '' : 'disabled' }}>
+                                                        <div class="d-flex gap-1 mb-1">
+                                                            <input type="number" class="form-control form-control-sm component-min"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $minValue }}"
+                                                                   step="0.01" min="0" placeholder="Min"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                            <input type="number" class="form-control form-control-sm component-max"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $maxValue }}"
+                                                                   step="0.01" min="0" placeholder="Max"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <div class="form-check">
+                                                                <input type="checkbox" class="form-check-input component-mandatory"
+                                                                       data-component-id="{{ $comp->id }}"
+                                                                       {{ $isMandatory ? 'checked' : '' }}
+                                                                       {{ $isSelected ? '' : 'disabled' }}>
+                                                                <label class="form-check-label small">Mandatory</label>
+                                                            </div>
+                                                            <input type="number" class="form-control form-control-sm component-sort-order"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $sortOrder }}"
+                                                                   min="0" style="width: 72px;"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             @endforeach
                                         </tbody>
@@ -242,6 +320,7 @@
                                                 <th>Component</th>
                                                 <th style="width: 150px;">Calculation</th>
                                                 <th style="width: 120px;">Value</th>
+                                                <th style="width: 180px;">Formula / Limits</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -252,6 +331,11 @@
                                                     $calcType = $existingComp->pivot->calculation_type ?? $comp->calculation_type ?? 'fixed';
                                                     $calcValue = $existingComp->pivot->value ?? $comp->default_value ?? '';
                                                     $percentage = $existingComp->pivot->percentage ?? $comp->percentage ?? '';
+                                                    $formula = $existingComp->pivot->formula ?? '';
+                                                    $minValue = $existingComp->pivot->min_value ?? '';
+                                                    $maxValue = $existingComp->pivot->max_value ?? '';
+                                                    $isMandatory = (bool) ($existingComp->pivot->is_mandatory ?? false);
+                                                    $sortOrder = $existingComp->pivot->sort_order ?? $loop->iteration;
                                                 @endphp
                                                 <tr>
                                                     <td class="text-center">
@@ -274,6 +358,39 @@
                                                                data-component-id="{{ $comp->id }}"
                                                                value="{{ str_contains($calcType, 'percent') ? $percentage : $calcValue }}"
                                                                step="0.01" min="0" {{ $isSelected ? '' : 'disabled' }}>
+                                                    </td>
+                                                    <td>
+                                                        <input type="text" class="form-control form-control-sm component-formula mb-1"
+                                                               data-component-id="{{ $comp->id }}"
+                                                               value="{{ $formula }}"
+                                                               placeholder="Formula"
+                                                               {{ $isSelected ? '' : 'disabled' }}>
+                                                        <div class="d-flex gap-1 mb-1">
+                                                            <input type="number" class="form-control form-control-sm component-min"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $minValue }}"
+                                                                   step="0.01" min="0" placeholder="Min"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                            <input type="number" class="form-control form-control-sm component-max"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $maxValue }}"
+                                                                   step="0.01" min="0" placeholder="Max"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <div class="form-check">
+                                                                <input type="checkbox" class="form-check-input component-mandatory"
+                                                                       data-component-id="{{ $comp->id }}"
+                                                                       {{ $isMandatory ? 'checked' : '' }}
+                                                                       {{ $isSelected ? '' : 'disabled' }}>
+                                                                <label class="form-check-label small">Mandatory</label>
+                                                            </div>
+                                                            <input type="number" class="form-control form-control-sm component-sort-order"
+                                                                   data-component-id="{{ $comp->id }}"
+                                                                   value="{{ $sortOrder }}"
+                                                                   min="0" style="width: 72px;"
+                                                                   {{ $isSelected ? '' : 'disabled' }}>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             @endforeach
@@ -306,8 +423,18 @@ document.addEventListener('DOMContentLoaded', function() {
     function toggleComponentFields(componentId, enabled) {
         const calc = document.querySelector(`.component-calc[data-component-id="${componentId}"]`);
         const value = document.querySelector(`.component-value[data-component-id="${componentId}"]`);
+        const formula = document.querySelector(`.component-formula[data-component-id="${componentId}"]`);
+        const min = document.querySelector(`.component-min[data-component-id="${componentId}"]`);
+        const max = document.querySelector(`.component-max[data-component-id="${componentId}"]`);
+        const mandatory = document.querySelector(`.component-mandatory[data-component-id="${componentId}"]`);
+        const sortOrder = document.querySelector(`.component-sort-order[data-component-id="${componentId}"]`);
         if (calc) calc.disabled = !enabled;
         if (value) value.disabled = !enabled;
+        if (formula) formula.disabled = !enabled;
+        if (min) min.disabled = !enabled;
+        if (max) max.disabled = !enabled;
+        if (mandatory) mandatory.disabled = !enabled;
+        if (sortOrder) sortOrder.disabled = !enabled;
     }
     
     function generateHiddenInputs() {
@@ -318,15 +445,28 @@ document.addEventListener('DOMContentLoaded', function() {
             const componentId = checkbox.dataset.componentId;
             const calc = document.querySelector(`.component-calc[data-component-id="${componentId}"]`);
             const value = document.querySelector(`.component-value[data-component-id="${componentId}"]`);
+            const formula = document.querySelector(`.component-formula[data-component-id="${componentId}"]`);
+            const min = document.querySelector(`.component-min[data-component-id="${componentId}"]`);
+            const max = document.querySelector(`.component-max[data-component-id="${componentId}"]`);
+            const mandatory = document.querySelector(`.component-mandatory[data-component-id="${componentId}"]`);
+            const sortOrder = document.querySelector(`.component-sort-order[data-component-id="${componentId}"]`);
             const calcType = calc ? calc.value : 'fixed';
             const calcValue = value ? value.value : 0;
+            const formulaValue = formula ? formula.value : '';
+            const minValue = min ? min.value : '';
+            const maxValue = max ? max.value : '';
+            const sortOrderValue = sortOrder ? sortOrder.value : (index + 1);
             
             componentInputs.innerHTML += `
                 <input type="hidden" name="components[${index}][id]" value="${componentId}">
                 <input type="hidden" name="components[${index}][calculation_type]" value="${calcType}">
                 <input type="hidden" name="components[${index}][calculation_value]" value="${calcType === 'fixed' ? calcValue : 0}">
                 <input type="hidden" name="components[${index}][percentage]" value="${calcType.includes('percent') ? calcValue : ''}">
-                <input type="hidden" name="components[${index}][based_on]" value="basic">
+                <input type="hidden" name="components[${index}][formula]" value="${calcType === 'formula' ? formulaValue : formulaValue}">
+                <input type="hidden" name="components[${index}][min_value]" value="${minValue}">
+                <input type="hidden" name="components[${index}][max_value]" value="${maxValue}">
+                <input type="hidden" name="components[${index}][is_mandatory]" value="${mandatory && mandatory.checked ? 1 : 0}">
+                <input type="hidden" name="components[${index}][sort_order]" value="${sortOrderValue}">
             `;
             index++;
         });
@@ -348,6 +488,43 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     updateComponentCount();
+
+    // Auto calculate Professional Tax (PT) when Basic Salary changes
+    const ptSlabs = {!! json_encode(\App\Models\Hr\HrProfessionalTaxSlab::where('is_active', true)->orderBy('salary_from')->get()->map(function($slab) {
+        return [
+            'salary_from' => (float) $slab->salary_from,
+            'salary_to' => (float) $slab->salary_to,
+            'tax_amount' => (float) $slab->tax_amount
+        ];
+    })->toArray()) !!};
+
+    function calculatePT(basicSalary) {
+        if (!basicSalary || isNaN(basicSalary)) return 0;
+        basicSalary = parseFloat(basicSalary);
+        let tax = 0;
+        ptSlabs.forEach(s => {
+            if (basicSalary >= s.salary_from && (s.salary_to === null || s.salary_to === 0 || basicSalary <= s.salary_to)) {
+                tax = s.tax_amount;
+            }
+        });
+        return tax;
+    }
+
+    document.addEventListener('input', function(e) {
+        if (e.target && e.target.classList.contains('component-value')) {
+            const tr = e.target.closest('tr');
+            if (tr && tr.textContent.includes('BASIC')) {
+                const ptTr = Array.from(document.querySelectorAll('tr')).find(row => row.textContent.includes('PT') && row.querySelector('.component-value'));
+                if (ptTr) {
+                    const ptInput = ptTr.querySelector('.component-value');
+                    const ptCalc = ptTr.querySelector('.component-calc');
+                    if (ptInput && ptCalc && (ptCalc.value === 'slab_based' || ptCalc.value === 'fixed')) {
+                        ptInput.value = parseFloat(calculatePT(e.target.value)).toFixed(2);
+                    }
+                }
+            }
+        }
+    });
 });
 </script>
 @endpush

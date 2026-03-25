@@ -3,6 +3,8 @@
 namespace App\Models\Hr;
 
 use App\Enums\Hr\PayrollStatus;
+use App\Models\Accounting\Voucher;
+use App\Models\Company;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +18,7 @@ class HrPayroll extends Model
     protected $table = 'hr_payrolls';
 
     protected $fillable = [
+        'company_id',
         'payroll_number',
         'hr_payroll_period_id',
         'hr_payroll_batch_id',
@@ -82,10 +85,26 @@ class HrPayroll extends Model
         'hold_reason',
         'remarks',
         'created_by',
+        'accrual_voucher_id',
+        'accrual_reversal_voucher_id',
+        'accrual_accounting_status',
+        'accrual_posted_at',
+        'accrual_reversed_at',
+        'accrual_reversal_reason',
+        'payment_voucher_id',
+        'payment_reversal_voucher_id',
+        'payment_accounting_status',
+        'payment_posted_at',
+        'payment_reversed_at',
+        'payment_reversal_reason',
     ];
 
     protected $casts = [
         'payment_date' => 'date',
+        'accrual_posted_at' => 'datetime',
+        'accrual_reversed_at' => 'datetime',
+        'payment_posted_at' => 'datetime',
+        'payment_reversed_at' => 'datetime',
         'paid_days' => 'decimal:2',
         'half_days' => 'decimal:1',
         'ot_hours' => 'decimal:2',
@@ -131,6 +150,11 @@ class HrPayroll extends Model
 
     // Relationships
 
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
+    }
+
     public function period(): BelongsTo
     {
         return $this->belongsTo(HrPayrollPeriod::class, 'hr_payroll_period_id');
@@ -175,6 +199,26 @@ class HrPayroll extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function accrualVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'accrual_voucher_id');
+    }
+
+    public function accrualReversalVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'accrual_reversal_voucher_id');
+    }
+
+    public function paymentVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'payment_voucher_id');
+    }
+
+    public function paymentReversalVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'payment_reversal_voucher_id');
     }
 
     // Scopes
@@ -303,33 +347,33 @@ class HrPayroll extends Model
     public function calculateTotals(): void
     {
         // Calculate total earnings
-        $this->total_earnings = $this->basic + $this->hra + $this->da + 
+        $this->total_earnings = round($this->basic + $this->hra + $this->da +
             $this->special_allowance + $this->conveyance + $this->medical +
             $this->other_earnings + $this->ot_amount + $this->incentive +
-            $this->bonus + $this->arrears + $this->reimbursements;
-        
+            $this->bonus + $this->arrears + $this->reimbursements, 2);
+
         $this->gross_salary = $this->total_earnings;
-        
+
         // Calculate total deductions
-        $this->total_deductions = $this->pf_employee + $this->esi_employee +
+        $this->total_deductions = round($this->pf_employee + $this->esi_employee +
             $this->professional_tax + $this->tds + $this->lwf_employee +
             $this->loan_deduction + $this->advance_deduction +
-            $this->other_deductions + $this->lop_deduction;
-        
+            $this->other_deductions + $this->lop_deduction, 2);
+
         // Calculate net pay
-        $this->net_pay = $this->gross_salary - $this->total_deductions;
-        
+        $this->net_pay = round($this->gross_salary - $this->total_deductions, 2);
+
         // Round off
-        $this->round_off = round($this->net_pay) - $this->net_pay;
-        $this->net_payable = round($this->net_pay);
-        
+        $this->round_off = round(round($this->net_pay) - $this->net_pay, 2);
+        $this->net_payable = round($this->net_pay + $this->round_off, 2);
+
         // Calculate employer costs
-        $this->total_employer_cost = $this->pf_employer + $this->eps_employer +
+        $this->total_employer_cost = round($this->pf_employer + $this->eps_employer +
             $this->edli_employer + $this->pf_admin_charges + $this->esi_employer +
-            $this->lwf_employer + $this->gratuity_provision;
-        
+            $this->lwf_employer + $this->gratuity_provision, 2);
+
         // CTC
-        $this->ctc = $this->gross_salary + $this->total_employer_cost;
+        $this->ctc = round($this->gross_salary + $this->total_employer_cost, 2);
     }
 
     public static function generateNumber(int $periodId): string

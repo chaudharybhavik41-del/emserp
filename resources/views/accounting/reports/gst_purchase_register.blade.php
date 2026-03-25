@@ -72,9 +72,9 @@
                     </div>
 
                     <div class="col-md-3">
-                        <label class="form-label form-label-sm">Supplier</label>
+                        <label class="form-label form-label-sm">Supplier/Contractor</label>
                         <select name="supplier_id" class="form-select form-select-sm">
-                            <option value="">All suppliers</option>
+                            <option value="">All parties</option>
                             @foreach($suppliers as $s)
                                 <option value="{{ $s->id }}" {{ (string) $supplierId === (string) $s->id ? 'selected' : '' }}>
                                     {{ $s->name }}{{ $s->gstin ? ' - ' . $s->gstin : '' }}
@@ -112,7 +112,7 @@
                         <div class="input-group input-group-sm">
                             <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                             <input type="text" id="gprSearch" class="form-control"
-                                placeholder="Invoice no / voucher / supplier / gstin / status...">
+                                placeholder="Invoice no / voucher / party / gstin / status...">
                             <button type="button" id="gprSearchClear" class="btn btn-outline-secondary">Clear</button>
                         </div>
                     </div>
@@ -196,7 +196,7 @@
                                         <th>Posting Date</th>
                                         <th>Bill No</th>
                                         <th>Voucher No</th>
-                                        <th>Supplier</th>
+                                        <th>Supplier/Contractor</th>
                                         <th>GSTIN</th>
                                         <th class="text-end">Taxable</th>
                                         <th class="text-end">CGST</th>
@@ -204,9 +204,9 @@
                                         <th class="text-end">IGST</th>
                                         <th class="text-end">GST Total</th>
                                         <th class="text-end">RCM GST</th>
-                                        <th class="text-end">Invoice</th>
-                                        <th class="text-end">TCS</th>
-                                        <th class="text-end">TDS</th>
+                                        <th class="text-end">Total Amount</th>
+                                        <th class="text-end">TCS Charge</th>
+                                        <th class="text-end">TDS Deduct</th>
                                         <th class="text-end">Net Payable</th>
                                         <th>Status</th>
                                     </tr>
@@ -263,6 +263,11 @@
                                                             class="text-decoration-none">
                                                             {{ $bill->supplier->name }}
                                                         </a>
+                                                        @if($bill->getAttribute('source_type') === 'subcontractor_ra_bill')
+                                                            <span class="badge bg-info-subtle text-info border border-info-subtle ms-1" style="font-size: 0.65rem;">Contractor</span>
+                                                        @elseif($bill->getAttribute('source_type') === 'purchase_debit_note')
+                                                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle ms-1" style="font-size: 0.65rem;">Debit Note</span>
+                                                        @endif
                                                     @else
                                                         -
                                                     @endif

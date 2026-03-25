@@ -4,6 +4,10 @@
 
 @section('content')
 <div class="container-fluid py-3">
+    @if($loan->employee)
+        @include('hr.employees.partials.hub-nav', ['employee' => $loan->employee, 'activeSection' => 'loans-advances'])
+    @endif
+
     @include('partials.flash')
 
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -12,9 +16,15 @@
             <p class="text-muted mb-0">{{ $loan->employee?->full_name }} | {{ $loan->loanType?->name }}</p>
         </div>
         <div class="d-flex gap-2">
-            <a href="{{ route('hr.loans.employee-loans.edit', $loan) }}" class="btn btn-outline-primary btn-sm">Edit</a>
+            @if(auth()->user()?->can('hr.employee.update') && in_array($loan->status, ['applied', 'pending_approval', 'rejected'], true) && empty($loan->disbursement_voucher_id) && $loan->repayments->isEmpty())
+                <a href="{{ route('hr.loans.employee-loans.edit', $loan) }}" class="btn btn-outline-primary btn-sm">Edit</a>
+            @endif
             <a href="{{ route('hr.loans.employee-loans.schedule', $loan) }}" class="btn btn-outline-secondary btn-sm">Repayment Schedule</a>
-            <a href="{{ route('hr.loans.employee-loans.index') }}" class="btn btn-outline-secondary btn-sm">Back</a>
+            @if($loan->employee)
+                <a href="{{ route('hr.employees.loans-advances', $loan->employee) }}" class="btn btn-outline-secondary btn-sm">Back to Employee</a>
+            @else
+                <a href="{{ route('hr.loans.employee-loans.index') }}" class="btn btn-outline-secondary btn-sm">Back</a>
+            @endif
         </div>
     </div>
 
@@ -37,8 +47,9 @@
         </div>
     </div>
 
+    @can('hr.employee.update')
     <div class="row g-3">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card"><div class="card-header">Approve</div><div class="card-body">
                 <form method="POST" action="{{ route('hr.loans.employee-loans.approve', $loan) }}">@csrf
                     <div class="mb-2"><input type="number" name="approved_amount" class="form-control form-control-sm" placeholder="Approved Amount" min="0" step="0.01"></div>
@@ -47,7 +58,7 @@
                 </form>
             </div></div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card"><div class="card-header">Reject</div><div class="card-body">
                 <form method="POST" action="{{ route('hr.loans.employee-loans.reject', $loan) }}">@csrf
                     <div class="mb-2"><textarea name="rejection_reason" class="form-control form-control-sm" rows="3" placeholder="Reason" required></textarea></div>
@@ -55,15 +66,26 @@
                 </form>
             </div></div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card"><div class="card-header">Disburse</div><div class="card-body">
                 <form method="POST" action="{{ route('hr.loans.employee-loans.disburse', $loan) }}">@csrf
                     <div class="mb-2"><input type="number" name="disbursed_amount" class="form-control form-control-sm" placeholder="Disbursed Amount" min="0" step="0.01"></div>
+                    <div class="mb-2"><input type="date" name="disbursement_date" class="form-control form-control-sm" value="{{ old('disbursement_date', now()->format('Y-m-d')) }}"></div>
                     <div class="mb-2"><input type="date" name="emi_start_date" class="form-control form-control-sm"></div>
                     <button class="btn btn-primary btn-sm">Disburse</button>
                 </form>
             </div></div>
         </div>
+        <div class="col-md-3">
+            <div class="card"><div class="card-header">Cancel</div><div class="card-body">
+                <form method="POST" action="{{ route('hr.loans.employee-loans.cancel', $loan) }}">@csrf
+                    <div class="mb-2"><input type="date" name="reversal_date" class="form-control form-control-sm" value="{{ optional($loan->disbursement_date)->format('Y-m-d') ?? now()->format('Y-m-d') }}" required></div>
+                    <div class="mb-2"><textarea name="cancellation_reason" class="form-control form-control-sm" rows="3" placeholder="Cancellation reason" required></textarea></div>
+                    <button class="btn btn-outline-dark btn-sm">Cancel Loan</button>
+                </form>
+            </div></div>
+        </div>
     </div>
+    @endcan
 </div>
 @endsection

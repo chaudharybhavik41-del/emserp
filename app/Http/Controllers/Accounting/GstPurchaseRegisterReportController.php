@@ -31,32 +31,35 @@ class GstPurchaseRegisterReportController extends Controller
         $companyId = (int) ($request->integer('company_id') ?: $this->defaultCompanyId());
 
         $fromDate = $request->date('from_date') ?: now()->startOfMonth();
-        $toDate   = $request->date('to_date') ?: now();
+        $toDate = $request->date('to_date') ?: now();
 
         $fromDate = Carbon::parse($fromDate)->startOfDay();
-        $toDate   = Carbon::parse($toDate)->endOfDay();
+        $toDate = Carbon::parse($toDate)->endOfDay();
 
         $supplierId = $request->integer('supplier_id') ?: null;
-        $status     = trim((string) $request->string('status', 'posted'));
+        $status = trim((string) $request->string('status', 'posted'));
 
-        // Suppliers for dropdown
+        // Suppliers + Contractors for dropdown
         $suppliers = Party::query()
-            ->where('is_supplier', true)
+            ->where(function ($q) {
+                $q->where('is_supplier', true)
+                    ->orWhere('is_contractor', true);
+            })
             ->orderBy('name')
             ->get();
 
-        $bills  = $this->loadRows($companyId, $fromDate, $toDate, $supplierId, $status);
+        $bills = $this->loadRows($companyId, $fromDate, $toDate, $supplierId, $status);
         $totals = $this->computeTotals($bills);
 
         return view('accounting.reports.gst_purchase_register', [
-            'companyId'  => $companyId,
-            'fromDate'   => $fromDate,
-            'toDate'     => $toDate,
+            'companyId' => $companyId,
+            'fromDate' => $fromDate,
+            'toDate' => $toDate,
             'supplierId' => $supplierId,
-            'status'     => $status,
-            'suppliers'  => $suppliers,
-            'bills'      => $bills,
-            'totals'     => $totals,
+            'status' => $status,
+            'suppliers' => $suppliers,
+            'bills' => $bills,
+            'totals' => $totals,
         ]);
     }
 
@@ -65,13 +68,13 @@ class GstPurchaseRegisterReportController extends Controller
         $companyId = (int) ($request->integer('company_id') ?: $this->defaultCompanyId());
 
         $fromDate = $request->date('from_date') ?: now()->startOfMonth();
-        $toDate   = $request->date('to_date') ?: now();
+        $toDate = $request->date('to_date') ?: now();
 
         $fromDate = Carbon::parse($fromDate)->startOfDay();
-        $toDate   = Carbon::parse($toDate)->endOfDay();
+        $toDate = Carbon::parse($toDate)->endOfDay();
 
         $supplierId = $request->integer('supplier_id') ?: null;
-        $status     = trim((string) $request->string('status', 'posted'));
+        $status = trim((string) $request->string('status', 'posted'));
 
         $bills = $this->loadRows($companyId, $fromDate, $toDate, $supplierId, $status);
 
@@ -103,28 +106,28 @@ class GstPurchaseRegisterReportController extends Controller
             foreach ($bills as $bill) {
                 $supplier = $bill->supplier;
 
-                $taxable   = (string) ($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? '0');
-                $cgst      = (string) ($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? '0');
-                $sgst      = (string) ($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? '0');
-                $igst      = (string) ($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? '0');
-                $rcmCgst   = (string) ($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? '0');
-                $rcmSgst   = (string) ($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? '0');
-                $rcmIgst   = (string) ($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? '0');
-                $invoice   = (string) ($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? '0');
+                $taxable = (string) ($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? '0');
+                $cgst = (string) ($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? '0');
+                $sgst = (string) ($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? '0');
+                $igst = (string) ($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? '0');
+                $rcmCgst = (string) ($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? '0');
+                $rcmSgst = (string) ($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? '0');
+                $rcmIgst = (string) ($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? '0');
+                $invoice = (string) ($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? '0');
                 $tcsAmount = (string) ($bill->getRawOriginal('tcs_amount') ?? $bill->tcs_amount ?? '0');
                 $tdsAmount = (string) ($bill->getRawOriginal('tds_amount') ?? $bill->tds_amount ?? '0');
 
                 $taxablePaise = MoneyHelper::toPaise($taxable);
-                $cgstPaise    = MoneyHelper::toPaise($cgst);
-                $sgstPaise    = MoneyHelper::toPaise($sgst);
-                $igstPaise    = MoneyHelper::toPaise($igst);
+                $cgstPaise = MoneyHelper::toPaise($cgst);
+                $sgstPaise = MoneyHelper::toPaise($sgst);
+                $igstPaise = MoneyHelper::toPaise($igst);
                 $rcmCgstPaise = MoneyHelper::toPaise($rcmCgst);
                 $rcmSgstPaise = MoneyHelper::toPaise($rcmSgst);
                 $rcmIgstPaise = MoneyHelper::toPaise($rcmIgst);
                 $invoicePaise = MoneyHelper::toPaise($invoice);
-                $tcsPaise     = MoneyHelper::toPaise($tcsAmount);
-                $tdsPaise     = MoneyHelper::toPaise($tdsAmount);
-                $netPaise     = ($invoicePaise + $tcsPaise) - $tdsPaise;
+                $tcsPaise = MoneyHelper::toPaise($tcsAmount);
+                $tdsPaise = MoneyHelper::toPaise($tdsAmount);
+                $netPaise = ($invoicePaise + $tcsPaise) - $tdsPaise;
 
                 fputcsv($out, [
                     optional($bill->bill_date)->toDateString(),
@@ -167,90 +170,129 @@ class GstPurchaseRegisterReportController extends Controller
             ->orderBy('id')
             ->get();
 
-        // If purchase_debit_notes table is not present (legacy DB), just return invoices.
-        if (! Schema::hasTable('purchase_debit_notes')) {
-            return $bills;
-        }
-
-        // Filter by Posting Date:
-        // - If voucher exists (posted notes), use voucher.voucher_date
-        // - Otherwise (draft notes without voucher), fallback to note_date
-        $debitNotesQuery = PurchaseDebitNote::query()
-            ->with(['supplier', 'voucher'])
-            ->where('company_id', $companyId)
-            ->where(function ($q) use ($fromDate, $toDate) {
-                $q->whereHas('voucher', function ($vq) use ($fromDate, $toDate) {
-                    $vq->whereDate('voucher_date', '>=', $fromDate->toDateString())
-                        ->whereDate('voucher_date', '<=', $toDate->toDateString());
-                })
-                ->orWhere(function ($q2) use ($fromDate, $toDate) {
-                    $q2->whereNull('voucher_id')
-                        ->whereDate('note_date', '>=', $fromDate->toDateString())
-                        ->whereDate('note_date', '<=', $toDate->toDateString());
+        $synthetic = collect();
+        if (Schema::hasTable('purchase_debit_notes')) {
+            $debitNotesQuery = PurchaseDebitNote::query()
+                ->with(['supplier', 'voucher'])
+                ->where('company_id', $companyId)
+                ->where(function ($q) use ($fromDate, $toDate) {
+                    $q->whereHas('voucher', function ($vq) use ($fromDate, $toDate) {
+                        $vq->whereDate('voucher_date', '>=', $fromDate->toDateString())
+                            ->whereDate('voucher_date', '<=', $toDate->toDateString());
+                    })
+                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                            $q2->whereNull('voucher_id')
+                                ->whereDate('note_date', '>=', $fromDate->toDateString())
+                                ->whereDate('note_date', '<=', $toDate->toDateString());
+                        });
                 });
-            });
 
-        if ($supplierId) {
-            $debitNotesQuery->where('supplier_id', $supplierId);
+            if ($supplierId) {
+                $debitNotesQuery->where('supplier_id', $supplierId);
+            }
+
+            if (in_array($status, ['draft', 'posted', 'cancelled'], true)) {
+                $debitNotesQuery->where('status', $status);
+            }
+
+            $debitNotes = $debitNotesQuery->get();
+
+            if ($debitNotes->isNotEmpty()) {
+                $synthetic = $debitNotes->map(function (PurchaseDebitNote $note) {
+                    $bill = new PurchaseBill();
+                    $bill->setRawAttributes([
+                        'id' => null,
+                        'company_id' => $note->company_id,
+                        'supplier_id' => $note->supplier_id,
+                        'bill_number' => $note->note_number,
+                        'total_basic' => -1 * (float) $note->total_basic,
+                        'total_cgst' => -1 * (float) $note->total_cgst,
+                        'total_sgst' => -1 * (float) $note->total_sgst,
+                        'total_igst' => -1 * (float) $note->total_igst,
+                        'total_rcm_cgst' => 0,
+                        'total_rcm_sgst' => 0,
+                        'total_rcm_igst' => 0,
+                        'total_amount' => -1 * (float) $note->total_amount,
+                        'tcs_amount' => 0,
+                        'tds_amount' => 0,
+                        'status' => $note->status,
+                    ], true);
+
+                    $bill->setAttribute('bill_date', $note->note_date);
+                    $bill->setRelation('supplier', $note->supplier);
+                    $bill->setRelation('voucher', $note->voucher);
+                    $bill->setAttribute('source_type', 'purchase_debit_note');
+                    $bill->setAttribute('source_note_id', $note->id);
+
+                    return $bill;
+                });
+            }
         }
-
-        if (in_array($status, ['draft', 'posted', 'cancelled'], true)) {
-            $debitNotesQuery->where('status', $status);
-        }
-
-        $debitNotes = $debitNotesQuery->get();
-
-        if ($debitNotes->isEmpty()) {
-            return $bills;
-        }
-
-        $synthetic = $debitNotes->map(function (PurchaseDebitNote $note) {
-            // Create an in-memory PurchaseBill instance with negative values,
-            // so that totals + report behave like Tally (notes reduce purchases/GST).
-            $bill = new PurchaseBill();
-
-            $bill->setRawAttributes([
-                'id'              => null,
-                'company_id'      => $note->company_id,
-                'supplier_id'     => $note->supplier_id,
-                'bill_number'     => $note->note_number,
-                'total_basic'     => -1 * (float) $note->total_basic,
-                'total_cgst'      => -1 * (float) $note->total_cgst,
-                'total_sgst'      => -1 * (float) $note->total_sgst,
-                'total_igst'      => -1 * (float) $note->total_igst,
-                'total_rcm_cgst'  => 0,
-                'total_rcm_sgst'  => 0,
-                'total_rcm_igst'  => 0,
-                'total_amount'    => -1 * (float) $note->total_amount,
-                'tcs_amount'      => 0,
-                'tds_amount'      => 0,
-                'status'          => $note->status,
-            ], true);
-
-            // bill_date should behave like the Eloquent date cast used on PurchaseBill
-            $bill->setAttribute('bill_date', $note->note_date);
-
-            // Copy relations
-            $bill->setRelation('supplier', $note->supplier);
-            $bill->setRelation('voucher', $note->voucher);
-
-            // Meta (not used by existing views, but available for future badges/links)
-            $bill->setAttribute('source_type', 'purchase_debit_note');
-            $bill->setAttribute('source_note_id', $note->id);
-
-            return $bill;
-        });
 
         // Mark original bills for completeness
         $bills->each(function (PurchaseBill $bill) {
-            if (! $bill->getAttribute('source_type')) {
-                $bill->setAttribute('source_type', 'purchase_bill');
-            }
+            $bill->setAttribute('source_type', 'purchase_bill');
         });
+
+        $raSynthetic = collect();
+        if (Schema::hasTable('subcontractor_ra_bills')) {
+            $raBillsQuery = \App\Models\SubcontractorRaBill::query()
+                ->with(['subcontractor', 'voucher'])
+                ->where('company_id', $companyId)
+                ->where(function ($q) use ($fromDate, $toDate) {
+                    $q->whereBetween('posting_date', [$fromDate->toDateString(), $toDate->toDateString()])
+                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                            $q2->whereNull('posting_date')
+                                ->whereBetween('bill_date', [$fromDate->toDateString(), $toDate->toDateString()]);
+                        });
+                });
+
+            if ($supplierId) {
+                $raBillsQuery->where('subcontractor_id', $supplierId);
+            }
+
+            if (in_array($status, ['draft', 'posted', 'cancelled'], true)) {
+                $raBillsQuery->where('status', $status);
+            }
+
+            $raBills = $raBillsQuery->get();
+
+            $raSynthetic = $raBills->map(function (\App\Models\SubcontractorRaBill $ra) {
+                $bill = new PurchaseBill();
+
+                $bill->setRawAttributes([
+                    'id' => $ra->id,
+                    'company_id' => $ra->company_id,
+                    'supplier_id' => $ra->subcontractor_id,
+                    'bill_number' => $ra->bill_number ?: $ra->ra_number,
+                    'total_basic' => (float) $ra->current_amount,
+                    'total_cgst' => (float) $ra->cgst_amount,
+                    'total_sgst' => (float) $ra->sgst_amount,
+                    'total_igst' => (float) $ra->igst_amount,
+                    'total_rcm_cgst' => 0,
+                    'total_rcm_sgst' => 0,
+                    'total_rcm_igst' => 0,
+                    'total_amount' => (float) $ra->total_amount + (float) $ra->tds_amount,
+                    'tcs_amount' => 0,
+                    'tds_amount' => (float) $ra->tds_amount,
+                    'status' => $ra->status,
+                    'posting_date' => $ra->posting_date,
+                ], true);
+
+                $bill->setAttribute('bill_date', $ra->bill_date);
+                $bill->setRelation('supplier', $ra->subcontractor);
+                $bill->setRelation('voucher', $ra->voucher);
+                $bill->setAttribute('source_type', 'subcontractor_ra_bill');
+                $bill->setAttribute('source_note_id', $ra->id);
+
+                return $bill;
+            });
+        }
 
         // Sort by Posting Date (same basis as the filter), then by id/bill_no for stable ordering.
         return $bills
             ->concat($synthetic)
+            ->concat($raSynthetic)
             ->sortBy(function ($bill) {
                 $postingDate = $bill->getAttribute('posting_date')
                     ?: optional($bill->voucher)->voucher_date
@@ -262,10 +304,18 @@ class GstPurchaseRegisterReportController extends Controller
                     $keyDate = (string) $postingDate;
                 }
 
-                $id     = (int) ($bill->id ?? 0);
+                $sourcePriority = [
+                    'purchase_bill' => 1,
+                    'subcontractor_ra_bill' => 2,
+                    'purchase_debit_note' => 3,
+                ];
+                $priority = $sourcePriority[$bill->getAttribute('source_type')] ?? 9;
+
+                $id = (int) ($bill->id ?? 0);
                 $billNo = (string) ($bill->bill_number ?? '');
 
                 return $keyDate
+                    . '_' . (string) $priority
                     . '_' . str_pad((string) $id, 10, '0', STR_PAD_LEFT)
                     . '_' . $billNo;
             })
@@ -308,39 +358,39 @@ class GstPurchaseRegisterReportController extends Controller
     protected function computeTotals($bills): array
     {
         $totals = [
-            'taxable'    => 0,
-            'cgst'       => 0,
-            'sgst'       => 0,
-            'igst'       => 0,
-            'rcm_cgst'   => 0,
-            'rcm_sgst'   => 0,
-            'rcm_igst'   => 0,
-            'invoice'    => 0,
+            'taxable' => 0,
+            'cgst' => 0,
+            'sgst' => 0,
+            'igst' => 0,
+            'rcm_cgst' => 0,
+            'rcm_sgst' => 0,
+            'rcm_igst' => 0,
+            'invoice' => 0,
             'tcs_amount' => 0,
             'tds_amount' => 0,
-            'net_payable'=> 0,
+            'net_payable' => 0,
         ];
 
         foreach ($bills as $bill) {
-            $taxable   = (string) ($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? '0');
-            $cgst      = (string) ($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? '0');
-            $sgst      = (string) ($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? '0');
-            $igst      = (string) ($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? '0');
-            $rcmCgst   = (string) ($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? '0');
-            $rcmSgst   = (string) ($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? '0');
-            $rcmIgst   = (string) ($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? '0');
-            $invoice   = (string) ($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? '0');
+            $taxable = (string) ($bill->getRawOriginal('total_basic') ?? $bill->total_basic ?? '0');
+            $cgst = (string) ($bill->getRawOriginal('total_cgst') ?? $bill->total_cgst ?? '0');
+            $sgst = (string) ($bill->getRawOriginal('total_sgst') ?? $bill->total_sgst ?? '0');
+            $igst = (string) ($bill->getRawOriginal('total_igst') ?? $bill->total_igst ?? '0');
+            $rcmCgst = (string) ($bill->getRawOriginal('total_rcm_cgst') ?? $bill->total_rcm_cgst ?? '0');
+            $rcmSgst = (string) ($bill->getRawOriginal('total_rcm_sgst') ?? $bill->total_rcm_sgst ?? '0');
+            $rcmIgst = (string) ($bill->getRawOriginal('total_rcm_igst') ?? $bill->total_rcm_igst ?? '0');
+            $invoice = (string) ($bill->getRawOriginal('total_amount') ?? $bill->total_amount ?? '0');
             $tcsAmount = (string) ($bill->getRawOriginal('tcs_amount') ?? $bill->tcs_amount ?? '0');
             $tdsAmount = (string) ($bill->getRawOriginal('tds_amount') ?? $bill->tds_amount ?? '0');
 
-            $totals['taxable']    += MoneyHelper::toPaise($taxable);
-            $totals['cgst']       += MoneyHelper::toPaise($cgst);
-            $totals['sgst']       += MoneyHelper::toPaise($sgst);
-            $totals['igst']       += MoneyHelper::toPaise($igst);
-            $totals['rcm_cgst']   += MoneyHelper::toPaise($rcmCgst);
-            $totals['rcm_sgst']   += MoneyHelper::toPaise($rcmSgst);
-            $totals['rcm_igst']   += MoneyHelper::toPaise($rcmIgst);
-            $totals['invoice']    += MoneyHelper::toPaise($invoice);
+            $totals['taxable'] += MoneyHelper::toPaise($taxable);
+            $totals['cgst'] += MoneyHelper::toPaise($cgst);
+            $totals['sgst'] += MoneyHelper::toPaise($sgst);
+            $totals['igst'] += MoneyHelper::toPaise($igst);
+            $totals['rcm_cgst'] += MoneyHelper::toPaise($rcmCgst);
+            $totals['rcm_sgst'] += MoneyHelper::toPaise($rcmSgst);
+            $totals['rcm_igst'] += MoneyHelper::toPaise($rcmIgst);
+            $totals['invoice'] += MoneyHelper::toPaise($invoice);
             $totals['tcs_amount'] += MoneyHelper::toPaise($tcsAmount);
             $totals['tds_amount'] += MoneyHelper::toPaise($tdsAmount);
         }

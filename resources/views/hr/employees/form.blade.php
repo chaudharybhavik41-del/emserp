@@ -20,11 +20,27 @@
         </a>
     </div>
 
+    @if(!empty($sourceCandidate))
+        <div class="alert alert-info d-flex justify-content-between align-items-start mb-3">
+            <div>
+                <div class="fw-semibold">Converting Candidate To Employee</div>
+                <div class="small mb-1">{{ $sourceCandidate->candidate_code }} - {{ $sourceCandidate->full_name }}</div>
+                <div class="small text-muted">Candidate details have been prefilled where applicable. Review and complete the remaining employee fields before saving.</div>
+            </div>
+            <a href="{{ route('hr.candidates.show', $sourceCandidate) }}" class="btn btn-outline-secondary btn-sm">
+                View Candidate
+            </a>
+        </div>
+    @endif
+
     <form action="{{ isset($employee->id) ? route('hr.employees.update', $employee) : route('hr.employees.store') }}" 
           method="POST" enctype="multipart/form-data" id="employeeForm">
         @csrf
         @if(isset($employee->id))
             @method('PUT')
+        @endif
+        @if(!empty($sourceCandidate) && !isset($employee->id))
+            <input type="hidden" name="source_candidate_id" value="{{ $sourceCandidate->id }}">
         @endif
 
         {{-- Tab Navigation --}}
@@ -179,6 +195,10 @@
                                 <label class="form-label">Highest Qualification</label>
                                 <input type="text" name="highest_qualification" class="form-control" value="{{ old('highest_qualification', $employee->highest_qualification) }}">
                             </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Specialization</label>
+                                <input type="text" name="specialization" class="form-control" value="{{ old('specialization', $employee->specialization) }}">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -196,7 +216,7 @@
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Official Email</label>
-                                <input type="email" name="official_email" class="form-control" value="{{ old('official_email', $employee->official_email) }}">
+                                <input type="email" name="official_email" id="officialEmail" class="form-control" value="{{ old('official_email', $employee->official_email) }}">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Mobile Number</label>
@@ -246,6 +266,7 @@
                         </div>
 
                         <div class="form-check my-3">
+                            <input type="hidden" name="address_same_as_present" value="0">
                             <input type="checkbox" class="form-check-input" name="address_same_as_present" id="addressSame" value="1" 
                                    {{ old('address_same_as_present', $employee->address_same_as_present) ? 'checked' : '' }}>
                             <label class="form-check-label" for="addressSame">Permanent address same as present</label>
@@ -358,6 +379,14 @@
                                 </select>
                             </div>
                             <div class="col-md-3">
+                                <label class="form-label">Status</label>
+                                <select name="status" class="form-select">
+                                    @foreach($statuses as $value => $label)
+                                        <option value="{{ $value }}" {{ old('status', $employee->status?->value ?? 'active') == $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="col-md-3">
                                 <label class="form-label">Probation Period (Months)</label>
                                 <input type="number" name="probation_period_months" class="form-control" min="0" max="24"
                                        value="{{ old('probation_period_months', $employee->probation_period_months ?? 6) }}">
@@ -372,13 +401,21 @@
                                 <input type="number" name="total_experience_months" class="form-control" min="0"
                                        value="{{ old('total_experience_months', $employee->total_experience_months ?? 0) }}">
                             </div>
+                            <div class="col-md-3">
+                                <input type="hidden" name="is_active" value="0">
+                                <div class="form-check mt-4">
+                                    <input type="checkbox" class="form-check-input" name="is_active" id="isActive" value="1"
+                                           {{ old('is_active', $employee->exists ? $employee->is_active : true) ? 'checked' : '' }}>
+                                    <label class="form-check-label" for="isActive">Record Active</label>
+                                </div>
+                            </div>
                         </div>
 
                         <h6 class="border-bottom pb-2 mb-3 mt-4">Position & Reporting</h6>
                         <div class="row g-3">
                             <div class="col-md-4">
                                 <label class="form-label">Department</label>
-                                <select name="department_id" class="form-select">
+                                <select name="department_id" id="departmentSelect" class="form-select">
                                     <option value="">Select Department</option>
                                     @foreach($departments as $dept)
                                         <option value="{{ $dept->id }}" {{ old('department_id', $employee->department_id) == $dept->id ? 'selected' : '' }}>{{ $dept->name }}</option>
@@ -468,10 +505,17 @@
                             </div>
                             <div class="col-md-3">
                                 <div class="form-check mt-4">
+                                    <input type="hidden" name="overtime_applicable" value="0">
                                     <input type="checkbox" class="form-check-input" name="overtime_applicable" id="otApplicable" value="1"
                                            {{ old('overtime_applicable', $employee->overtime_applicable) ? 'checked' : '' }}>
                                     <label class="form-check-label" for="otApplicable">Overtime Applicable</label>
                                 </div>
+                            </div>
+                            <div class="col-md-3" id="otHourlyRateWrapper">
+                                <label class="form-label">OT Hourly Rate</label>
+                                <input type="number" name="ot_hourly_rate" id="otHourlyRate" class="form-control" min="0" step="0.01"
+                                       value="{{ old('ot_hourly_rate', $employee->ot_hourly_rate) }}">
+                                <small class="text-muted">Used when attendance policy OT basis is Fixed.</small>
                             </div>
                         </div>
                     </div>
@@ -479,158 +523,290 @@
             </div>
 
             {{-- Statutory & Bank Tab --}}
-            <div class="tab-pane fade" id="statutory" role="tabpanel">
-                <div class="card">
-                    <div class="card-body">
-                        <h6 class="border-bottom pb-2 mb-3">Statutory Compliance</h6>
-                        <div class="row g-3">
-                            {{-- PF --}}
-                            <div class="col-md-12">
-                                <div class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="pf_applicable" id="pfApplicable" value="1"
-                                           {{ old('pf_applicable', $employee->pf_applicable) ? 'checked' : '' }}>
-                                    <label class="form-check-label fw-medium" for="pfApplicable">PF Applicable</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
-                                <label class="form-label">UAN / PF Number</label>
-                                <input type="text" name="pf_number" class="form-control" value="{{ old('pf_number', $employee->pf_number) }}">
-                            </div>
-                            <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
-                                <label class="form-label">PF Join Date</label>
-                                <input type="date" name="pf_join_date" class="form-control" value="{{ old('pf_join_date', $employee->pf_join_date?->format('Y-m-d')) }}">
-                            </div>
-                            <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
-                                <div class="form-check mt-4">
-                                    <input type="checkbox" class="form-check-input" name="eps_applicable" id="epsApplicable" value="1"
-                                           {{ old('eps_applicable', $employee->eps_applicable ?? true) ? 'checked' : '' }}>
-                                    <label class="form-check-label" for="epsApplicable">EPS Applicable</label>
-                                </div>
-                            </div>
+           <div class="tab-pane fade" id="statutory" role="tabpanel">
+    <div class="card">
+        <div class="card-body">
+            <h6 class="border-bottom pb-2 mb-3">Statutory Compliance</h6>
 
-                            {{-- ESI --}}
-                            <div class="col-md-12 mt-3">
-                                <div class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="esi_applicable" id="esiApplicable" value="1"
-                                           {{ old('esi_applicable', $employee->esi_applicable) ? 'checked' : '' }}>
-                                    <label class="form-check-label fw-medium" for="esiApplicable">ESI Applicable</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4 esi-fields {{ old('esi_applicable', $employee->esi_applicable) ? '' : 'd-none' }}">
-                                <label class="form-label">ESI Number</label>
-                                <input type="text" name="esi_number" class="form-control" value="{{ old('esi_number', $employee->esi_number) }}">
-                            </div>
-                            <div class="col-md-4 esi-fields {{ old('esi_applicable', $employee->esi_applicable) ? '' : 'd-none' }}">
-                                <label class="form-label">ESI Join Date</label>
-                                <input type="date" name="esi_join_date" class="form-control" value="{{ old('esi_join_date', $employee->esi_join_date?->format('Y-m-d')) }}">
-                            </div>
+            <div class="row g-3">
+                {{-- PF --}}
+                <div class="col-md-12">
+                    <input type="hidden" name="pf_applicable" value="0">
+                    <div class="form-check">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               name="pf_applicable"
+                               id="pfApplicable"
+                               value="1"
+                               {{ old('pf_applicable', $employee->pf_applicable) ? 'checked' : '' }}>
+                        <label class="form-check-label fw-medium" for="pfApplicable">PF Applicable</label>
+                    </div>
+                </div>
 
-                            {{-- PT --}}
-                            <div class="col-md-12 mt-3">
-                                <div class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="pt_applicable" id="ptApplicable" value="1"
-                                           {{ old('pt_applicable', $employee->pt_applicable) ? 'checked' : '' }}>
-                                    <label class="form-check-label fw-medium" for="ptApplicable">Professional Tax Applicable</label>
-                                </div>
-                            </div>
-                            <div class="col-md-4 pt-fields {{ old('pt_applicable', $employee->pt_applicable) ? '' : 'd-none' }}">
-                                <label class="form-label">PT State</label>
-                                <select name="pt_state" class="form-select">
-                                    <option value="">Select State</option>
-                                    @foreach($states as $state)
-                                        <option value="{{ $state }}" {{ old('pt_state', $employee->pt_state) == $state ? 'selected' : '' }}>{{ $state }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
+                <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
+                    <label class="form-label">UAN / PF Number</label>
+                    <input type="text"
+                           name="pf_number"
+                           class="form-control"
+                           value="{{ old('pf_number', $employee->pf_number) }}">
+                </div>
 
-                            {{-- Other --}}
-                            <div class="col-md-12 mt-3">
-                                <div class="row">
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input type="checkbox" class="form-check-input" name="lwf_applicable" id="lwfApplicable" value="1"
-                                                   {{ old('lwf_applicable', $employee->lwf_applicable) ? 'checked' : '' }}>
-                                            <label class="form-check-label" for="lwfApplicable">LWF Applicable</label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input type="checkbox" class="form-check-input" name="tds_applicable" id="tdsApplicable" value="1"
-                                                   {{ old('tds_applicable', $employee->tds_applicable ?? true) ? 'checked' : '' }}>
-                                            <label class="form-check-label" for="tdsApplicable">TDS Applicable</label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input type="checkbox" class="form-check-input" name="gratuity_applicable" id="gratuityApplicable" value="1"
-                                                   {{ old('gratuity_applicable', $employee->gratuity_applicable) ? 'checked' : '' }}>
-                                            <label class="form-check-label" for="gratuityApplicable">Gratuity Applicable</label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label">Tax Regime</label>
-                                        <select name="tax_regime" class="form-select">
-                                            <option value="new" {{ old('tax_regime', $employee->tax_regime ?? 'new') == 'new' ? 'selected' : '' }}>New Regime</option>
-                                            <option value="old" {{ old('tax_regime', $employee->tax_regime) == 'old' ? 'selected' : '' }}>Old Regime</option>
-                                        </select>
-                                    </div>
-                                </div>
+                <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
+                    <label class="form-label">PF Join Date</label>
+                    <input type="date"
+                           name="pf_join_date"
+                           class="form-control"
+                           value="{{ old('pf_join_date', $employee->pf_join_date?->format('Y-m-d')) }}">
+                </div>
+
+                <div class="col-md-4 pf-fields {{ old('pf_applicable', $employee->pf_applicable) ? '' : 'd-none' }}">
+                    <input type="hidden" name="eps_applicable" value="0">
+                    <div class="form-check mt-4">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               name="eps_applicable"
+                               id="epsApplicable"
+                               value="1"
+                               {{ old('eps_applicable', $employee->eps_applicable ?? true) ? 'checked' : '' }}>
+                        <label class="form-check-label" for="epsApplicable">EPS Applicable</label>
+                    </div>
+                </div>
+
+                {{-- ESI --}}
+                <div class="col-md-12 mt-3">
+                    <input type="hidden" name="esi_applicable" value="0">
+                    <div class="form-check">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               name="esi_applicable"
+                               id="esiApplicable"
+                               value="1"
+                               {{ old('esi_applicable', $employee->esi_applicable) ? 'checked' : '' }}>
+                        <label class="form-check-label fw-medium" for="esiApplicable">ESI Applicable</label>
+                    </div>
+                </div>
+
+                <div class="col-md-4 esi-fields {{ old('esi_applicable', $employee->esi_applicable) ? '' : 'd-none' }}">
+                    <label class="form-label">ESI Number</label>
+                    <input type="text"
+                           name="esi_number"
+                           class="form-control"
+                           value="{{ old('esi_number', $employee->esi_number) }}">
+                </div>
+
+                <div class="col-md-4 esi-fields {{ old('esi_applicable', $employee->esi_applicable) ? '' : 'd-none' }}">
+                    <label class="form-label">ESI Join Date</label>
+                    <input type="date"
+                           name="esi_join_date"
+                           class="form-control"
+                           value="{{ old('esi_join_date', $employee->esi_join_date?->format('Y-m-d')) }}">
+                </div>
+
+                {{-- Professional Tax --}}
+                <div class="col-md-12 mt-3">
+                    <input type="hidden" name="pt_applicable" value="0">
+                    <div class="form-check">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               name="pt_applicable"
+                               id="ptApplicable"
+                               value="1"
+                               {{ old('pt_applicable', $employee->pt_applicable) ? 'checked' : '' }}>
+                        <label class="form-check-label fw-medium" for="ptApplicable">Professional Tax Applicable</label>
+                    </div>
+                </div>
+
+                <div class="col-md-4 pt-fields {{ old('pt_applicable', $employee->pt_applicable) ? '' : 'd-none' }}">
+                    <label class="form-label">PT State</label>
+                    <select name="pt_state" class="form-select">
+                        <option value="">Select State</option>
+                        @foreach($states as $state)
+                            <option value="{{ $state }}" {{ old('pt_state', $employee->pt_state) == $state ? 'selected' : '' }}>
+                                {{ $state }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                {{-- Other --}}
+                <div class="col-md-12 mt-3">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <input type="hidden" name="lwf_applicable" value="0">
+                            <div class="form-check">
+                                <input type="checkbox"
+                                       class="form-check-input"
+                                       name="lwf_applicable"
+                                       id="lwfApplicable"
+                                       value="1"
+                                       {{ old('lwf_applicable', $employee->lwf_applicable) ? 'checked' : '' }}>
+                                <label class="form-check-label" for="lwfApplicable">LWF Applicable</label>
                             </div>
                         </div>
 
-                        <h6 class="border-bottom pb-2 mb-3 mt-4">Bank Details</h6>
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Bank Name</label>
-                                <input type="text" name="bank_name" class="form-control" value="{{ old('bank_name', $employee->bank_name) }}">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Branch Name</label>
-                                <input type="text" name="bank_branch" class="form-control" value="{{ old('bank_branch', $employee->bank_branch) }}">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Account Type</label>
-                                <select name="bank_account_type" class="form-select">
-                                    <option value="savings" {{ old('bank_account_type', $employee->bank_account_type) == 'savings' ? 'selected' : '' }}>Savings</option>
-                                    <option value="current" {{ old('bank_account_type', $employee->bank_account_type) == 'current' ? 'selected' : '' }}>Current</option>
-                                    <option value="salary" {{ old('bank_account_type', $employee->bank_account_type) == 'salary' ? 'selected' : '' }}>Salary Account</option>
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Account Number</label>
-                                <input type="text" name="bank_account_number" class="form-control" value="{{ old('bank_account_number', $employee->bank_account_number) }}">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">IFSC Code</label>
-                                <input type="text" name="bank_ifsc" class="form-control text-uppercase" value="{{ old('bank_ifsc', $employee->bank_ifsc) }}">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Payment Mode</label>
-                                <select name="payment_mode" class="form-select">
-                                    <option value="bank_transfer" {{ old('payment_mode', $employee->payment_mode ?? 'bank_transfer') == 'bank_transfer' ? 'selected' : '' }}>Bank Transfer</option>
-                                    <option value="cheque" {{ old('payment_mode', $employee->payment_mode) == 'cheque' ? 'selected' : '' }}>Cheque</option>
-                                    <option value="cash" {{ old('payment_mode', $employee->payment_mode) == 'cash' ? 'selected' : '' }}>Cash</option>
-                                </select>
+                        <div class="col-md-3">
+                            <input type="hidden" name="tds_applicable" value="0">
+                            <div class="form-check">
+                                <input type="checkbox"
+                                       class="form-check-input"
+                                       name="tds_applicable"
+                                       id="tdsApplicable"
+                                       value="1"
+                                       {{ old('tds_applicable', $employee->tds_applicable ?? true) ? 'checked' : '' }}>
+                                <label class="form-check-label" for="tdsApplicable">TDS Applicable</label>
                             </div>
                         </div>
 
-                        @if(!isset($employee->id))
-                        <h6 class="border-bottom pb-2 mb-3 mt-4">User Account</h6>
-                        <div class="row g-3">
-                            <div class="col-12">
-                                <div class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="create_user_account" id="createUserAccount" value="1">
-                                    <label class="form-check-label" for="createUserAccount">
-                                        Create login account for this employee (requires official email)
-                                    </label>
-                                </div>
-                                <small class="text-muted">Default password will be "password123" - employee should change it on first login.</small>
+                        <div class="col-md-3">
+                            <input type="hidden" name="gratuity_applicable" value="0">
+                            <div class="form-check">
+                                <input type="checkbox"
+                                       class="form-check-input"
+                                       name="gratuity_applicable"
+                                       id="gratuityApplicable"
+                                       value="1"
+                                       {{ old('gratuity_applicable', $employee->gratuity_applicable) ? 'checked' : '' }}>
+                                <label class="form-check-label" for="gratuityApplicable">Gratuity Applicable</label>
                             </div>
                         </div>
-                        @endif
+
+                        <div class="col-md-3">
+                            <label class="form-label">Tax Regime</label>
+                            <select name="tax_regime" class="form-select">
+                                <option value="new" {{ old('tax_regime', $employee->tax_regime ?? 'new') == 'new' ? 'selected' : '' }}>
+                                    New Regime
+                                </option>
+                                <option value="old" {{ old('tax_regime', $employee->tax_regime) == 'old' ? 'selected' : '' }}>
+                                    Old Regime
+                                </option>
+                            </select>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            <h6 class="border-bottom pb-2 mb-3 mt-4">Bank Details</h6>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Bank Name</label>
+                    <input type="text"
+                           name="bank_name"
+                           class="form-control"
+                           value="{{ old('bank_name', $employee->bank_name) }}">
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Branch Name</label>
+                    <input type="text"
+                           name="bank_branch"
+                           class="form-control"
+                           value="{{ old('bank_branch', $employee->bank_branch) }}">
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Account Type</label>
+                    <select name="bank_account_type" class="form-select">
+                        <option value="savings" {{ old('bank_account_type', $employee->bank_account_type) == 'savings' ? 'selected' : '' }}>
+                            Savings
+                        </option>
+                        <option value="current" {{ old('bank_account_type', $employee->bank_account_type) == 'current' ? 'selected' : '' }}>
+                            Current
+                        </option>
+                        <option value="salary" {{ old('bank_account_type', $employee->bank_account_type) == 'salary' ? 'selected' : '' }}>
+                            Salary Account
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Account Number</label>
+                    <input type="text"
+                           name="bank_account_number"
+                           class="form-control"
+                           value="{{ old('bank_account_number', $employee->bank_account_number) }}">
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">IFSC Code</label>
+                    <input type="text"
+                           name="bank_ifsc"
+                           class="form-control text-uppercase"
+                           value="{{ old('bank_ifsc', $employee->bank_ifsc) }}">
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label">Payment Mode</label>
+                    <select name="payment_mode" class="form-select">
+                        <option value="bank_transfer" {{ old('payment_mode', $employee->payment_mode ?? 'bank_transfer') == 'bank_transfer' ? 'selected' : '' }}>
+                            Bank Transfer
+                        </option>
+                        <option value="cheque" {{ old('payment_mode', $employee->payment_mode) == 'cheque' ? 'selected' : '' }}>
+                            Cheque
+                        </option>
+                        <option value="cash" {{ old('payment_mode', $employee->payment_mode) == 'cash' ? 'selected' : '' }}>
+                            Cash
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <h6 class="border-bottom pb-2 mb-3 mt-4">Insurance & Benefits</h6>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <input type="hidden" name="health_insurance_enrolled" value="0">
+                    <div class="form-check mt-4">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               name="health_insurance_enrolled"
+                               id="healthInsuranceEnrolled"
+                               value="1"
+                               {{ old('health_insurance_enrolled', $employee->health_insurance_enrolled) ? 'checked' : '' }}>
+                        <label class="form-check-label" for="healthInsuranceEnrolled">Health Insurance Enrolled</label>
+                    </div>
+                </div>
+                <div class="col-md-4 insurance-fields {{ old('health_insurance_enrolled', $employee->health_insurance_enrolled) ? '' : 'd-none' }}">
+                    <label class="form-label">Policy Number</label>
+                    <input type="text"
+                           name="health_insurance_policy_no"
+                           class="form-control"
+                           value="{{ old('health_insurance_policy_no', $employee->health_insurance_policy_no) }}">
+                </div>
+                <div class="col-md-4 insurance-fields {{ old('health_insurance_enrolled', $employee->health_insurance_enrolled) ? '' : 'd-none' }}">
+                    <label class="form-label">Sum Insured</label>
+                    <input type="number"
+                           name="sum_insured"
+                           class="form-control"
+                           min="0"
+                           step="0.01"
+                           value="{{ old('sum_insured', $employee->sum_insured ?? 0) }}">
+                </div>
+            </div>
+
+            @if(!isset($employee->id))
+                <h6 class="border-bottom pb-2 mb-3 mt-4">User Account</h6>
+                <div class="row g-3">
+                    <div class="col-12">
+                        <input type="hidden" name="create_user_account" value="0">
+                        <div class="form-check">
+                            <input type="checkbox"
+                                   class="form-check-input"
+                                   name="create_user_account"
+                                   id="createUserAccount"
+                                   value="1"
+                                   {{ old('create_user_account') ? 'checked' : '' }}>
+                            <label class="form-check-label" for="createUserAccount">
+                                Create login account for this employee (requires official email)
+                            </label>
+                        </div>
+                        <small class="text-muted">
+                            Default password will be "password123" - employee should change it on first login.
+                        </small>
+                    </div>
+                </div>
+            @endif
+        </div>
+    </div>
+</div>
         </div>
 
         {{-- Submit Buttons --}}
@@ -689,6 +865,35 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('ptApplicable').addEventListener('change', function() {
         document.querySelectorAll('.pt-fields').forEach(el => el.classList.toggle('d-none', !this.checked));
     });
+
+    const attendancePolicySelect = document.querySelector('select[name="hr_attendance_policy_id"]');
+    const otHourlyRateWrapper = document.getElementById('otHourlyRateWrapper');
+    const otHourlyRateInput = document.getElementById('otHourlyRate');
+    const fixedPolicyIds = @json(collect($attendancePolicies)->filter(fn($policy) => ($policy->ot_calculation_basis ?? 'basic') === 'fixed')->pluck('id')->values());
+
+    function syncOtHourlyRateVisibility() {
+        if (!attendancePolicySelect || !otHourlyRateWrapper || !otHourlyRateInput) {
+            return;
+        }
+
+        const selectedPolicyId = attendancePolicySelect.value ? Number(attendancePolicySelect.value) : null;
+        const isFixedPolicy = selectedPolicyId !== null && fixedPolicyIds.includes(selectedPolicyId);
+
+        otHourlyRateWrapper.classList.toggle('d-none', !isFixedPolicy);
+        otHourlyRateInput.required = isFixedPolicy;
+    }
+
+    if (attendancePolicySelect) {
+        attendancePolicySelect.addEventListener('change', syncOtHourlyRateVisibility);
+        syncOtHourlyRateVisibility();
+    }
+
+    const healthInsuranceEnrolled = document.getElementById('healthInsuranceEnrolled');
+    if (healthInsuranceEnrolled) {
+        healthInsuranceEnrolled.addEventListener('change', function() {
+            document.querySelectorAll('.insurance-fields').forEach(el => el.classList.toggle('d-none', !this.checked));
+        });
+    }
 });
 </script>
 @endpush

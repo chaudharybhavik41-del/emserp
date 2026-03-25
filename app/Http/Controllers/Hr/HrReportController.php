@@ -7,12 +7,15 @@ use App\Models\Department;
 use App\Models\Hr\HrAttendance;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeDocument;
+use App\Services\Accounting\HrAccountingReconciliationService;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class HrReportController extends Controller
 {
-    public function __construct()
+    public function __construct(
+        protected HrAccountingReconciliationService $hrAccountingReconciliationService
+    )
     {
         $this->middleware('auth');
     }
@@ -162,6 +165,11 @@ class HrReportController extends Controller
             ])->toArray();
 
         return $this->listView('Muster Roll', ['Date', 'Emp Code', 'Name', 'Status', 'Work Hrs'], $rows);
+    }
+
+    public function accountingReconciliation(): View
+    {
+        return view('hr.reports.accounting_reconciliation', $this->hrAccountingReconciliationService->build());
     }
 
     private function listView(string $title, array $headers, array $rows): View

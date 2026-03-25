@@ -3,13 +3,16 @@
 namespace App\Models\Hr;
 
 use App\Enums\Hr\EmployeeStatus;
+use App\Models\Accounting\Account;
 use App\Models\Department;
 use App\Models\User;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -78,6 +81,7 @@ class HrEmployee extends Model
         'hr_attendance_policy_id',
         'hr_leave_policy_id',
         'overtime_applicable',
+        'ot_hourly_rate',
         'attendance_mode',
         'hr_salary_structure_id',
         'payment_mode',
@@ -123,6 +127,7 @@ class HrEmployee extends Model
         'esi_join_date' => 'date',
         'address_same_as_present' => 'boolean',
         'overtime_applicable' => 'boolean',
+        'ot_hourly_rate' => 'decimal:2',
         'pf_applicable' => 'boolean',
         'eps_applicable' => 'boolean',
         'esi_applicable' => 'boolean',
@@ -186,11 +191,39 @@ class HrEmployee extends Model
         return $this->date_of_joining?->copy()?->addMonths($this->probation_period_months ?? 0);
     }
 
+    public function canBeDeleted(): bool
+    {
+        return $this->deletionBlockedReason() === null;
+    }
+
+    public function deletionBlockedReason(): ?string
+    {
+        if ($this->relationLoaded('payrolls') ? $this->payrolls->isNotEmpty() : $this->payrolls()->exists()) {
+            return 'Cannot delete employee with payroll records. Consider marking as inactive instead.';
+        }
+
+        if ($this->relationLoaded('salaries') ? $this->salaries->isNotEmpty() : $this->salaries()->exists()) {
+            return 'Cannot delete employee with salary records. Consider marking as inactive instead.';
+        }
+
+        return null;
+    }
+
     // Relationships
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function accountingLedger(): MorphOne
+    {
+        return $this->morphOne(Account::class, 'related_model');
+    }
+
+    public function sourceCandidate(): HasOne
+    {
+        return $this->hasOne(HrCandidate::class, 'converted_hr_employee_id');
     }
 
     public function department(): BelongsTo
@@ -476,6 +509,76 @@ class HrEmployee extends Model
         
         // Return default shift
         return $this->defaultShift;
+    }
+
+    public function getApplicableAttendancePolicy(?CarbonInterface $date = null): ?HrAttendancePolicy
+    {
+        $effectiveDate = $date?->toDateString() ?? now()->toDateString();
+
+        if ($this->relationLoaded('attendancePolicy') && $this->attendancePolicy) {
+            if (! $this->attendancePolicy->effective_from || $this->attendancePolicy->effective_from->toDateString() <= $effectiveDate) {
+                return $this->attendancePolicy;
+            }
+        }
+
+        if ($this->hr_attendance_policy_id) {
+            $assignedPolicy = $this->attendancePolicy()
+                ->where(function ($query) use ($effectiveDate) {
+                    $query->whereNull('effective_from')
+                        ->orWhereDate('effective_from', '<=', $effectiveDate);
+                })
+                ->first();
+
+            if ($assignedPolicy) {
+                return $assignedPolicy;
+            }
+        }
+
+        return HrAttendancePolicy::query()
+            ->where('is_active', true)
+            ->where('is_default', true)
+            ->where(function ($query) use ($effectiveDate) {
+                $query->whereNull('effective_from')
+                    ->orWhereDate('effective_from', '<=', $effectiveDate);
+            })
+            ->orderByDesc('effective_from')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    public function isWeeklyOffOn(CarbonInterface $date): bool
+    {
+        $dailyAssignment = HrDailyShiftAssignment::query()
+            ->where('hr_employee_id', $this->id)
+            ->whereDate('date', $date->toDateString())
+            ->first();
+
+        if ($dailyAssignment) {
+            if ($dailyAssignment->day_type === 'weekly_off') {
+                return true;
+            }
+
+            if ($dailyAssignment->day_type === 'working') {
+                return false;
+            }
+        }
+
+        $roster = $this->shiftRosters()
+            ->with('weeklyOffPattern')
+            ->where('is_current', true)
+            ->where('effective_from', '<=', $date)
+            ->where(function ($q) use ($date) {
+                $q->whereNull('effective_to')
+                    ->orWhere('effective_to', '>=', $date);
+            })
+            ->latest('effective_from')
+            ->first();
+
+        if ($roster?->weeklyOffPattern) {
+            return $roster->weeklyOffPattern->isWeeklyOffForDate($date);
+        }
+
+        return $date->isSunday();
     }
 
     public function getPerDaySalary(): float

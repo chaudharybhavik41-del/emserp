@@ -9,6 +9,7 @@ use App\Models\Department;
 use App\Models\PasswordHistory;
 use App\Models\User;
 use App\Models\UserRoleHistory;
+use App\Services\Users\AuditedUserCreator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -17,8 +18,9 @@ use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
 {
-    public function __construct()
-    {
+    public function __construct(
+        protected AuditedUserCreator $userCreator
+    ) {
         $this->middleware('permission:core.user.view')->only(['index', 'show']);
         $this->middleware('permission:core.user.create')->only(['create', 'store']);
         $this->middleware('permission:core.user.update')->only(['edit', 'update', 'toggleStatus']);
@@ -37,9 +39,9 @@ class UserController extends Controller
         if ($search = trim($request->get('q', ''))) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('employee_code', 'like', "%{$search}%")
-                  ->orWhere('phone', 'like', "%{$search}%");
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('employee_code', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%");
             });
         }
 
@@ -81,9 +83,9 @@ class UserController extends Controller
      */
     public function create()
     {
-        $user = new User();
+        $user = new User;
         $user->employee_code = User::generateEmployeeCode();
-        
+
         $roles = Role::orderBy('name')->get();
         $departments = Department::active()->orderBy('name')->get();
 
@@ -96,7 +98,7 @@ class UserController extends Controller
     public function store(StoreUserRequest $request)
     {
         $data = $request->validated();
-        
+
         // Hash password
         $data['password'] = Hash::make($data['password']);
         $data['is_active'] = $request->boolean('is_active', true);
@@ -107,10 +109,12 @@ class UserController extends Controller
                 ->store('profile-photos', 'public');
         }
 
-        $user = User::create($data);
-
-        // Store initial password in history
-        PasswordHistory::storePassword($user, $data['password']);
+        $user = $this->userCreator->create($data, [
+            'source' => 'users.store',
+            'metadata' => [
+                'creation_flow' => 'admin_user_management',
+            ],
+        ]);
 
         // Assign roles
         if ($request->has('roles')) {
@@ -125,9 +129,6 @@ class UserController extends Controller
 
         // Assign departments
         $this->syncDepartments($user, $request);
-
-        // Log activity
-        ActivityLog::logCreated($user, "Created user: {$user->name}");
 
         return redirect()
             ->route('users.index')
@@ -190,7 +191,7 @@ class UserController extends Controller
         $data = $request->validated();
 
         // Handle password update
-        if (!empty($data['password'])) {
+        if (! empty($data['password'])) {
             // Check password history
             $historyCount = (int) setting('password_history_count', 5);
             if ($historyCount > 0 && PasswordHistory::wasPasswordUsed($user, $data['password'], $historyCount)) {
@@ -250,13 +251,13 @@ class UserController extends Controller
         }
 
         $oldStatus = $user->is_active;
-        $user->is_active = !$user->is_active;
+        $user->is_active = ! $user->is_active;
         $user->save();
 
         $action = $user->is_active ? 'activated' : 'deactivated';
         ActivityLog::logCustom(
             $user->is_active ? ActivityLog::ACTION_ACTIVATED : ActivityLog::ACTION_DEACTIVATED,
-            ucfirst($action) . " user: {$user->name}",
+            ucfirst($action)." user: {$user->name}",
             $user
         );
 
@@ -308,7 +309,7 @@ class UserController extends Controller
     public function forceDelete($id)
     {
         $user = User::onlyTrashed()->findOrFail($id);
-        
+
         // Delete profile photo
         if ($user->profile_photo) {
             Storage::disk('public')->delete($user->profile_photo);

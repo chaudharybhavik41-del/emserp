@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeAsset;
@@ -11,13 +12,18 @@ use Illuminate\View\View;
 
 class HrEmployeeAssetController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'edit', 'update', 'destroy', 'returnAsset']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $assets = $employee->assets()->latest()->paginate(20)->withQueryString();
 
         $editing = null;
@@ -30,11 +36,15 @@ class HrEmployeeAssetController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.assets.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $this->validateData($request);
         $validated['hr_employee_id'] = $employee->id;
         $validated['issued_by'] = auth()->id();
@@ -47,6 +57,8 @@ class HrEmployeeAssetController extends Controller
 
     public function edit(HrEmployee $employee, HrEmployeeAsset $asset): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $asset);
 
         return redirect()->route('hr.employees.assets.index', ['employee' => $employee->id, 'edit' => $asset->id]);
@@ -54,6 +66,8 @@ class HrEmployeeAssetController extends Controller
 
     public function update(Request $request, HrEmployee $employee, HrEmployeeAsset $asset): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $asset);
 
         $asset->update($this->validateData($request));
@@ -64,6 +78,8 @@ class HrEmployeeAssetController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeAsset $asset): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $asset);
 
         $asset->delete();
@@ -74,6 +90,8 @@ class HrEmployeeAssetController extends Controller
 
     public function returnAsset(HrEmployee $employee, HrEmployeeAsset $asset): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $asset);
 
         $asset->update([

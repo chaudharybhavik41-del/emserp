@@ -68,10 +68,15 @@ class SubcontractorWorkOrder extends Model
         return $this->hasMany(SubcontractorRaBill::class, 'work_order_id');
     }
 
-    public static function generateNextNumber(?int $companyId = null): string
+    public static function generateNextNumber(?int $companyId = null, $date = null): string
     {
         $companyId ??= (int) config('accounting.default_company_id', 1);
-        $prefix = 'SCWO-' . now()->format('ym') . '-';
+        $date = $date ? \Carbon\Carbon::parse($date) : now();
+        $startMonth = (int) config('accounting.financial_year.start_month', 4);
+        $fyStartYear = $date->month >= $startMonth ? $date->year : $date->year - 1;
+        $fyEndYear = $fyStartYear + 1;
+        $fyCode = substr((string) $fyStartYear, -2) . substr((string) $fyEndYear, -2);
+        $prefix = 'SCWO-' . $fyCode . '-';
 
         $lastNumber = static::query()
             ->where('company_id', $companyId)

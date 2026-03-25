@@ -9,10 +9,15 @@ use App\Models\ClientRaBill;
 use App\Models\ClientRaBillLine;
 use App\Models\Party;
 use App\Models\Project;
+use App\Models\ProjectClientBillingRate;
+use App\Models\ProductionV2\ProductionDispatch;
+use App\Models\ProductionV2\ProductionDispatchLine;
 use App\Models\Uom;
 use App\Services\Accounting\SalesPostingService;
+use App\Services\ProjectClientBillingRateResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -27,6 +32,7 @@ class ClientRaBillController extends Controller
     public function __construct()
     {
         $this->middleware('permission:client_ra.view')->only(['index', 'show']);
+        $this->middleware('permission:client_ra.view')->only(['dispatchBalance']);
         $this->middleware('permission:client_ra.create')->only(['create', 'store']);
         $this->middleware('permission:client_ra.update')->only(['edit', 'update']);
         $this->middleware('permission:client_ra.delete')->only('destroy');
@@ -35,7 +41,7 @@ class ClientRaBillController extends Controller
     }
 
     /**
-     * Display listing of Client RA Bills
+     * Display listing of client billing documents
      */
     public function index(Request $request)
     {
@@ -60,6 +66,14 @@ class ClientRaBillController extends Controller
             $query->where('revenue_type', $request->revenue_type);
         }
 
+        if ($request->filled('bill_kind')) {
+            $query->where('bill_kind', $request->bill_kind);
+        }
+
+        if ($request->filled('source_basis')) {
+            $query->where('source_basis', $request->source_basis);
+        }
+
         if ($request->filled('date_from')) {
             $query->whereDate('bill_date', '>=', $request->date_from);
         }
@@ -73,7 +87,82 @@ class ClientRaBillController extends Controller
         $clients = Party::where('is_client', true)->where('is_active', true)->orderBy('name')->get();
         $projects = Project::orderBy('name')->get();
 
-        return view('client_ra.index', compact('raBills', 'clients', 'projects'));
+        return view('client_ra.index', [
+            'raBills' => $raBills,
+            'clients' => $clients,
+            'projects' => $projects,
+            'billKindOptions' => ClientRaBill::billKindOptions(),
+            'sourceBasisOptions' => ClientRaBill::sourceBasisOptions(),
+        ]);
+    }
+
+    public function dispatchBalance(Request $request)
+    {
+        $billedSubquery = ClientRaBillLine::query()
+            ->join('client_ra_bills as bills', 'bills.id', '=', 'client_ra_bill_lines.client_ra_bill_id')
+            ->whereIn('bills.status', ['draft', 'submitted', 'approved', 'posted'])
+            ->whereNotNull('client_ra_bill_lines.production_v2_dispatch_line_id')
+            ->groupBy('client_ra_bill_lines.production_v2_dispatch_line_id')
+            ->selectRaw('client_ra_bill_lines.production_v2_dispatch_line_id as dispatch_line_id, SUM(client_ra_bill_lines.current_qty) as billed_qty');
+
+        $query = DB::table('production_v2_dispatch_lines as line')
+            ->join('production_v2_dispatches as dispatch', 'dispatch.id', '=', 'line.dispatch_id')
+            ->join('projects as project', 'project.id', '=', 'dispatch.project_id')
+            ->leftJoin('parties as client', 'client.id', '=', 'dispatch.client_party_id')
+            ->leftJoinSub($billedSubquery, 'billed', function ($join) {
+                $join->on('billed.dispatch_line_id', '=', 'line.id');
+            })
+            ->where('dispatch.status', 'finalized')
+            ->when($request->filled('client_id'), fn ($builder) => $builder->where('dispatch.client_party_id', (int) $request->client_id))
+            ->when($request->filled('project_id'), fn ($builder) => $builder->where('dispatch.project_id', (int) $request->project_id))
+            ->when($request->filled('date_from'), fn ($builder) => $builder->whereDate('dispatch.dispatch_date', '>=', $request->date_from))
+            ->when($request->filled('date_to'), fn ($builder) => $builder->whereDate('dispatch.dispatch_date', '<=', $request->date_to))
+            ->when($request->get('billing_status') === 'unbilled', fn ($builder) => $builder->whereRaw('COALESCE(billed.billed_qty, 0) <= 0.0001'))
+            ->when($request->get('billing_status') === 'partial', fn ($builder) => $builder->whereRaw('COALESCE(billed.billed_qty, 0) > 0.0001 AND COALESCE(billed.billed_qty, 0) < line.qty - 0.0001'))
+            ->when($request->get('billing_status') === 'fully_billed', fn ($builder) => $builder->whereRaw('COALESCE(billed.billed_qty, 0) >= line.qty - 0.0001'))
+            ->selectRaw('
+                line.id as dispatch_line_id,
+                dispatch.id as dispatch_id,
+                dispatch.dispatch_number,
+                dispatch.dispatch_date,
+                dispatch.client_party_id,
+                dispatch.project_id,
+                client.name as client_name,
+                project.name as project_name,
+                line.assembly_code_snapshot,
+                line.assembly_name_snapshot,
+                line.client_dispatch_description_snapshot,
+                line.qty as dispatch_qty,
+                line.weight_kg,
+                COALESCE(billed.billed_qty, 0) as billed_qty
+            ')
+            ->orderByDesc('dispatch.dispatch_date')
+            ->orderByDesc('dispatch.id')
+            ->orderBy('line.id');
+
+        $rows = $query->paginate(25)->withQueryString();
+
+        $rows->getCollection()->transform(function ($row) {
+            $dispatchQty = (float) $row->dispatch_qty;
+            $billedQty = (float) $row->billed_qty;
+            $remainingQty = max(0.0, $dispatchQty - $billedQty);
+
+            $row->remaining_qty = $remainingQty;
+            $row->billing_status = $remainingQty <= 0.0001
+                ? 'fully_billed'
+                : ($billedQty > 0.0001 ? 'partial' : 'unbilled');
+
+            return $row;
+        });
+
+        $clients = Party::where('is_client', true)->where('is_active', true)->orderBy('name')->get();
+        $projects = Project::orderBy('name')->get();
+
+        return view('client_ra.dispatch_balance', [
+            'rows' => $rows,
+            'clients' => $clients,
+            'projects' => $projects,
+        ]);
     }
 
     /**
@@ -84,11 +173,8 @@ class ClientRaBillController extends Controller
         $clients = Party::where('is_client', true)->where('is_active', true)->orderBy('name')->get();
         $projects = Project::orderBy('name')->get();
         $uoms = Uom::where('is_active', true)->orderBy('name')->get();
-        
-        // Revenue accounts for line-level assignment
-        $revenueAccounts = Account::whereHas('group', function ($q) {
-            $q->where('nature', 'income');
-        })->where('is_active', true)->orderBy('name')->get();
+        $revenueAccountData = $this->clientBillingRevenueAccountData();
+        $revenueAccounts = $revenueAccountData['accounts'];
 
         $companyId = (int) config('accounting.default_company_id', 1);
         $tdsSections = TdsSection::where('company_id', $companyId)
@@ -101,8 +187,19 @@ class ClientRaBillController extends Controller
         $selectedProject = null;
         $previousRa = null;
         $prefillLines = null;
+        $dispatchImport = null;
 
-        if ($request->filled('client_id') && $request->filled('project_id')) {
+        if ($request->filled('production_v2_dispatch_id')) {
+            $dispatchImport = $this->buildProductionDispatchImport((int) $request->production_v2_dispatch_id);
+
+            if ($dispatchImport) {
+                $selectedClient = $dispatchImport['dispatch']->client;
+                $selectedProject = $dispatchImport['dispatch']->project;
+                $prefillLines = $dispatchImport['lines'];
+            }
+        }
+
+        if (! $dispatchImport && $request->filled('client_id') && $request->filled('project_id')) {
             $selectedClient = Party::find($request->client_id);
             $selectedProject = Project::find($request->project_id);
 
@@ -141,18 +238,23 @@ class ClientRaBillController extends Controller
 
         $nextRaNumber = ClientRaBill::generateNextRaNumber();
 
-        return view('client_ra.create', compact(
-            'clients',
-            'projects',
-            'uoms',
-            'revenueAccounts',
-            'selectedClient',
-            'selectedProject',
-            'previousRa',
-            'prefillLines',
-            'nextRaNumber',
-            'tdsSections'
-        ));
+        return view('client_ra.create', [
+            'clients' => $clients,
+            'projects' => $projects,
+            'uoms' => $uoms,
+            'revenueAccounts' => $revenueAccounts,
+            'selectedClient' => $selectedClient,
+            'selectedProject' => $selectedProject,
+            'previousRa' => $previousRa,
+            'prefillLines' => $prefillLines,
+            'dispatchImport' => $dispatchImport,
+            'nextRaNumber' => $nextRaNumber,
+            'tdsSections' => $tdsSections,
+            'billKindOptions' => ClientRaBill::billKindOptions(),
+            'sourceBasisOptions' => ClientRaBill::sourceBasisOptions(),
+            'materialScopeOptions' => ClientRaBill::materialScopeOptions(),
+            'revenueAccountMeta' => $revenueAccountData['meta'],
+        ]);
     }
 
     /**
@@ -170,6 +272,9 @@ class ClientRaBillController extends Controller
             'contract_number'  => 'nullable|string|max:100',
             'po_number'        => 'nullable|string|max:100',
             'revenue_type'     => 'required|in:fabrication,erection,supply,service,other',
+            'bill_kind'        => 'nullable|in:' . implode(',', array_keys(ClientRaBill::billKindOptions())),
+            'source_basis'     => 'nullable|in:' . implode(',', array_keys(ClientRaBill::sourceBasisOptions())),
+            'material_scope'   => 'nullable|in:' . implode(',', array_keys(ClientRaBill::materialScopeOptions())),
             
             // Deductions
             'retention_percent' => 'nullable|numeric|min:0|max:100',
@@ -185,6 +290,7 @@ class ClientRaBillController extends Controller
             // TDS (deducted by client)
             'tds_section' => 'nullable|string|max:20',
             'tds_rate'    => 'nullable|numeric|min:0|max:100',
+            'invoice_total' => 'nullable|numeric|min:0',
             
             'remarks' => 'nullable|string',
             
@@ -193,6 +299,8 @@ class ClientRaBillController extends Controller
             'lines.*.description'      => 'required|string|max:500',
             'lines.*.uom_id'           => 'nullable|exists:uoms,id',
             'lines.*.revenue_account_id' => 'nullable|exists:accounts,id',
+            'lines.*.production_v2_dispatch_id' => 'nullable|exists:production_v2_dispatches,id',
+            'lines.*.production_v2_dispatch_line_id' => 'nullable|exists:production_v2_dispatch_lines,id',
             'lines.*.contracted_qty'   => 'nullable|numeric|min:0',
             'lines.*.previous_qty'     => 'nullable|numeric|min:0',
             'lines.*.current_qty'      => 'required|numeric|min:0',
@@ -214,8 +322,11 @@ class ClientRaBillController extends Controller
 
         // Apply TDS master defaults (section → rate)
         $this->applyTdsFromMaster($validated, (int) $companyId);
+        $this->normalizeBillingClassification($validated);
+        $this->normalizeClientBillingLineDefaults($validated);
+        $dispatchSourceRows = $this->validateProductionDispatchSources($validated, null);
 
-        DB::transaction(function () use ($validated, $companyId) {
+        DB::transaction(function () use ($validated, $companyId, $dispatchSourceRows) {
             // Create RA Bill
             $raBill = new ClientRaBill();
             $raBill->company_id = $companyId;
@@ -233,6 +344,9 @@ class ClientRaBillController extends Controller
             $raBill->contract_number = $validated['contract_number'] ?? null;
             $raBill->po_number = $validated['po_number'] ?? null;
             $raBill->revenue_type = $validated['revenue_type'];
+            $raBill->bill_kind = $validated['bill_kind'];
+            $raBill->source_basis = $validated['source_basis'];
+            $raBill->material_scope = $validated['material_scope'];
             
             // Deductions
             $raBill->retention_percent = $validated['retention_percent'] ?? 0;
@@ -256,16 +370,19 @@ class ClientRaBillController extends Controller
 
             // Create lines
             $lineNo = 1;
-            foreach ($validated['lines'] as $lineData) {
+            foreach ($validated['lines'] as $index => $lineData) {
+                $dispatchSource = $dispatchSourceRows[$index] ?? null;
                 $line = new ClientRaBillLine();
                 $line->client_ra_bill_id = $raBill->id;
                 $line->line_no = $lineNo++;
                 $line->boq_item_code = $lineData['boq_item_code'] ?? null;
                 $line->revenue_account_id = $lineData['revenue_account_id'] ?? null;
+                $line->production_v2_dispatch_id = $dispatchSource['dispatch']->id ?? ($lineData['production_v2_dispatch_id'] ?? null);
+                $line->production_v2_dispatch_line_id = $dispatchSource['dispatch_line']->id ?? ($lineData['production_v2_dispatch_line_id'] ?? null);
                 $line->description = $lineData['description'];
                 $line->uom_id = $lineData['uom_id'] ?? null;
-                $line->contracted_qty = $lineData['contracted_qty'] ?? 0;
-                $line->previous_qty = $lineData['previous_qty'] ?? 0;
+                $line->contracted_qty = $dispatchSource['dispatch_line']->qty ?? ($lineData['contracted_qty'] ?? 0);
+                $line->previous_qty = $dispatchSource['already_billed_qty'] ?? ($lineData['previous_qty'] ?? 0);
                 $line->current_qty = $lineData['current_qty'];
                 $line->rate = $lineData['rate'];
                 $line->sac_hsn_code = $lineData['sac_hsn_code'] ?? null;
@@ -275,12 +392,17 @@ class ClientRaBillController extends Controller
             }
 
             // Recalculate bill totals
-            $this->recalculateBillTotals($raBill);
+            $this->recalculateBillTotals(
+                $raBill,
+                array_key_exists('invoice_total', $validated) && $validated['invoice_total'] !== null
+                    ? (float) $validated['invoice_total']
+                    : null
+            );
         });
 
         return redirect()
             ->route('accounting.client-ra.index')
-            ->with('success', 'Client RA Bill created successfully.');
+            ->with('success', 'Client billing draft created successfully.');
     }
 
     /**
@@ -288,7 +410,17 @@ class ClientRaBillController extends Controller
      */
     public function show(ClientRaBill $clientRa)
     {
-        $clientRa->load(['client', 'project', 'lines.uom', 'lines.revenueAccount', 'voucher', 'creator', 'approvedBy']);
+        $clientRa->load([
+            'client',
+            'project',
+            'lines.uom',
+            'lines.revenueAccount',
+            'lines.productionV2Dispatch',
+            'lines.productionV2DispatchLine',
+            'voucher',
+            'creator',
+            'approvedBy',
+        ]);
         
         return view('client_ra.show', compact('clientRa'));
     }
@@ -304,13 +436,12 @@ class ClientRaBillController extends Controller
                 ->with('error', 'Posted RA Bills cannot be edited.');
         }
 
-        $clientRa->load('lines');
+        $clientRa->load(['lines.productionV2Dispatch', 'lines.productionV2DispatchLine']);
         $clients = Party::where('is_client', true)->where('is_active', true)->orderBy('name')->get();
         $projects = Project::orderBy('name')->get();
         $uoms = Uom::where('is_active', true)->orderBy('name')->get();
-        $revenueAccounts = Account::whereHas('group', function ($q) {
-            $q->where('nature', 'income');
-        })->where('is_active', true)->orderBy('name')->get();
+        $revenueAccountData = $this->clientBillingRevenueAccountData();
+        $revenueAccounts = $revenueAccountData['accounts'];
 
         $companyId = (int) ($clientRa->company_id ?: config('accounting.default_company_id', 1));
         $tdsSections = TdsSection::where('company_id', $companyId)
@@ -318,7 +449,18 @@ class ClientRaBillController extends Controller
             ->orderBy('code')
             ->get();
 
-        return view('client_ra.edit', compact('clientRa', 'clients', 'projects', 'uoms', 'revenueAccounts', 'tdsSections'));
+        return view('client_ra.edit', [
+            'clientRa' => $clientRa,
+            'clients' => $clients,
+            'projects' => $projects,
+            'uoms' => $uoms,
+            'revenueAccounts' => $revenueAccounts,
+            'tdsSections' => $tdsSections,
+            'billKindOptions' => ClientRaBill::billKindOptions(),
+            'sourceBasisOptions' => ClientRaBill::sourceBasisOptions(),
+            'materialScopeOptions' => ClientRaBill::materialScopeOptions(),
+            'revenueAccountMeta' => $revenueAccountData['meta'],
+        ]);
     }
 
     /**
@@ -340,6 +482,9 @@ class ClientRaBillController extends Controller
             'contract_number'  => 'nullable|string|max:100',
             'po_number'        => 'nullable|string|max:100',
             'revenue_type'     => 'required|in:fabrication,erection,supply,service,other',
+            'bill_kind'        => 'nullable|in:' . implode(',', array_keys(ClientRaBill::billKindOptions())),
+            'source_basis'     => 'nullable|in:' . implode(',', array_keys(ClientRaBill::sourceBasisOptions())),
+            'material_scope'   => 'nullable|in:' . implode(',', array_keys(ClientRaBill::materialScopeOptions())),
             
             'retention_percent' => 'nullable|numeric|min:0|max:100',
             'retention_amount'  => 'nullable|numeric|min:0',
@@ -352,6 +497,7 @@ class ClientRaBillController extends Controller
             
             'tds_section' => 'nullable|string|max:20',
             'tds_rate'    => 'nullable|numeric|min:0|max:100',
+            'invoice_total' => 'nullable|numeric|min:0',
             
             'remarks' => 'nullable|string',
             
@@ -360,6 +506,8 @@ class ClientRaBillController extends Controller
             'lines.*.description'      => 'required|string|max:500',
             'lines.*.uom_id'           => 'nullable|exists:uoms,id',
             'lines.*.revenue_account_id' => 'nullable|exists:accounts,id',
+            'lines.*.production_v2_dispatch_id' => 'nullable|exists:production_v2_dispatches,id',
+            'lines.*.production_v2_dispatch_line_id' => 'nullable|exists:production_v2_dispatch_lines,id',
             'lines.*.contracted_qty'   => 'nullable|numeric|min:0',
             'lines.*.previous_qty'     => 'nullable|numeric|min:0',
             'lines.*.current_qty'      => 'required|numeric|min:0',
@@ -372,8 +520,11 @@ class ClientRaBillController extends Controller
         // Apply TDS master defaults (section → rate)
         $companyId = (int) ($clientRa->company_id ?: config('accounting.default_company_id', 1));
         $this->applyTdsFromMaster($validated, $companyId);
+        $this->normalizeBillingClassification($validated);
+        $this->normalizeClientBillingLineDefaults($validated);
+        $dispatchSourceRows = $this->validateProductionDispatchSources($validated, $clientRa);
 
-        DB::transaction(function () use ($validated, $clientRa) {
+        DB::transaction(function () use ($validated, $clientRa, $dispatchSourceRows) {
             // Update header
             $clientRa->fill([
                 'bill_date'         => $validated['bill_date'],
@@ -383,6 +534,9 @@ class ClientRaBillController extends Controller
                 'contract_number'   => $validated['contract_number'] ?? null,
                 'po_number'         => $validated['po_number'] ?? null,
                 'revenue_type'      => $validated['revenue_type'],
+                'bill_kind'         => $validated['bill_kind'],
+                'source_basis'      => $validated['source_basis'],
+                'material_scope'    => $validated['material_scope'],
                 'retention_percent' => $validated['retention_percent'] ?? 0,
                 'other_deductions'  => $validated['other_deductions'] ?? 0,
                 'deduction_remarks' => $validated['deduction_remarks'] ?? null,
@@ -409,15 +563,18 @@ class ClientRaBillController extends Controller
 
             // Update/create lines
             $lineNo = 1;
-            foreach ($validated['lines'] as $lineData) {
+            foreach ($validated['lines'] as $index => $lineData) {
+                $dispatchSource = $dispatchSourceRows[$index] ?? null;
                 $lineAttributes = [
                     'line_no'            => $lineNo++,
                     'boq_item_code'      => $lineData['boq_item_code'] ?? null,
                     'revenue_account_id' => $lineData['revenue_account_id'] ?? null,
+                    'production_v2_dispatch_id' => $dispatchSource['dispatch']->id ?? ($lineData['production_v2_dispatch_id'] ?? null),
+                    'production_v2_dispatch_line_id' => $dispatchSource['dispatch_line']->id ?? ($lineData['production_v2_dispatch_line_id'] ?? null),
                     'description'        => $lineData['description'],
                     'uom_id'             => $lineData['uom_id'] ?? null,
-                    'contracted_qty'     => $lineData['contracted_qty'] ?? 0,
-                    'previous_qty'       => $lineData['previous_qty'] ?? 0,
+                    'contracted_qty'     => $dispatchSource['dispatch_line']->qty ?? ($lineData['contracted_qty'] ?? 0),
+                    'previous_qty'       => $dispatchSource['already_billed_qty'] ?? ($lineData['previous_qty'] ?? 0),
                     'current_qty'        => $lineData['current_qty'],
                     'rate'               => $lineData['rate'],
                     'sac_hsn_code'       => $lineData['sac_hsn_code'] ?? null,
@@ -440,12 +597,17 @@ class ClientRaBillController extends Controller
             }
 
             // Recalculate totals
-            $this->recalculateBillTotals($clientRa);
+            $this->recalculateBillTotals(
+                $clientRa,
+                array_key_exists('invoice_total', $validated) && $validated['invoice_total'] !== null
+                    ? (float) $validated['invoice_total']
+                    : null
+            );
         });
 
         return redirect()
             ->route('accounting.client-ra.show', $clientRa)
-            ->with('success', 'Client RA Bill updated successfully.');
+            ->with('success', 'Client billing draft updated successfully.');
     }
 
     /**
@@ -611,10 +773,328 @@ class ClientRaBillController extends Controller
         }
     }
 
+    protected function normalizeBillingClassification(array &$validated): void
+    {
+        $lines = collect($validated['lines'] ?? []);
+        $hasDispatchSource = $lines->contains(function ($line) {
+            return !empty($line['production_v2_dispatch_line_id'] ?? null);
+        });
+        $project = !empty($validated['project_id']) ? Project::find((int) $validated['project_id']) : null;
+
+        $billKind = $validated['bill_kind'] ?? ($project?->client_billing_default_bill_kind ?: null);
+        if (!$billKind) {
+            $billKind = ClientRaBill::defaultBillKindFor($validated['revenue_type'] ?? null, $hasDispatchSource);
+        }
+
+        $sourceBasis = $validated['source_basis'] ?? ($project?->client_billing_source_basis ?: null);
+        if (!$sourceBasis) {
+            $sourceBasis = ClientRaBill::defaultSourceBasisFor($billKind, $hasDispatchSource);
+        }
+
+        $materialScope = $validated['material_scope'] ?? ($project?->client_billing_material_scope ?: null);
+        if (!$materialScope) {
+            $materialScope = ClientRaBill::defaultMaterialScopeFor($billKind);
+        }
+
+        if (empty($validated['tds_section']) && !empty($project?->client_billing_tds_section)) {
+            $validated['tds_section'] = $project->client_billing_tds_section;
+        }
+
+        if (((float) ($validated['tds_rate'] ?? 0)) <= 0 && !empty($project?->client_billing_tds_rate)) {
+            $validated['tds_rate'] = (float) $project->client_billing_tds_rate;
+        }
+
+        $validated['bill_kind'] = $billKind;
+        $validated['source_basis'] = $sourceBasis;
+        $validated['material_scope'] = $materialScope;
+    }
+
+    protected function normalizeClientBillingLineDefaults(array &$validated): void
+    {
+        if (empty($validated['lines']) || empty($validated['project_id'])) {
+            return;
+        }
+
+        $project = Project::find((int) $validated['project_id']);
+        $billKind = (string) ($validated['bill_kind'] ?? ClientRaBill::BILL_KIND_OTHER);
+        $revenueType = (string) ($validated['revenue_type'] ?? 'other');
+        $billDate = $validated['bill_date'] ?? null;
+        $rateResolver = app(ProjectClientBillingRateResolver::class);
+
+        foreach ($validated['lines'] as $index => $line) {
+            if ($project) {
+                $projectRate = $rateResolver->resolveForClientBillLine($project, $line, $billKind, $billDate);
+
+                if ($projectRate) {
+                    if (empty($line['uom_id']) && $projectRate->uom_id) {
+                        $validated['lines'][$index]['uom_id'] = $projectRate->uom_id;
+                    }
+
+                    if ((float) ($line['rate'] ?? 0) <= 0 && $projectRate->rate > 0) {
+                        $validated['lines'][$index]['rate'] = $projectRate->rate;
+                    }
+
+                    if (empty($line['sac_hsn_code']) && !empty($projectRate->sac_hsn_code)) {
+                        $validated['lines'][$index]['sac_hsn_code'] = $projectRate->sac_hsn_code;
+                    }
+
+                    if (empty($line['revenue_account_id']) && $projectRate->revenue_account_id) {
+                        $validated['lines'][$index]['revenue_account_id'] = $projectRate->revenue_account_id;
+                    }
+                }
+            }
+
+            if (empty($validated['lines'][$index]['revenue_account_id'])) {
+                $defaultRevenueAccount = $this->defaultRevenueAccountForBillKind($billKind, $revenueType);
+                if ($defaultRevenueAccount) {
+                    $validated['lines'][$index]['revenue_account_id'] = $defaultRevenueAccount->id;
+                }
+            }
+        }
+    }
+
+    protected function clientBillingRevenueAccountData(): array
+    {
+        $accounts = Account::query()
+            ->whereHas('group', function ($q) {
+                $q->where('nature', 'income');
+            })
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        $codeBuckets = [
+            'fabrication' => (string) Config::get('accounting.sales.fabrication_revenue_code', 'REV-FABRICATION'),
+            'erection' => (string) Config::get('accounting.sales.erection_revenue_code', 'REV-ERECTION'),
+            'supply' => (string) Config::get('accounting.sales.supply_revenue_code', 'REV-SUPPLY'),
+            'service' => (string) Config::get('accounting.sales.service_revenue_code', 'REV-SERVICE'),
+            'other' => (string) Config::get('accounting.sales.other_revenue_code', 'REV-OTHER'),
+            'scrap' => (string) Config::get('accounting.sales.scrap_revenue_code', 'REV-SCRAP'),
+            'default' => (string) Config::get('accounting.sales.default_revenue_code', 'REV-FABRICATION'),
+        ];
+
+        $roleByAccountId = [];
+        $idsByRole = [];
+
+        foreach ($accounts as $account) {
+            $role = array_search($account->code, $codeBuckets, true);
+            $role = $role === false ? 'generic' : $role;
+            $roleByAccountId[$account->id] = $role;
+            $idsByRole[$role][] = $account->id;
+        }
+
+        return [
+            'accounts' => $accounts,
+            'meta' => [
+                'role_by_account_id' => $roleByAccountId,
+                'ids_by_role' => $idsByRole,
+                'default_account_ids' => [
+                    ClientRaBill::BILL_KIND_MATERIAL_SALES => $this->defaultRevenueAccountForBillKind(ClientRaBill::BILL_KIND_MATERIAL_SALES, 'supply')?->id,
+                    ClientRaBill::BILL_KIND_SCRAP_SALES => $this->defaultRevenueAccountForBillKind(ClientRaBill::BILL_KIND_SCRAP_SALES, 'other')?->id,
+                    ClientRaBill::BILL_KIND_PROJECT_LABOUR_SERVICE => $this->defaultRevenueAccountForBillKind(ClientRaBill::BILL_KIND_PROJECT_LABOUR_SERVICE, 'service')?->id,
+                    ClientRaBill::BILL_KIND_PROJECT_MFG_SERVICE => $this->defaultRevenueAccountForBillKind(ClientRaBill::BILL_KIND_PROJECT_MFG_SERVICE, 'fabrication')?->id,
+                    ClientRaBill::BILL_KIND_OTHER => $this->defaultRevenueAccountForBillKind(ClientRaBill::BILL_KIND_OTHER, 'other')?->id,
+                ],
+            ],
+        ];
+    }
+
+    protected function defaultRevenueAccountForBillKind(string $billKind, string $revenueType): ?Account
+    {
+        $preferredCode = match ($billKind) {
+            ClientRaBill::BILL_KIND_MATERIAL_SALES => (string) Config::get('accounting.sales.supply_revenue_code', 'REV-SUPPLY'),
+            ClientRaBill::BILL_KIND_SCRAP_SALES => (string) Config::get('accounting.sales.scrap_revenue_code', 'REV-SCRAP'),
+            ClientRaBill::BILL_KIND_PROJECT_LABOUR_SERVICE => (string) Config::get('accounting.sales.service_revenue_code', 'REV-SERVICE'),
+            ClientRaBill::BILL_KIND_PROJECT_MFG_SERVICE => match ($revenueType) {
+                'erection' => (string) Config::get('accounting.sales.erection_revenue_code', 'REV-ERECTION'),
+                'service' => (string) Config::get('accounting.sales.service_revenue_code', 'REV-SERVICE'),
+                default => (string) Config::get('accounting.sales.fabrication_revenue_code', 'REV-FABRICATION'),
+            },
+            default => match ($revenueType) {
+                'supply' => (string) Config::get('accounting.sales.supply_revenue_code', 'REV-SUPPLY'),
+                'service' => (string) Config::get('accounting.sales.service_revenue_code', 'REV-SERVICE'),
+                'erection' => (string) Config::get('accounting.sales.erection_revenue_code', 'REV-ERECTION'),
+                default => (string) Config::get('accounting.sales.other_revenue_code', Config::get('accounting.sales.default_revenue_code', 'REV-FABRICATION')),
+            },
+        };
+
+        return Account::query()
+            ->where('code', $preferredCode)
+            ->where('is_active', true)
+            ->first();
+    }
+
+    protected function buildProductionDispatchImport(int $dispatchId): ?array
+    {
+        $rateResolver = app(ProjectClientBillingRateResolver::class);
+        $dispatch = ProductionDispatch::query()
+            ->with(['project', 'client', 'lines'])
+            ->where('status', 'finalized')
+            ->find($dispatchId);
+
+        if (! $dispatch) {
+            return null;
+        }
+
+        $billedQtyMap = $this->dispatchLineBilledQtyMap($dispatch->lines->pluck('id')->all());
+
+        $lines = $dispatch->lines
+            ->map(function (ProductionDispatchLine $line) use ($dispatch, $billedQtyMap, $rateResolver) {
+                $alreadyBilledQty = (float) ($billedQtyMap[$line->id] ?? 0);
+                $remainingQty = max(0.0, (float) $line->qty - $alreadyBilledQty);
+                $projectRate = $rateResolver->resolveForDispatchLine($dispatch->project_id, $line, $dispatch->dispatch_date);
+
+                if ($remainingQty <= 0.0001) {
+                    return null;
+                }
+
+                return [
+                    'id' => null,
+                    'boq_item_code' => $line->assembly_code_snapshot ?? '',
+                    'revenue_account_id' => null,
+                    'production_v2_dispatch_id' => $dispatch->id,
+                    'production_v2_dispatch_line_id' => $line->id,
+                    'description' => $this->dispatchBillingDescription($dispatch, $line),
+                    'uom_id' => $projectRate?->uom_id,
+                    'contracted_qty' => (float) $line->qty,
+                    'previous_qty' => $alreadyBilledQty,
+                    'current_qty' => $remainingQty,
+                    'rate' => (float) ($projectRate?->rate ?? 0),
+                    'revenue_account_id' => $projectRate?->revenue_account_id,
+                    'sac_hsn_code' => $projectRate?->sac_hsn_code ?? '',
+                    'remarks' => $line->remarks ?? '',
+                    'source_summary' => $dispatch->dispatch_number,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        return [
+            'dispatch' => $dispatch,
+            'lines' => $lines,
+            'remaining_count' => count($lines),
+        ];
+    }
+
+    /**
+     * @return array<int, array{dispatch:\App\Models\ProductionV2\ProductionDispatch,dispatch_line:\App\Models\ProductionV2\ProductionDispatchLine,already_billed_qty:float}>
+     */
+    protected function validateProductionDispatchSources(array $validated, ?ClientRaBill $currentBill): array
+    {
+        $rows = [];
+        $lineIds = collect($validated['lines'] ?? [])
+            ->pluck('production_v2_dispatch_line_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($lineIds->isEmpty()) {
+            return $rows;
+        }
+
+        $dispatchLines = ProductionDispatchLine::query()
+            ->with('dispatch')
+            ->whereIn('id', $lineIds)
+            ->get()
+            ->keyBy('id');
+
+        $billedQtyMap = $this->dispatchLineBilledQtyMap($lineIds->all(), $currentBill?->id);
+        $projectId = (int) ($validated['project_id'] ?? $currentBill?->project_id ?? 0);
+        $clientId = (int) ($validated['client_id'] ?? $currentBill?->client_id ?? 0);
+
+        foreach ($validated['lines'] as $index => $line) {
+            $dispatchId = (int) ($line['production_v2_dispatch_id'] ?? 0);
+            $dispatchLineId = (int) ($line['production_v2_dispatch_line_id'] ?? 0);
+
+            if ($dispatchId === 0 && $dispatchLineId === 0) {
+                continue;
+            }
+
+            if ($dispatchId === 0 || $dispatchLineId === 0) {
+                throw ValidationException::withMessages([
+                    "lines.$index.description" => 'Dispatch-linked billing line is missing source dispatch reference.',
+                ]);
+            }
+
+            /** @var \App\Models\ProductionV2\ProductionDispatchLine|null $dispatchLine */
+            $dispatchLine = $dispatchLines->get($dispatchLineId);
+            $dispatch = $dispatchLine?->dispatch;
+
+            if (! $dispatchLine || ! $dispatch || (int) $dispatch->id !== $dispatchId) {
+                throw ValidationException::withMessages([
+                    "lines.$index.description" => 'Selected dispatch source could not be verified.',
+                ]);
+            }
+
+            if ($dispatch->status !== 'finalized') {
+                throw ValidationException::withMessages([
+                    "lines.$index.description" => 'Only finalized production dispatch can be billed to client.',
+                ]);
+            }
+
+            if ((int) $dispatch->project_id !== $projectId || (int) ($dispatch->client_party_id ?? 0) !== $clientId) {
+                throw ValidationException::withMessages([
+                    "lines.$index.description" => 'Dispatch source does not belong to the selected client/project.',
+                ]);
+            }
+
+            $alreadyBilledQty = (float) ($billedQtyMap[$dispatchLineId] ?? 0);
+            $currentQty = (float) ($line['current_qty'] ?? 0);
+
+            if ($currentQty > (((float) $dispatchLine->qty - $alreadyBilledQty) + 0.0001)) {
+                throw ValidationException::withMessages([
+                    "lines.$index.current_qty" => 'Current qty exceeds remaining unbilled dispatch qty.',
+                ]);
+            }
+
+            $rows[$index] = [
+                'dispatch' => $dispatch,
+                'dispatch_line' => $dispatchLine,
+                'already_billed_qty' => $alreadyBilledQty,
+            ];
+        }
+
+        return $rows;
+    }
+
+    protected function dispatchLineBilledQtyMap(array $dispatchLineIds, ?int $ignoreBillId = null)
+    {
+        if (empty($dispatchLineIds)) {
+            return collect();
+        }
+
+        return ClientRaBillLine::query()
+            ->join('client_ra_bills as bills', 'bills.id', '=', 'client_ra_bill_lines.client_ra_bill_id')
+            ->whereIn('bills.status', ['draft', 'submitted', 'approved', 'posted'])
+            ->when($ignoreBillId, fn ($query) => $query->where('bills.id', '!=', $ignoreBillId))
+            ->whereIn('client_ra_bill_lines.production_v2_dispatch_line_id', $dispatchLineIds)
+            ->groupBy('client_ra_bill_lines.production_v2_dispatch_line_id')
+            ->selectRaw('client_ra_bill_lines.production_v2_dispatch_line_id as dispatch_line_id, SUM(client_ra_bill_lines.current_qty) as qty_sum')
+            ->pluck('qty_sum', 'dispatch_line_id');
+    }
+
+    protected function dispatchBillingDescription(ProductionDispatch $dispatch, ProductionDispatchLine $line): string
+    {
+        $parts = trim((string) ($line->client_dispatch_description_snapshot ?? ''));
+        $assembly = trim((string) ($line->assembly_code_snapshot ?: 'Assembly'));
+        $assemblyName = trim((string) ($line->assembly_name_snapshot ?? ''));
+
+        $label = trim($assembly . ($assemblyName !== '' ? ' - ' . $assemblyName : ''));
+        $description = 'Dispatch ' . $dispatch->dispatch_number . ' / ' . $label;
+
+        if ($parts !== '') {
+            $description .= ' / Parts: ' . $parts;
+        }
+
+        return $description;
+    }
+
     /**
      * Recalculate bill totals from lines
      */
-    protected function recalculateBillTotals(ClientRaBill $raBill): void
+    protected function recalculateBillTotals(ClientRaBill $raBill, ?float $invoiceTotalInput = null): void
     {
         $raBill->refresh();
 
@@ -627,9 +1107,9 @@ class ClientRaBillController extends Controller
         $raBill->gross_amount = $previousAmount + $currentAmount;
 
         // Calculate retention
-        if ($raBill->retention_percent > 0) {
-            $raBill->retention_amount = round($currentAmount * ($raBill->retention_percent / 100), 2);
-        }
+        $raBill->retention_amount = $raBill->retention_percent > 0
+            ? round($currentAmount * ($raBill->retention_percent / 100), 2)
+            : 0.0;
 
         // Net = Current - Deductions
         $totalDeductions = $raBill->retention_amount + $raBill->other_deductions;
@@ -641,15 +1121,39 @@ class ClientRaBillController extends Controller
         $raBill->igst_amount = round($raBill->net_amount * ($raBill->igst_rate / 100), 2);
         $raBill->total_gst = $raBill->cgst_amount + $raBill->sgst_amount + $raBill->igst_amount;
 
-        // TDS on net amount (will be deducted by client)
-        $raBill->tds_amount = round($raBill->net_amount * ($raBill->tds_rate / 100), 2);
+        // TDS on net amount (will be deducted by client) should stay whole-rupee.
+        $raBill->tds_amount = $this->calculateRoundedTdsAmount(
+            (float) $raBill->net_amount,
+            (float) $raBill->tds_rate
+        );
 
-        // Total invoice = Net + GST
-        $raBill->total_amount = $raBill->net_amount + $raBill->total_gst;
+        $calculatedTotal = round($raBill->net_amount + $raBill->total_gst, 2);
+        $invoiceTotal = $invoiceTotalInput !== null
+            ? round($invoiceTotalInput, 2)
+            : round($calculatedTotal, 0);
+        $raBill->round_off = round($invoiceTotal - $calculatedTotal, 2);
+
+        if (abs((float) $raBill->round_off) > 5) {
+            throw ValidationException::withMessages([
+                'invoice_total' => 'Invoice Total differs too much from calculated total. Please check billing lines, GST and deductions.',
+            ]);
+        }
+
+        // Total invoice = Net + GST + Round Off
+        $raBill->total_amount = $invoiceTotal;
 
         // Receivable = Total - TDS
         $raBill->receivable_amount = $raBill->total_amount - $raBill->tds_amount;
 
         $raBill->save();
+    }
+
+    protected function calculateRoundedTdsAmount(float $netAmount, float $tdsRate): float
+    {
+        if ($tdsRate <= 0 || $netAmount <= 0) {
+            return 0.0;
+        }
+
+        return (float) round(max(0, ($netAmount * $tdsRate) / 100), 0);
     }
 }

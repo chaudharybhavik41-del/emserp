@@ -238,6 +238,7 @@ class ProductionV2AssemblyController extends Controller
             'requirements.*.uom_id' => ['nullable', 'integer', 'exists:uoms,id'],
             'requirements.*.consumption_sequence' => ['nullable', 'integer', 'min:0'],
             'requirements.*.is_mandatory' => ['nullable', 'boolean'],
+            'requirements.*.is_client_dispatchable' => ['nullable', 'boolean'],
             'requirements.*.remarks' => ['nullable', 'string'],
         ]);
 
@@ -261,6 +262,7 @@ class ProductionV2AssemblyController extends Controller
                 'uom_id' => $row['uom_id'] ?: null,
                 'consumption_sequence' => (int) ($row['consumption_sequence'] ?? $index + 1),
                 'is_mandatory' => array_key_exists('is_mandatory', $row) ? (bool) $row['is_mandatory'] : false,
+                'is_client_dispatchable' => array_key_exists('is_client_dispatchable', $row) ? (bool) $row['is_client_dispatchable'] : false,
                 'remarks' => $row['remarks'] ?? null,
             ]);
         }

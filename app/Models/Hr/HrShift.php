@@ -141,7 +141,7 @@ class HrShift extends Model
             return 0;
         }
         
-        return $inTime->diffInMinutes($shiftStart);
+        return $shiftStart->diffInMinutes($inTime);
     }
 
     public function calculateEarlyMinutes(Carbon $outTime, Carbon $date): int
@@ -153,7 +153,7 @@ class HrShift extends Model
             return 0;
         }
         
-        return $shiftEnd->diffInMinutes($outTime);
+        return $outTime->diffInMinutes($shiftEnd);
     }
 
     public function calculateOvertimeMinutes(Carbon $outTime, Carbon $date): int
@@ -169,7 +169,7 @@ class HrShift extends Model
             return 0;
         }
         
-        $otMinutes = $outTime->diffInMinutes($shiftEnd);
+        $otMinutes = $shiftEnd->diffInMinutes($outTime);
         
         // Check minimum OT threshold
         if ($otMinutes < $this->min_ot_minutes) {
@@ -182,10 +182,21 @@ class HrShift extends Model
     }
 
     public function determineAttendanceStatus(
-        ?Carbon $inTime, 
-        ?Carbon $outTime, 
-        Carbon $date
+        ?Carbon $inTime,
+        ?Carbon $outTime,
+        Carbon $date,
+        ?HrAttendancePolicy $policy = null,
+        bool $isWeekOff = false,
+        bool $isHoliday = false,
+        int $existingMonthlyOtMinutes = 0
     ): array {
+        $gracePeriodMinutes = (int) ($policy?->grace_period_minutes ?? $this->grace_period_minutes);
+        $halfDayLateMinutes = (int) ($policy?->half_day_after_late_minutes ?? $this->half_day_late_minutes);
+        $halfDayEarlyMinutes = (int) ($policy?->half_day_after_early_minutes ?? $this->half_day_early_minutes);
+        $absentAfterLateMinutes = (int) ($policy?->absent_after_late_minutes ?? $this->absent_after_minutes);
+        $minHoursForFullDay = (float) ($policy?->min_hours_for_full_day ?? $this->working_hours);
+        $minHoursForHalfDay = (float) ($policy?->min_hours_for_half_day ?? max(0, ((float) $this->working_hours) / 2));
+
         // No punch = absent
         if (!$inTime && !$outTime) {
             return [
@@ -217,19 +228,32 @@ class HrShift extends Model
                 'needs_regularization' => true,
             ];
         }
-        
-        $lateMinutes = $this->calculateLateMinutes($inTime, $date);
+
+        $shiftStart = $this->getStartTimeForDate($date);
+        $graceEnd = $shiftStart->copy()->addMinutes($gracePeriodMinutes);
+        $lateMinutes = $inTime->lte($graceEnd) ? 0 : $shiftStart->diffInMinutes($inTime);
         $earlyMinutes = $this->calculateEarlyMinutes($outTime, $date);
-        $workingMinutes = $outTime->diffInMinutes($inTime) - $this->break_duration_minutes;
+        $workingMinutes = $inTime->diffInMinutes($outTime) - $this->break_duration_minutes;
         $workingHours = round($workingMinutes / 60, 2);
-        $otMinutes = $this->calculateOvertimeMinutes($outTime, $date);
+        $otMinutes = $this->determinePolicyAwareOvertimeMinutes(
+            $outTime,
+            $date,
+            $policy,
+            $isWeekOff,
+            $isHoliday,
+            $existingMonthlyOtMinutes
+        );
         
         // Determine status
         $status = 'present';
         
-        if ($lateMinutes >= $this->absent_after_minutes) {
+        if ($lateMinutes >= $absentAfterLateMinutes || $workingHours < $minHoursForHalfDay) {
             $status = 'absent';
-        } elseif ($lateMinutes >= $this->half_day_late_minutes || $earlyMinutes >= $this->half_day_early_minutes) {
+        } elseif (
+            $lateMinutes >= $halfDayLateMinutes
+            || $earlyMinutes >= $halfDayEarlyMinutes
+            || $workingHours < $minHoursForFullDay
+        ) {
             $status = 'half_day';
         } elseif ($lateMinutes > 0 && $earlyMinutes > 0) {
             $status = 'late_and_early';
@@ -246,6 +270,52 @@ class HrShift extends Model
             'working_hours' => $workingHours,
             'ot_minutes' => $otMinutes,
         ];
+    }
+
+    private function determinePolicyAwareOvertimeMinutes(
+        Carbon $outTime,
+        Carbon $date,
+        ?HrAttendancePolicy $policy,
+        bool $isWeekOff,
+        bool $isHoliday,
+        int $existingMonthlyOtMinutes
+    ): int {
+        if ($policy && !$policy->ot_allowed) {
+            return 0;
+        }
+
+        if (!$policy && !$this->ot_applicable) {
+            return 0;
+        }
+
+        if (($isWeekOff || $isHoliday) && $policy && !$policy->allow_week_off_work) {
+            return 0;
+        }
+
+        $shiftEnd = $this->getEndTimeForDate($date);
+        $otStartTime = $shiftEnd->copy()->addMinutes((int) $this->ot_start_after_minutes);
+
+        if ($outTime->lte($otStartTime)) {
+            return 0;
+        }
+
+        $otMinutes = $shiftEnd->diffInMinutes($outTime);
+        $minOtMinutes = (int) ($policy?->ot_min_minutes ?? $this->min_ot_minutes);
+        if ($otMinutes < $minOtMinutes) {
+            return 0;
+        }
+
+        $dailyCapMinutes = (int) (($policy?->ot_max_hours_per_day ?? $this->max_ot_hours_per_day) * 60);
+        if ($dailyCapMinutes > 0) {
+            $otMinutes = min($otMinutes, $dailyCapMinutes);
+        }
+
+        if ($policy && (int) $policy->ot_max_hours_per_month > 0) {
+            $remainingMonthlyMinutes = max(0, ((int) $policy->ot_max_hours_per_month * 60) - $existingMonthlyOtMinutes);
+            $otMinutes = min($otMinutes, $remainingMonthlyMinutes);
+        }
+
+        return max(0, $otMinutes);
     }
 
     public static function generateCode(): string

@@ -20,9 +20,18 @@
                     'uom_id' => $row->uom_id,
                     'consumption_sequence' => $row->consumption_sequence,
                     'is_mandatory' => $row->is_mandatory,
+                    'is_client_dispatchable' => $row->is_client_dispatchable,
                     'remarks' => $row->remarks,
                 ])->all()
-                : [['part_definition_id' => '', 'required_qty' => '', 'uom_id' => '', 'consumption_sequence' => 1, 'is_mandatory' => 1, 'remarks' => '']];
+                : [[
+                    'part_definition_id' => '',
+                    'required_qty' => '',
+                    'uom_id' => '',
+                    'consumption_sequence' => 1,
+                    'is_mandatory' => 1,
+                    'is_client_dispatchable' => 0,
+                    'remarks' => '',
+                ]];
         }
     @endphp
 
@@ -129,6 +138,7 @@
                                 <th style="width: 12%">UOM</th>
                                 <th style="width: 12%">Seq</th>
                                 <th style="width: 12%">Mandatory</th>
+                                <th style="width: 12%">Client Dispatch</th>
                                 <th>Remarks</th>
                                 <th style="width: 5%"></th>
                             </tr>
@@ -157,6 +167,7 @@
                                 </td>
                                 <td><input type="number" min="0" name="requirements[{{ $index }}][consumption_sequence]" class="form-control" value="{{ $row['consumption_sequence'] ?? $index + 1 }}"></td>
                                 <td class="text-center"><input type="checkbox" value="1" name="requirements[{{ $index }}][is_mandatory]" @checked((bool)($row['is_mandatory'] ?? true))></td>
+                                <td class="text-center"><input type="checkbox" value="1" name="requirements[{{ $index }}][is_client_dispatchable]" @checked((bool)($row['is_client_dispatchable'] ?? false))></td>
                                 <td><input name="requirements[{{ $index }}][remarks]" class="form-control" value="{{ $row['remarks'] ?? '' }}"></td>
                                 <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-row">&times;</button></td>
                             </tr>
@@ -193,6 +204,7 @@
             </td>
             <td><input type="number" min="0" class="form-control requirement-seq"></td>
             <td class="text-center"><input type="checkbox" value="1" class="requirement-mandatory" checked></td>
+            <td class="text-center"><input type="checkbox" value="1" class="requirement-client-dispatchable"></td>
             <td><input class="form-control requirement-remarks"></td>
             <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-row">&times;</button></td>
         </tr>
@@ -213,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.querySelector('.requirement-uom, select[name*="[uom_id]"]')?.setAttribute('name', `requirements[${index}][uom_id]`);
             row.querySelector('.requirement-seq, input[name*="[consumption_sequence]"]')?.setAttribute('name', `requirements[${index}][consumption_sequence]`);
             row.querySelector('.requirement-mandatory, input[name*="[is_mandatory]"]')?.setAttribute('name', `requirements[${index}][is_mandatory]`);
+            row.querySelector('.requirement-client-dispatchable, input[name*="[is_client_dispatchable]"]')?.setAttribute('name', `requirements[${index}][is_client_dispatchable]`);
             row.querySelector('.requirement-remarks, input[name*="[remarks]"]')?.setAttribute('name', `requirements[${index}][remarks]`);
         });
     };

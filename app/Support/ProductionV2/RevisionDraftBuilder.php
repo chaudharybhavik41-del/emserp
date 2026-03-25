@@ -9,6 +9,7 @@ use App\Models\ProductionV2\ProductionAssembly;
 use App\Models\ProductionV2\ProductionAssemblyPartRequirement;
 use App\Models\ProductionV2\ProductionCuttingPlan;
 use App\Models\ProductionV2\ProductionCuttingPlanAllocation;
+use App\Models\ProductionV2\ProductionCuttingPlanPlate;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -64,6 +65,7 @@ class RevisionDraftBuilder
                     'uom_id' => $requirement->uom_id,
                     'consumption_sequence' => $requirement->consumption_sequence,
                     'is_mandatory' => $requirement->is_mandatory,
+                    'is_client_dispatchable' => $requirement->is_client_dispatchable,
                     'remarks' => $requirement->remarks,
                 ]);
             }
@@ -81,7 +83,7 @@ class RevisionDraftBuilder
 
     public function createCuttingPlanRevisionWithLatestParts(ProductionCuttingPlan $cuttingPlan, int $userId): array
     {
-        $cuttingPlan->loadMissing('allocations.partDefinition');
+        $cuttingPlan->loadMissing('plannedPlates.allocations.partDefinition', 'allocations.partDefinition');
         $latestReleased = $this->revisionImpactAnalyzer->effectiveLatestPartsByRoot((int) $cuttingPlan->project_id);
         $autoReplaced = [];
 
@@ -90,6 +92,7 @@ class RevisionDraftBuilder
                 'project_id' => $cuttingPlan->project_id,
                 'plan_number' => $cuttingPlan->plan_number,
                 'plan_date' => $cuttingPlan->plan_date,
+                'material_item_id' => $cuttingPlan->material_item_id,
                 'grade' => $cuttingPlan->grade,
                 'thickness_mm' => $cuttingPlan->thickness_mm,
                 'source_mode' => $cuttingPlan->source_mode,
@@ -101,27 +104,64 @@ class RevisionDraftBuilder
                 'created_by' => $userId,
             ]);
 
-            foreach ($cuttingPlan->allocations as $allocation) {
-                $replacement = $this->resolveLatestPartReplacement($allocation->partDefinition, $latestReleased);
-                if ($replacement['replaced']) {
-                    $autoReplaced[] = $replacement['label'];
-                }
+            if ($cuttingPlan->plannedPlates->isNotEmpty()) {
+                foreach ($cuttingPlan->plannedPlates as $plate) {
+                    $newPlate = ProductionCuttingPlanPlate::query()->create([
+                        'cutting_plan_id' => $revision->id,
+                        'plate_ref' => $plate->plate_ref,
+                        'planned_width_mm' => $plate->planned_width_mm,
+                        'planned_length_mm' => $plate->planned_length_mm,
+                        'planned_qty' => $plate->planned_qty,
+                        'remarks' => $plate->remarks,
+                    ]);
 
-                ProductionCuttingPlanAllocation::query()->create([
-                    'cutting_plan_id' => $revision->id,
-                    'part_definition_id' => $replacement['part_id'] ?? $allocation->part_definition_id,
-                    'planned_qty' => $allocation->planned_qty,
-                    'planned_blank_ref' => $allocation->planned_blank_ref,
-                    'planned_blank_width_mm' => $allocation->planned_blank_width_mm,
-                    'planned_blank_length_mm' => $allocation->planned_blank_length_mm,
-                    'mother_stock_item_id' => null,
-                    'cut_size_text' => $allocation->cut_size_text,
-                    'cut_width_mm' => $allocation->cut_width_mm,
-                    'cut_length_mm' => $allocation->cut_length_mm,
-                    'thickness_mm' => $allocation->thickness_mm,
-                    'allocation_group' => $allocation->allocation_group,
-                    'remarks' => $allocation->remarks,
-                ]);
+                    foreach ($plate->allocations as $allocation) {
+                        $replacement = $this->resolveLatestPartReplacement($allocation->partDefinition, $latestReleased);
+                        if ($replacement['replaced']) {
+                            $autoReplaced[] = $replacement['label'];
+                        }
+
+                        ProductionCuttingPlanAllocation::query()->create([
+                            'cutting_plan_id' => $revision->id,
+                            'cutting_plan_plate_id' => $newPlate->id,
+                            'part_definition_id' => $replacement['part_id'] ?? $allocation->part_definition_id,
+                            'planned_qty' => $allocation->planned_qty,
+                            'planned_blank_ref' => $allocation->planned_blank_ref,
+                            'planned_blank_width_mm' => $allocation->planned_blank_width_mm,
+                            'planned_blank_length_mm' => $allocation->planned_blank_length_mm,
+                            'mother_stock_item_id' => null,
+                            'cut_size_text' => $allocation->cut_size_text,
+                            'cut_width_mm' => $allocation->cut_width_mm,
+                            'cut_length_mm' => $allocation->cut_length_mm,
+                            'thickness_mm' => $allocation->thickness_mm,
+                            'allocation_group' => $allocation->allocation_group,
+                            'remarks' => $allocation->remarks,
+                        ]);
+                    }
+                }
+            } else {
+                foreach ($cuttingPlan->allocations as $allocation) {
+                    $replacement = $this->resolveLatestPartReplacement($allocation->partDefinition, $latestReleased);
+                    if ($replacement['replaced']) {
+                        $autoReplaced[] = $replacement['label'];
+                    }
+
+                    ProductionCuttingPlanAllocation::query()->create([
+                        'cutting_plan_id' => $revision->id,
+                        'part_definition_id' => $replacement['part_id'] ?? $allocation->part_definition_id,
+                        'planned_qty' => $allocation->planned_qty,
+                        'planned_blank_ref' => $allocation->planned_blank_ref,
+                        'planned_blank_width_mm' => $allocation->planned_blank_width_mm,
+                        'planned_blank_length_mm' => $allocation->planned_blank_length_mm,
+                        'mother_stock_item_id' => null,
+                        'cut_size_text' => $allocation->cut_size_text,
+                        'cut_width_mm' => $allocation->cut_width_mm,
+                        'cut_length_mm' => $allocation->cut_length_mm,
+                        'thickness_mm' => $allocation->thickness_mm,
+                        'allocation_group' => $allocation->allocation_group,
+                        'remarks' => $allocation->remarks,
+                    ]);
+                }
             }
 
             return $revision;

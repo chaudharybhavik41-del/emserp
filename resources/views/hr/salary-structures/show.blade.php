@@ -80,9 +80,9 @@
                             </thead>
                             <tbody>
                                 @php
-                                    $earnings = $structure->components->where('type', 'earning');
-                                    $deductions = $structure->components->where('type', 'deduction');
-                                    $employer = $structure->components->where('type', 'employer_contribution');
+                                    $earnings = $structure->components->where('component_type', 'earning');
+                                    $deductions = $structure->components->where('component_type', 'deduction');
+                                    $employer = $structure->components->where('component_type', 'employer_contribution');
                                 @endphp
 
                                 @if($earnings->count())
@@ -101,10 +101,12 @@
                                             <td><span class="badge bg-success">Earning</span></td>
                                             <td>{{ ucfirst($comp->pivot->calculation_type) }}</td>
                                             <td class="text-end">
-                                                @if($comp->pivot->calculation_type === 'percentage')
-                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst($comp->pivot->based_on ?? 'basic') }}
+                                                @if(str_starts_with((string) $comp->pivot->calculation_type, 'percent_'))
+                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst(str_replace('_', ' ', str_replace('percent_of_', '', (string) $comp->pivot->calculation_type))) }}
+                                                @elseif($comp->pivot->calculation_type === 'formula')
+                                                    <code>{{ $comp->pivot->formula }}</code>
                                                 @else
-                                                    ₹{{ number_format($comp->pivot->amount ?? 0, 2) }}
+                                                    ₹{{ number_format($comp->pivot->value ?? 0, 2) }}
                                                 @endif
                                             </td>
                                         </tr>
@@ -127,10 +129,12 @@
                                             <td><span class="badge bg-danger">Deduction</span></td>
                                             <td>{{ ucfirst($comp->pivot->calculation_type) }}</td>
                                             <td class="text-end">
-                                                @if($comp->pivot->calculation_type === 'percentage')
-                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst($comp->pivot->based_on ?? 'basic') }}
+                                                @if(str_starts_with((string) $comp->pivot->calculation_type, 'percent_'))
+                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst(str_replace('_', ' ', str_replace('percent_of_', '', (string) $comp->pivot->calculation_type))) }}
+                                                @elseif($comp->pivot->calculation_type === 'formula')
+                                                    <code>{{ $comp->pivot->formula }}</code>
                                                 @else
-                                                    ₹{{ number_format($comp->pivot->amount ?? 0, 2) }}
+                                                    ₹{{ number_format($comp->pivot->value ?? 0, 2) }}
                                                 @endif
                                             </td>
                                         </tr>
@@ -153,10 +157,12 @@
                                             <td><span class="badge bg-info">Employer</span></td>
                                             <td>{{ ucfirst($comp->pivot->calculation_type) }}</td>
                                             <td class="text-end">
-                                                @if($comp->pivot->calculation_type === 'percentage')
-                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst($comp->pivot->based_on ?? 'basic') }}
+                                                @if(str_starts_with((string) $comp->pivot->calculation_type, 'percent_'))
+                                                    {{ $comp->pivot->percentage }}% of {{ ucfirst(str_replace('_', ' ', str_replace('percent_of_', '', (string) $comp->pivot->calculation_type))) }}
+                                                @elseif($comp->pivot->calculation_type === 'formula')
+                                                    <code>{{ $comp->pivot->formula }}</code>
                                                 @else
-                                                    ₹{{ number_format($comp->pivot->amount ?? 0, 2) }}
+                                                    ₹{{ number_format($comp->pivot->value ?? 0, 2) }}
                                                 @endif
                                             </td>
                                         </tr>

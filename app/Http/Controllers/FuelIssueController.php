@@ -247,9 +247,7 @@ class FuelIssueController extends Controller
             return 0.0;
         }
 
-        $totalBasic = (float) \App\Models\PurchaseBillLine::query()
-            ->where('material_receipt_line_id', $mrLineId)
-            ->sum('basic_amount');
+        $totalBasic = \App\Models\PurchaseBillLine::postedBasicForMaterialReceiptLine($mrLineId);
         if ($totalBasic <= 0) {
             return 0.0;
         }

@@ -10,6 +10,10 @@
     $statusColor = $statusEnum?->color() ?? 'secondary';
 @endphp
 <div class="container-fluid py-3">
+    @if($leaveApplication->employee)
+        @include('hr.employees.partials.hub-nav', ['employee' => $leaveApplication->employee, 'activeSection' => 'leave'])
+    @endif
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h4 class="mb-1">Leave Application</h4>
@@ -21,9 +25,15 @@
                 </ol>
             </nav>
         </div>
-        <a href="{{ route('hr.leave-applications.index') }}" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-arrow-left me-1"></i> Back
-        </a>
+        @if($leaveApplication->employee)
+            <a href="{{ route('hr.employees.leave', $leaveApplication->employee) }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left me-1"></i> Back to Employee
+            </a>
+        @else
+            <a href="{{ route('hr.leave-applications.index') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left me-1"></i> Back
+            </a>
+        @endif
     </div>
 
     @include('partials.flash')
@@ -144,6 +154,7 @@
 
         <div class="col-lg-4">
             {{-- Actions --}}
+            @canany(['hr.leave.approve', 'hr.leave.reject', 'hr.leave.update', 'hr.leave.cancel'])
             <div class="card mb-3">
                 <div class="card-header">
                     <h6 class="mb-0">Actions</h6>
@@ -190,6 +201,7 @@
                     @endif
                 </div>
             </div>
+            @endcanany
 
             {{-- Timeline --}}
             <div class="card">

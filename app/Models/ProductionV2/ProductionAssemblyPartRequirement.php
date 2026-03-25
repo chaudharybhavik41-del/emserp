@@ -19,6 +19,7 @@ class ProductionAssemblyPartRequirement extends Model
         'uom_id',
         'consumption_sequence',
         'is_mandatory',
+        'is_client_dispatchable',
         'remarks',
     ];
 
@@ -26,6 +27,7 @@ class ProductionAssemblyPartRequirement extends Model
         'required_qty' => 'decimal:3',
         'consumption_sequence' => 'integer',
         'is_mandatory' => 'boolean',
+        'is_client_dispatchable' => 'boolean',
     ];
 
     public function assembly()

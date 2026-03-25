@@ -51,11 +51,19 @@ class ProductionV2CutBatchController extends Controller
         $selectedDpr = app(DailyDprManager::class)->findForActivity($project, (int) $request->integer('dpr_id'), 'cutting');
         $selectedPlanId = (int) $request->integer('cutting_plan_id');
 
+        $planStatusCounts = ProductionCuttingPlan::query()
+            ->where('project_id', $project->id)
+            ->selectRaw('status, COUNT(*) as aggregate_count')
+            ->groupBy('status')
+            ->pluck('aggregate_count', 'status');
+
         $plans = ProductionCuttingPlan::query()
             ->where('project_id', $project->id)
             ->where('status', 'released')
             ->orderByDesc('id')
-            ->get();
+            ->get()
+            ->filter(fn (ProductionCuttingPlan $plan) => $this->planNeedsCutting($plan))
+            ->values();
 
         $selectedPlan = $selectedPlanId > 0
             ? ProductionCuttingPlan::query()
@@ -64,6 +72,10 @@ class ProductionV2CutBatchController extends Controller
                 ->with(['allocations.partDefinition'])
                 ->find($selectedPlanId)
             : null;
+
+        if ($selectedPlan && ! $this->planNeedsCutting($selectedPlan)) {
+            $selectedPlan = null;
+        }
 
         $selectedPlanProfile = $selectedPlan
             ? $this->resolvePlanMaterialProfile($selectedPlan)
@@ -112,6 +124,11 @@ class ProductionV2CutBatchController extends Controller
         return view('production_v2.cut_batches.form', [
             'project' => $project,
             'plans' => $plans,
+            'planStatusCounts' => [
+                'draft' => (int) ($planStatusCounts['draft'] ?? 0),
+                'approved' => (int) ($planStatusCounts['approved'] ?? 0),
+                'released' => (int) ($planStatusCounts['released'] ?? 0),
+            ],
             'selectedPlan' => $selectedPlan,
             'selectedPlanProfile' => $selectedPlanProfile,
             'stockItems' => $stockItemsQuery
@@ -168,6 +185,13 @@ class ProductionV2CutBatchController extends Controller
             ->where('status', 'released')
             ->with(['allocations.partDefinition'])
             ->findOrFail((int) $data['cutting_plan_id']);
+
+        if (! $this->planNeedsCutting($plan)) {
+            return back()->withInput()->withErrors([
+                'cutting_plan_id' => 'Selected cutting plan is already fully cut.',
+            ]);
+        }
+
         $planProfile = $this->resolvePlanMaterialProfile($plan);
 
         $stock = StoreStockItem::query()->findOrFail((int) $data['mother_stock_item_id']);
@@ -232,7 +256,7 @@ class ProductionV2CutBatchController extends Controller
 
                 $qty = (float) $row['produced_qty'];
                 $mode = $row['mode'] ?? ($qty <= 1 ? 'piece' : 'lot');
-                $reference = ProductionWipItem::generateReference($project->code, $mode === 'piece' ? 'WIP' : 'LOT');
+                $reference = ProductionWipItem::generateReference($project->code, $mode === 'piece' ? 'WIP' : 'LOT', $plan->plan_number);
                 $this->assertNonInterchangeablePartScope($project, $part);
 
                 ProductionWipItem::query()->create([
@@ -446,6 +470,37 @@ class ProductionV2CutBatchController extends Controller
         }
 
         return null;
+    }
+
+    protected function planNeedsCutting(ProductionCuttingPlan $plan): bool
+    {
+        $plannedByPart = $plan->relationLoaded('allocations')
+            ? $plan->allocations
+            : $plan->allocations()->get();
+
+        $plannedQtyByPart = $plannedByPart
+            ->groupBy('part_definition_id')
+            ->map(fn ($rows) => (float) $rows->sum('planned_qty'));
+
+        if ($plannedQtyByPart->isEmpty()) {
+            return false;
+        }
+
+        $producedQtyByPart = DB::table('production_v2_wip_items as w')
+            ->join('production_v2_cut_batches as b', 'b.id', '=', 'w.cut_batch_id')
+            ->where('b.cutting_plan_id', $plan->id)
+            ->selectRaw('w.part_definition_id, SUM(w.qty) as total_qty')
+            ->groupBy('w.part_definition_id')
+            ->pluck('total_qty', 'part_definition_id');
+
+        foreach ($plannedQtyByPart as $partId => $plannedQty) {
+            $producedQty = (float) ($producedQtyByPart[$partId] ?? 0);
+            if ($producedQty + 0.0001 < $plannedQty) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function isRawMaterialStock(StoreStockItem $stock): bool

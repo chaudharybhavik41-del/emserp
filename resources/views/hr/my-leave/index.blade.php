@@ -18,6 +18,12 @@
         </div>
 
         <div class="d-flex gap-2">
+            @if(\Illuminate\Support\Facades\Route::has('hr.my.workspace'))
+                <a href="{{ route('hr.my.workspace', 'leave') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-person-vcard me-1"></i> My HR Workspace
+                </a>
+            @endif
+
             @if($hasBalanceRoute)
                 <a href="{{ route('hr.my.leave.balance') }}" class="btn btn-outline-secondary btn-sm">
                     <i class="bi bi-pie-chart me-1"></i> My Leave Balance

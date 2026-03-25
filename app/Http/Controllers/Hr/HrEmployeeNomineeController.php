@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeNominee;
@@ -11,13 +12,18 @@ use Illuminate\View\View;
 
 class HrEmployeeNomineeController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'edit', 'update', 'destroy']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $nominees = $employee->nominees()->latest()->paginate(20)->withQueryString();
 
         $editing = null;
@@ -30,11 +36,15 @@ class HrEmployeeNomineeController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.nominees.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $this->validateData($request);
         $validated['hr_employee_id'] = $employee->id;
 
@@ -50,6 +60,8 @@ class HrEmployeeNomineeController extends Controller
 
     public function edit(HrEmployee $employee, HrEmployeeNominee $nominee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $nominee);
 
         return redirect()->route('hr.employees.nominees.index', ['employee' => $employee->id, 'edit' => $nominee->id]);
@@ -57,6 +69,8 @@ class HrEmployeeNomineeController extends Controller
 
     public function update(Request $request, HrEmployee $employee, HrEmployeeNominee $nominee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $nominee);
 
         $validated = $this->validateData($request);
@@ -75,6 +89,8 @@ class HrEmployeeNomineeController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeNominee $nominee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $nominee);
 
         $nominee->delete();

@@ -19,16 +19,21 @@ class UpdatePartyRequest extends FormRequest
         $partyId = $this->route('party')?->id ?? null;
 
         return [
-            'code' => ['required', 'string', 'max:50', 'unique:parties,code,' . $partyId],
+            'code' => ['required', 'string', 'max:50', 'unique:parties,code,'.$partyId],
             'name' => ['required', 'string', 'max:200'],
             'legal_name' => ['nullable', 'string', 'max:250'],
 
-            'is_supplier'   => ['nullable', 'boolean'],
+            'is_supplier' => ['nullable', 'boolean'],
             'is_contractor' => ['nullable', 'boolean'],
-            'is_client'     => ['nullable', 'boolean'],
+            'is_client' => ['nullable', 'boolean'],
 
             'gstin' => ['nullable', 'string', 'max:20'],
-            'pan'   => ['nullable', 'string', 'max:20'],
+            'pan' => ['nullable', 'string', 'max:20'],
+            'gst_legal_name' => ['nullable', 'string', 'max:250'],
+            'gst_trade_name' => ['nullable', 'string', 'max:250'],
+            'gst_status' => ['nullable', 'string', 'max:50'],
+            'gst_state_code' => ['nullable', 'string', 'max:10'],
+            'gst_raw_json' => ['nullable', 'string'],
             'msme_no' => ['nullable', 'string', 'max:50'],
 
             'primary_phone' => ['nullable', 'string', 'max:50'],
@@ -36,25 +41,25 @@ class UpdatePartyRequest extends FormRequest
 
             'address_line1' => ['nullable', 'string', 'max:200'],
             'address_line2' => ['nullable', 'string', 'max:200'],
-            'city'          => ['nullable', 'string', 'max:100'],
-            'state'         => ['nullable', 'string', 'max:100'],
-            'pincode'       => ['nullable', 'string', 'max:20'],
-            'country'       => ['nullable', 'string', 'max:100'],
+            'city' => ['nullable', 'string', 'max:100'],
+            'state' => ['nullable', 'string', 'max:100'],
+            'pincode' => ['nullable', 'string', 'max:20'],
+            'country' => ['nullable', 'string', 'max:100'],
 
-            'is_active'     => ['nullable', 'boolean'],
+            'is_active' => ['nullable', 'boolean'],
         ];
     }
 
     protected function prepareForValidation(): void
     {
         $gstin = (string) ($this->input('gstin') ?? '');
-        $pan   = (string) ($this->input('pan') ?? '');
+        $pan = (string) ($this->input('pan') ?? '');
 
         $gstin = strtoupper(preg_replace('/\s+/', '', $gstin));
-        $pan   = strtoupper(preg_replace('/\s+/', '', $pan));
+        $pan = strtoupper(preg_replace('/\s+/', '', $pan));
 
         // If GSTIN is provided but PAN is not, extract PAN from GSTIN.
-        if ($gstin && !$pan && strlen($gstin) >= 12) {
+        if ($gstin && ! $pan && strlen($gstin) >= 12) {
             $maybePan = substr($gstin, 2, 10);
             if (preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]$/', $maybePan)) {
                 $pan = $maybePan;
@@ -63,7 +68,7 @@ class UpdatePartyRequest extends FormRequest
 
         $this->merge([
             'gstin' => $gstin ?: null,
-            'pan'   => $pan ?: null,
+            'pan' => $pan ?: null,
         ]);
     }
 
@@ -71,8 +76,8 @@ class UpdatePartyRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $partyId = $this->route('party')?->id ?? null;
-            $gstin   = $this->input('gstin');
-            $pan     = $this->input('pan');
+            $gstin = $this->input('gstin');
+            $pan = $this->input('pan');
 
             // Consistency guard: if GSTIN is provided and PAN is provided, they must match.
             // GSTIN embeds PAN in positions 3-12 (0-based: substr(2,10)).
@@ -80,6 +85,7 @@ class UpdatePartyRequest extends FormRequest
                 $maybePan = substr($gstin, 2, 10);
                 if (preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]$/', $maybePan) && $maybePan !== $pan) {
                     $validator->errors()->add('pan', 'PAN does not match GSTIN. Please correct PAN/GSTIN.');
+
                     return;
                 }
             }
@@ -99,6 +105,7 @@ class UpdatePartyRequest extends FormRequest
 
                 if ($existsInParties || $existsInBranches) {
                     $validator->errors()->add('gstin', 'Duplicate GSTIN found. Please use the existing party and add a branch if required.');
+
                     return;
                 }
             }
@@ -118,5 +125,3 @@ class UpdatePartyRequest extends FormRequest
         });
     }
 }
-
-

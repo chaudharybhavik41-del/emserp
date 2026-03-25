@@ -1,17 +1,21 @@
 @extends('layouts.erp')
 
-@section('title', 'Client RA Bills')
+@section('title', 'Client Billing')
 
 @section('content')
 <div class="container-fluid">
     @include('partials.alerts')
 
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4 mb-0">Client RA Bills (Sales Invoices)</h1>
-
-        <a href="{{ route('accounting.client-ra.create') }}" class="btn btn-primary btn-sm">
-            + New Client RA Bill
-        </a>
+        <h1 class="h4 mb-0">Client Billing</h1>
+        <div class="d-flex gap-2">
+            <a href="{{ route('accounting.client-ra.dispatch-balance') }}" class="btn btn-outline-secondary btn-sm">
+                Dispatch Billing Balance
+            </a>
+            <a href="{{ route('accounting.client-ra.create') }}" class="btn btn-primary btn-sm">
+                + New Client Bill
+            </a>
+        </div>
     </div>
 
     <div class="card mb-3">
@@ -47,6 +51,26 @@
                     </select>
                 </div>
 
+                <div class="col-md-3">
+                    <label class="form-label">Bill Kind</label>
+                    <select name="bill_kind" class="form-select form-select-sm">
+                        <option value="">-- All --</option>
+                        @foreach($billKindOptions as $value => $label)
+                            <option value="{{ $value }}" @selected(request('bill_kind') === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Source Basis</label>
+                    <select name="source_basis" class="form-select form-select-sm">
+                        <option value="">-- All --</option>
+                        @foreach($sourceBasisOptions as $value => $label)
+                            <option value="{{ $value }}" @selected(request('source_basis') === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
                 <div class="col-md-2">
                     <label class="form-label">From</label>
                     <input type="date" name="date_from" value="{{ request('date_from') }}" class="form-control form-control-sm">
@@ -71,10 +95,11 @@
                 <table class="table table-sm table-hover mb-0 align-middle">
                     <thead class="table-light">
                     <tr>
-                        <th style="width: 16%">RA No</th>
+                        <th style="width: 16%">Bill No</th>
                         <th style="width: 10%">Date</th>
                         <th>Client</th>
                         <th>Project</th>
+                        <th style="width: 16%">Kind</th>
                         <th class="text-end" style="width: 11%">Net</th>
                         <th class="text-end" style="width: 10%">GST</th>
                         <th class="text-end" style="width: 10%">TDS</th>
@@ -98,6 +123,10 @@
                             <td>{{ $bill->bill_date?->format('d-m-Y') }}</td>
                             <td>{{ $bill->client?->name }}</td>
                             <td>{{ $bill->project?->name }}</td>
+                            <td>
+                                <div class="fw-semibold">{{ $bill->bill_kind_label }}</div>
+                                <div class="small text-muted">{{ $bill->source_basis_label }}</div>
+                            </td>
                             <td class="text-end">{{ number_format((float) $bill->net_amount, 2) }}</td>
                             <td class="text-end">{{ number_format((float) $bill->total_gst, 2) }}</td>
                             <td class="text-end">{{ number_format((float) $bill->tds_amount, 2) }}</td>
@@ -123,7 +152,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="10" class="text-center text-muted py-3">No client RA bills found.</td>
+                            <td colspan="11" class="text-center text-muted py-3">No client billing records found.</td>
                         </tr>
                     @endforelse
                     </tbody>

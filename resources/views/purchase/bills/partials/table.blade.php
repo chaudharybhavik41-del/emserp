@@ -6,10 +6,11 @@
                 <th style="width: 12%">Posting / Bill</th>
                 <th>Supplier</th>
                 <th>Project</th>
+                                <th style="width: 10%" class="text-end">TDS</th>
+
                 <th style="width: 11%" class="text-end">Basic</th>
                 <th style="width: 11%" class="text-end">GST</th>
                 <th style="width: 11%" class="text-end">Invoice Total</th>
-                <th style="width: 10%" class="text-end">TDS</th>
                 <th style="width: 11%" class="text-end">Net Payable</th>
                 <th style="width: 9%">Status</th>
                 <th style="width: 14%" class="text-end">Actions</th>
@@ -26,14 +27,32 @@
                 <tr>
                     <td>
                         <div class="fw-semibold">{{ $bill->bill_number }}</div>
-                        @if($bill->status === 'posted' && $bill->voucher)
+                        @if ($bill->status === 'posted' && $bill->voucher)
                             <div class="small text-muted">Voucher:
-                                {{ $bill->voucher->voucher_no ?? ('#' . $bill->voucher->id) }}</div>
+                                {{ $bill->voucher->voucher_no ?? ('#' . $bill->voucher->id) }}
+                            </div>
                         @endif
 
-                        @if($bill->reference_no)
+                        @if ($bill->reference_no)
                             <div class="small text-muted">Invoice No: {{ $bill->reference_no }}</div>
                         @endif
+
+                        @php
+                            $poCodes = collect();
+                            if ($bill->purchase_order_id && $bill->purchaseOrder) {
+                                $poCodes->push($bill->purchaseOrder->code);
+                            }
+                            if ($bill->relationLoaded('lines')) {
+                                $poCodes = $poCodes->merge(
+                                    $bill->lines->map(fn($l) => $l->materialReceipt?->purchaseOrder?->code)
+                                )->filter()->unique();
+                            }
+                            $poCodes = $poCodes->sort()->values();
+                        @endphp
+
+                        @foreach ($poCodes as $poCode)
+                            <div class="small text-muted">PO: {{ $poCode }}</div>
+                        @endforeach
                     </td>
                     <td>
                         <div>{{ ($bill->posting_date ?: $bill->bill_date)?->format('d-m-Y') }}</div>
@@ -58,10 +77,10 @@
                                 }
                             }
                         @endphp
-                        @if($proj)
+                        @if ($proj)
                             <div class="fw-semibold">
                                 {{ $proj->code }}
-                                @if($multi)
+                                @if ($multi)
                                     <span class="badge text-bg-info ms-1">Multiple</span>
                                 @endif
                             </div>
@@ -72,13 +91,14 @@
                             <span class="text-muted">—</span>
                         @endif
                     </td>
+                                        <td class="text-end">{{ number_format($tds, 2) }}</td>
+
                     <td class="text-end">{{ number_format((float) $bill->total_basic, 2) }}</td>
                     <td class="text-end">{{ number_format((float) $bill->total_tax, 2) }}</td>
                     <td class="text-end fw-semibold">{{ number_format($invoice, 2) }}</td>
-                    <td class="text-end">{{ number_format($tds, 2) }}</td>
                     <td class="text-end fw-bold">{{ number_format($net, 2) }}</td>
                     <td>
-                        @if($bill->status === 'posted')
+                        @if ($bill->status === 'posted')
                             <span class="badge text-bg-success">Posted</span>
                         @elseif($bill->status === 'cancelled')
                             <span class="badge text-bg-danger">Cancelled</span>
@@ -87,10 +107,26 @@
                         @endif
                     </td>
                     <td class="text-end">
-                        <a href="{{ route('purchase.bills.show', $bill) }}"
-                            class="btn btn-sm btn-outline-secondary">View</a>
+                        @php
+                            $hasGrnLinks = $bill->relationLoaded('lines') && $bill->lines->whereNotNull('material_receipt_id')->isNotEmpty();
+                        @endphp
 
-                        @if($bill->status !== 'posted')
+                        @if ($hasGrnLinks)
+                            <button type="button" class="btn btn-sm btn-outline-info btn-grn-modal"
+                                data-bill-id="{{ $bill->id }}" title="View Associated GRNs">
+                                GRN
+                            </button>
+                        @endif
+
+                        <a href="{{ route('purchase.bills.show', $bill) }}"
+                            class="btn btn-sm btn-outline-secondary ms-1">View</a>
+
+                        @if ($bill->status === 'posted')
+                            <a href="{{ route('purchase.bills.tally.download', $bill) }}"
+                                class="btn btn-sm btn-outline-success ms-1 text-nowrap">Tally XML</a>
+                        @endif
+
+                        @if ($bill->status !== 'posted')
                             <a href="{{ route('purchase.bills.edit', $bill) }}"
                                 class="btn btn-sm btn-outline-primary ms-1">Edit</a>
                         @endif

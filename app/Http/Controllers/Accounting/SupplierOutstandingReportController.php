@@ -35,7 +35,11 @@ class SupplierOutstandingReportController extends Controller
         $asOfDateInput = $request->input('as_of_date');
         $asOfDate = $asOfDateInput ? Carbon::parse($asOfDateInput)->endOfDay() : now()->endOfDay();
 
-        $suppliers = Party::where('is_supplier', true)
+        $suppliers = Party::query()
+            ->where(function ($q) {
+                $q->where('is_supplier', true)
+                  ->orWhere('is_contractor', true);
+            })
             ->orderBy('name')
             ->get();
         $reportSuppliers = $suppliers

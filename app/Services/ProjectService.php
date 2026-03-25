@@ -48,7 +48,7 @@ class ProjectService
             'client_party_id' => $quotation->party_id,
             'lead_id'         => $quotation->lead_id,
             'quotation_id'    => $quotation->id,
-            'status'          => 'open',
+            'status'          => 'active',
             'start_date'      => now()->toDateString(),
 
             // Site info (from lead if available)
@@ -66,6 +66,7 @@ class ProjectService
             'tpi_notes'         => $lead->tpi_notes         ?? null,
 
             // Commercial terms from quotation
+            'po_number'            => $quotation->client_po_number,
             'payment_terms_days'    => $quotation->payment_terms_days,
             'freight_terms'         => $quotation->freight_terms,
             'project_special_notes' => $quotation->project_special_notes,

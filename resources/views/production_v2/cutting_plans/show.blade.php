@@ -53,17 +53,17 @@
         <div class="col-12 col-md-6 col-xl-3">
             <div class="card h-100 border-primary-subtle">
                 <div class="card-body">
-                    <div class="small text-uppercase text-primary mb-1">Grade / Thickness</div>
-                    <div class="fw-semibold">{{ $plan->grade ?: '-' }}</div>
-                    <div class="small text-body-secondary">{{ $plan->thickness_mm ?: '-' }} mm</div>
+                    <div class="small text-uppercase text-primary mb-1">Material Item</div>
+                    <div class="fw-semibold">{{ $plan->materialItem?->code ?: '-' }}</div>
+                    <div class="small text-body-secondary">{{ $plan->materialItem?->name ?: 'Not linked' }}</div>
                 </div>
             </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3">
             <div class="card h-100 border-success-subtle">
                 <div class="card-body">
-                    <div class="small text-uppercase text-success mb-1">Allocations</div>
-                    <div class="display-6 mb-0">{{ number_format($plan->allocations->count()) }}</div>
+                    <div class="small text-uppercase text-success mb-1">Planned Plates</div>
+                    <div class="display-6 mb-0">{{ number_format($plan->plannedPlates->count()) }}</div>
                 </div>
             </div>
         </div>
@@ -82,11 +82,12 @@
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-12 col-md-2"><div class="small text-body-secondary">Date</div><div>{{ $plan->plan_date?->format('Y-m-d') ?: '-' }}</div></div>
-                <div class="col-12 col-md-2"><div class="small text-body-secondary">Grade</div><div>{{ $plan->grade ?: '-' }}</div></div>
-                <div class="col-12 col-md-2"><div class="small text-body-secondary">Thickness</div><div>{{ $plan->thickness_mm ?: '-' }}</div></div>
+                <div class="col-12 col-md-3"><div class="small text-body-secondary">Material Item</div><div>{{ $plan->materialItem?->code ? $plan->materialItem->code . ' - ' . $plan->materialItem->name : '-' }}</div></div>
+                <div class="col-12 col-md-2"><div class="small text-body-secondary">Grade</div><div>{{ $plan->grade ?: ($plan->materialItem?->grade ?: '-') }}</div></div>
+                <div class="col-12 col-md-2"><div class="small text-body-secondary">Thickness</div><div>{{ $plan->thickness_mm ?: ($plan->materialItem?->thickness ?: '-') }}</div></div>
                 <div class="col-12 col-md-2"><div class="small text-body-secondary">Source</div><div>{{ str_replace('_', ' ', $plan->source_mode) }}</div></div>
                 <div class="col-12 col-md-2"><div class="small text-body-secondary">Status</div><div>{{ ucfirst($plan->status) }}</div></div>
-                <div class="col-12 col-md-2"><div class="small text-body-secondary">Allocations</div><div>{{ number_format($plan->allocations->count()) }}</div></div>
+                <div class="col-12 col-md-2"><div class="small text-body-secondary">Planned Plates</div><div>{{ number_format($plan->plannedPlates->count()) }}</div></div>
                 <div class="col-12 col-md-3"><div class="small text-body-secondary">Previous Revision</div><div>{{ $plan->previousRevision?->plan_number ? $plan->previousRevision->plan_number . ' / R' . $plan->previousRevision->revision_no : '-' }}</div></div>
                 <div class="col-12 col-md-3"><div class="small text-body-secondary">Released In</div><div>{{ $plan->designRelease?->release_number ?: '-' }}</div></div>
                 <div class="col-12 col-md-3"><div class="small text-body-secondary">Released By</div><div>{{ $plan->releasedBy?->name ?: '-' }}</div></div>
@@ -136,85 +137,79 @@
     </div>
 
     <div class="card">
-        <div class="card-header">Allocations</div>
+        <div class="card-header">Planned Plates</div>
         <div class="card-body p-0">
             <div class="table-responsive pv2-mobile-table">
                 <table class="table table-sm align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>Part</th>
-                            <th class="text-end">Qty</th>
-                            <th>Planned Blank</th>
-                            <th>Cut Size</th>
-                            <th>W</th>
-                            <th>L</th>
-                            <th>T</th>
-                            <th>Group</th>
+                            <th>Plate Ref</th>
+                            <th>Plate Size</th>
+                            <th class="text-end">Plate Qty</th>
+                            <th>Allocated Parts</th>
+                            <th>Area Summary</th>
                             <th>Remarks</th>
                         </tr>
                     </thead>
                     <tbody>
-                    @forelse($plan->allocations as $allocation)
+                    @forelse($plan->plannedPlates as $plate)
                         <tr>
-                            <td>{{ $allocation->partDefinition?->part_code }}<div class="small text-body-secondary">{{ $allocation->partDefinition?->part_name }}</div></td>
-                            <td class="text-end">{{ number_format((float) $allocation->planned_qty, 3) }}</td>
                             <td>
-                                {{ $allocation->planned_blank_ref ?: ($allocation->allocation_group ?: ($allocation->motherStock?->plate_number ?: '-')) }}
-                                <div class="small text-body-secondary">
-                                    {{ $allocation->planned_blank_width_mm ?: '-' }} x {{ $allocation->planned_blank_length_mm ?: '-' }} mm
-                                </div>
+                                <div class="fw-semibold">{{ $plate->plate_ref ?: '-' }}</div>
                             </td>
-                            <td>{{ $allocation->cut_size_text ?: '-' }}</td>
-                            <td>{{ $allocation->cut_width_mm ?: '-' }}</td>
-                            <td>{{ $allocation->cut_length_mm ?: '-' }}</td>
-                            <td>{{ $allocation->thickness_mm ?: '-' }}</td>
-                            <td>{{ $allocation->allocation_group ?: '-' }}</td>
-                            <td>{{ $allocation->remarks ?: '-' }}</td>
+                            <td>{{ $plate->planned_width_mm }} x {{ $plate->planned_length_mm }} mm</td>
+                            <td class="text-end">{{ number_format((float) $plate->planned_qty, 3) }}</td>
+                            <td>
+                                @foreach($plate->allocations as $allocation)
+                                    <div>{{ $allocation->partDefinition?->part_code }} <span class="text-body-secondary">x {{ number_format((float) $allocation->planned_qty, 3) }}</span></div>
+                                @endforeach
+                            </td>
+                            <td>
+                                @php
+                                    $plateArea = (float) $plate->planned_width_mm * (float) $plate->planned_length_mm * (float) $plate->planned_qty;
+                                    $allocatedArea = $plate->allocations->sum(fn ($allocation) => (float) $allocation->cut_width_mm * (float) $allocation->cut_length_mm * (float) $allocation->planned_qty);
+                                @endphp
+                                <div class="small">Planned: {{ number_format($plateArea / 1000000, 3) }} m2</div>
+                                <div class="small">Allocated: {{ number_format($allocatedArea / 1000000, 3) }} m2</div>
+                            </td>
+                            <td>{{ $plate->remarks ?: '-' }}</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-4">No allocations added.</td>
+                            <td colspan="6" class="text-center text-muted py-4">No planned plates added.</td>
                         </tr>
                     @endforelse
                     </tbody>
                 </table>
             </div>
             <div class="pv2-mobile-list p-3">
-                @forelse($plan->allocations as $allocation)
+                @forelse($plan->plannedPlates as $plate)
                     <div class="pv2-mobile-card">
                         <div class="pv2-mobile-card__head">
                             <div>
-                                <div class="pv2-mobile-card__title">{{ $allocation->partDefinition?->part_code ?: 'Part' }}</div>
-                                <div class="small text-body-secondary">{{ $allocation->partDefinition?->part_name ?: 'No part name' }}</div>
+                                <div class="pv2-mobile-card__title">{{ $plate->plate_ref ?: 'Planned Plate' }}</div>
+                                <div class="small text-body-secondary">{{ $plate->planned_width_mm }} x {{ $plate->planned_length_mm }} mm</div>
                             </div>
-                            <span class="badge text-bg-light border">{{ number_format((float) $allocation->planned_qty, 3) }}</span>
+                            <span class="badge text-bg-light border">{{ number_format((float) $plate->planned_qty, 3) }}</span>
                         </div>
                         <div class="pv2-mobile-card__meta">
                             <div class="pv2-mobile-card__row">
-                                <span class="pv2-mobile-card__label">Planned Blank</span>
-                                <span>{{ $allocation->planned_blank_ref ?: ($allocation->allocation_group ?: ($allocation->motherStock?->plate_number ?: '-')) }}</span>
+                                <span class="pv2-mobile-card__label">Allocated Parts</span>
+                                <span>{{ $plate->allocations->map(fn ($allocation) => ($allocation->partDefinition?->part_code ?: 'Part') . ' x ' . number_format((float) $allocation->planned_qty, 3))->implode(', ') ?: '-' }}</span>
                             </div>
                             <div class="pv2-mobile-card__row">
-                                <span class="pv2-mobile-card__label">Blank Size</span>
-                                <span>{{ $allocation->planned_blank_width_mm ?: '-' }} x {{ $allocation->planned_blank_length_mm ?: '-' }} mm</span>
-                            </div>
-                            <div class="pv2-mobile-card__row">
-                                <span class="pv2-mobile-card__label">Cut Size</span>
-                                <span>{{ $allocation->cut_size_text ?: '-' }}</span>
-                            </div>
-                            <div class="pv2-mobile-card__row">
-                                <span class="pv2-mobile-card__label">W / L / T</span>
-                                <span>{{ $allocation->cut_width_mm ?: '-' }} / {{ $allocation->cut_length_mm ?: '-' }} / {{ $allocation->thickness_mm ?: '-' }}</span>
-                            </div>
-                            <div class="pv2-mobile-card__row">
-                                <span class="pv2-mobile-card__label">Group</span>
-                                <span>{{ $allocation->allocation_group ?: '-' }}</span>
+                                <span class="pv2-mobile-card__label">Area</span>
+                                @php
+                                    $plateArea = (float) $plate->planned_width_mm * (float) $plate->planned_length_mm * (float) $plate->planned_qty;
+                                    $allocatedArea = $plate->allocations->sum(fn ($allocation) => (float) $allocation->cut_width_mm * (float) $allocation->cut_length_mm * (float) $allocation->planned_qty);
+                                @endphp
+                                <span>{{ number_format($allocatedArea / 1000000, 3) }} / {{ number_format($plateArea / 1000000, 3) }} m2</span>
                             </div>
                         </div>
-                        <div class="small text-body-secondary mt-3">{{ $allocation->remarks ?: 'No remarks' }}</div>
+                        <div class="small text-body-secondary mt-3">{{ $plate->remarks ?: 'No remarks' }}</div>
                     </div>
                 @empty
-                    <div class="text-center text-muted py-4">No allocations added.</div>
+                    <div class="text-center text-muted py-4">No planned plates added.</div>
                 @endforelse
             </div>
         </div>

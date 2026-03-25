@@ -26,6 +26,7 @@
                 <a class="btn btn-outline-primary btn-sm" href="{{ route('hr.reports.document-expiry') }}">Document Expiry</a>
                 <a class="btn btn-outline-primary btn-sm" href="{{ route('hr.reports.employee-directory') }}">Employee Directory</a>
                 <a class="btn btn-outline-primary btn-sm" href="{{ route('hr.reports.muster-roll') }}">Muster Roll</a>
+                <a class="btn btn-outline-danger btn-sm" href="{{ route('hr.reports.accounting-reconciliation') }}">Accounting Reconciliation</a>
             </div>
         </div>
     </div>

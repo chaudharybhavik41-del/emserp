@@ -72,7 +72,7 @@
                             <th class="text-center">Leave</th>
                             <th class="text-center">Holiday</th>
                             <th class="text-center">Weekly Off</th>
-                            <th class="text-center">OT Hours</th>
+                            <th class="text-center">Approved OT Hours</th>
                             <th class="text-center">Paid Days</th>
                         </tr>
                     </thead>
@@ -154,7 +154,7 @@
             <div class="card bg-primary text-white">
                 <div class="card-body text-center">
                     <h4 class="mb-0">{{ number_format(collect($reportData)->sum('ot_hours'), 1) }}</h4>
-                    <small>Total OT Hours</small>
+                    <small>Total Approved OT Hours</small>
                 </div>
             </div>
         </div>

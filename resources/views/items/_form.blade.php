@@ -407,6 +407,7 @@ $selectedBrands = collect(old('brands', $item->brands ?? []))->filter()->values(
                 <option value="tool_stock" {{ old('accounting_usage_override', $item->accounting_usage_override ?? '') == 'tool_stock' ? 'selected' : '' }}>Short-term Tool Stock (Inventory)</option>
                 <option value="fixed_asset" {{ old('accounting_usage_override', $item->accounting_usage_override ?? '') == 'fixed_asset' ? 'selected' : '' }}>Long-term Fixed Asset (Depreciable)</option>
                 <option value="inventory" {{ old('accounting_usage_override', $item->accounting_usage_override ?? '') == 'inventory' ? 'selected' : '' }}>Inventory (Default)</option>
+                <option value="mixed" {{ old('accounting_usage_override', $item->accounting_usage_override ?? '') == 'mixed' ? 'selected' : '' }}>Mixed (Follow document context)</option>
                 <option value="expense" {{ old('accounting_usage_override', $item->accounting_usage_override ?? '') == 'expense' ? 'selected' : '' }}>Direct Expense</option>
             </select>
             @error('accounting_usage_override')
@@ -420,6 +421,57 @@ $selectedBrands = collect(old('brands', $item->brands ?? []))->filter()->values(
             <div class="form-text">
                 This affects accounting posting: Tool Stock → <code>INV-TOOLS</code>. Fixed Asset → <code>FA-MACHINERY</code>.
             </div>
+        </div>
+    </div>
+
+    {{-- Item-level account overrides --}}
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <label for="inventory_account_id" class="form-label">Inventory Account</label>
+            <select name="inventory_account_id" id="inventory_account_id" class="form-select form-select-sm @error('inventory_account_id') is-invalid @enderror">
+                <option value="">Use Subcategory / Type Default</option>
+                @foreach($accounts as $account)
+                    <option value="{{ $account->id }}" {{ (string) old('inventory_account_id', $item->inventory_account_id ?? '') === (string) $account->id ? 'selected' : '' }}>
+                        {{ $account->code }} - {{ $account->name }}
+                    </option>
+                @endforeach
+            </select>
+            @error('inventory_account_id')
+            <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+            <div class="form-text">Used when this item should post to a specific stock ledger.</div>
+        </div>
+
+        <div class="col-md-4">
+            <label for="expense_account_id" class="form-label">Expense Account</label>
+            <select name="expense_account_id" id="expense_account_id" class="form-select form-select-sm @error('expense_account_id') is-invalid @enderror">
+                <option value="">Use Subcategory / Type Default</option>
+                @foreach($accounts as $account)
+                    <option value="{{ $account->id }}" {{ (string) old('expense_account_id', $item->expense_account_id ?? '') === (string) $account->id ? 'selected' : '' }}>
+                        {{ $account->code }} - {{ $account->name }}
+                    </option>
+                @endforeach
+            </select>
+            @error('expense_account_id')
+            <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+            <div class="form-text">Used when this item is treated as direct expense.</div>
+        </div>
+
+        <div class="col-md-4">
+            <label for="asset_account_id" class="form-label">Asset Account</label>
+            <select name="asset_account_id" id="asset_account_id" class="form-select form-select-sm @error('asset_account_id') is-invalid @enderror">
+                <option value="">Use Subcategory / Type Default</option>
+                @foreach($accounts as $account)
+                    <option value="{{ $account->id }}" {{ (string) old('asset_account_id', $item->asset_account_id ?? '') === (string) $account->id ? 'selected' : '' }}>
+                        {{ $account->code }} - {{ $account->name }}
+                    </option>
+                @endforeach
+            </select>
+            @error('asset_account_id')
+            <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+            <div class="form-text">Used when this item should capitalize to a fixed-asset ledger.</div>
         </div>
     </div>
 

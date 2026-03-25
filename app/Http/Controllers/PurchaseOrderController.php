@@ -415,16 +415,17 @@ if ($vendorId = (int) $request->get('vendor_id', 0)) {
                 $gstType = $this->resolveGstTypeForVendor($company, $vendorParty, $vendorBranch);
 
                 $order = new PurchaseOrder();
+                $poDate = now();
 
                 $orderData = [
-                    'code'               => PurchaseOrder::generateNextCode(),
+                    'code'               => PurchaseOrder::generateNextCode($poDate),
                     'project_id'         => $purchaseRfq->project_id,
                     'department_id'      => $purchaseRfq->department_id,
                     'vendor_party_id'    => $vendorPartyId,
                     'vendor_branch_id'   => $vendorBranchId,
                     'purchase_rfq_id'    => $purchaseRfq->id,
                     'purchase_indent_id' => $purchaseRfq->purchase_indent_id,
-                    'po_date'            => now(),
+                    'po_date'            => $poDate,
                     'expected_delivery_date' => $purchaseRfq->due_date,
                     'payment_terms_days' => $rfqVendor->payment_terms_days ?? $purchaseRfq->payment_terms_days,
                     'delivery_terms_days'=> $rfqVendor->delivery_terms_days ?? $purchaseRfq->delivery_terms_days,

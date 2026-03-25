@@ -67,6 +67,11 @@ abstract class BaseTabularReport implements Report
         return $safe . '_' . $date . '.' . $ext;
     }
 
+    public function headerData(array $filters): array
+    {
+        return [];
+    }
+
     public function resolveValue(array $column, mixed $row, bool $forExport = false): mixed
     {
         $val = $column['value'] ?? null;

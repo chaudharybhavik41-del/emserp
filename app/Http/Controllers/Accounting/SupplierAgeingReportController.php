@@ -36,7 +36,11 @@ class SupplierAgeingReportController extends Controller
         $asOfDate = $request->date('as_of_date') ?: now();
         $asOfDate = Carbon::parse($asOfDate)->startOfDay();
 
-        $suppliers = Party::where('is_supplier', true)
+        $suppliers = Party::query()
+            ->where(function ($q) {
+                $q->where('is_supplier', true)
+                  ->orWhere('is_contractor', true);
+            })
             ->orderBy('name')
             ->get();
         $reportSuppliers = $suppliers
@@ -165,8 +169,8 @@ class SupplierAgeingReportController extends Controller
 
         /** @var Party|null $party */
         $party = $account->relatedModel;
-        if (! $party || ! $party->is_supplier) {
-            abort(404, 'Supplier ledger not found.');
+        if (! $party || (! $party->is_supplier && ! $party->is_contractor)) {
+            abort(404, 'Supplier/Contractor ledger not found.');
         }
 
         $openBills = $this->billAllocationService->getOpenPurchaseBillsForAccount($account, $asOfDate);

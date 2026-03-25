@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Hr;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrSalaryStructure;
 use App\Models\Hr\HrSalaryComponent;
+use App\Models\Hr\HrProfessionalTaxSlab;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -17,7 +18,15 @@ class HrSalaryStructureController extends Controller
 
     public function index(Request $request)
     {
-        $query = HrSalaryStructure::query();
+        $query = HrSalaryStructure::query()
+            ->withCount('components')
+            ->select('hr_salary_structures.*')
+            ->selectSub(function ($subQuery) {
+                $subQuery->from('hr_employee_salaries')
+                    ->selectRaw('COUNT(DISTINCT hr_employee_id)')
+                    ->whereColumn('hr_employee_salaries.hr_salary_structure_id', 'hr_salary_structures.id')
+                    ->where('is_current', true);
+            }, 'employees_count');
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -31,17 +40,9 @@ class HrSalaryStructureController extends Controller
             $query->where('is_active', $request->is_active);
         }
 
-        // Safely count employees if relationship exists
-        try {
-            $structures = $query->withCount('employees')
-                                ->orderBy('name')
-                                ->paginate(20)
-                                ->withQueryString();
-        } catch (\Exception $e) {
-            $structures = $query->orderBy('name')
-                                ->paginate(20)
-                                ->withQueryString();
-        }
+        $structures = $query->orderBy('name')
+            ->paginate(20)
+            ->withQueryString();
 
         return view('hr.salary-structures.index', compact('structures'));
     }
@@ -72,6 +73,11 @@ class HrSalaryStructureController extends Controller
             'components.*.calculation_type' => 'required|in:fixed,percent_of_basic,percent_of_gross,percent_of_ctc,formula,slab_based',
             'components.*.calculation_value' => 'nullable|numeric|min:0',
             'components.*.percentage' => 'nullable|numeric|min:0|max:100',
+            'components.*.formula' => 'nullable|string|max:500',
+            'components.*.min_value' => 'nullable|numeric|min:0',
+            'components.*.max_value' => 'nullable|numeric|min:0',
+            'components.*.is_mandatory' => 'nullable|boolean',
+            'components.*.sort_order' => 'nullable|integer|min:0',
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
@@ -86,13 +92,8 @@ class HrSalaryStructureController extends Controller
                 'is_active' => $validated['is_active'],
             ]);
 
-            foreach ($validated['components'] as $comp) {
-                $structure->components()->attach($comp['id'], [
-                    'calculation_type' => $comp['calculation_type'],
-                    'value' => $comp['calculation_value'] ?? 0,
-                    'percentage' => $comp['percentage'] ?? null,
-                    'is_active' => true,
-                ]);
+            foreach ($validated['components'] as $index => $comp) {
+                $structure->components()->attach($comp['id'], $this->buildPivotPayload($comp, null, $index));
             }
 
             DB::commit();
@@ -151,6 +152,11 @@ class HrSalaryStructureController extends Controller
             'components.*.calculation_type' => 'required|in:fixed,percent_of_basic,percent_of_gross,percent_of_ctc,formula,slab_based',
             'components.*.calculation_value' => 'nullable|numeric|min:0',
             'components.*.percentage' => 'nullable|numeric|min:0|max:100',
+            'components.*.formula' => 'nullable|string|max:500',
+            'components.*.min_value' => 'nullable|numeric|min:0',
+            'components.*.max_value' => 'nullable|numeric|min:0',
+            'components.*.is_mandatory' => 'nullable|boolean',
+            'components.*.sort_order' => 'nullable|integer|min:0',
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
@@ -166,14 +172,13 @@ class HrSalaryStructureController extends Controller
             ]);
 
             // Sync components
+            $existingComponents = $salaryStructure->components()
+                ->get()
+                ->keyBy('id');
             $syncData = [];
-            foreach ($validated['components'] as $comp) {
-                $syncData[$comp['id']] = [
-                    'calculation_type' => $comp['calculation_type'],
-                    'value' => $comp['calculation_value'] ?? 0,
-                    'percentage' => $comp['percentage'] ?? null,
-                    'is_active' => true,
-                ];
+            foreach ($validated['components'] as $index => $comp) {
+                $existingComponent = $existingComponents->get($comp['id']);
+                $syncData[$comp['id']] = $this->buildPivotPayload($comp, $existingComponent, $index);
             }
             $salaryStructure->components()->sync($syncData);
 
@@ -191,7 +196,7 @@ class HrSalaryStructureController extends Controller
     public function destroy(HrSalaryStructure $salaryStructure)
     {
         try {
-            if ($salaryStructure->employees()->exists()) {
+            if ($salaryStructure->employees()->exists() || $salaryStructure->employeeSalaries()->exists()) {
                 return back()->with('error', 'Cannot delete structure. Employees are assigned to it.');
             }
         } catch (\Exception $e) {
@@ -210,7 +215,7 @@ class HrSalaryStructureController extends Controller
         DB::beginTransaction();
         try {
             $newStructure = $salaryStructure->replicate();
-            $newStructure->code = $salaryStructure->code . '_COPY';
+            $newStructure->code = $this->generateDuplicateCode($salaryStructure->code);
             $newStructure->name = $salaryStructure->name . ' (Copy)';
             $newStructure->save();
 
@@ -218,9 +223,13 @@ class HrSalaryStructureController extends Controller
             foreach ($salaryStructure->components as $component) {
                 $newStructure->components()->attach($component->id, [
                     'calculation_type' => $component->pivot->calculation_type,
-                    'calculation_value' => $component->pivot->calculation_value,
+                    'value' => $component->pivot->value,
                     'percentage' => $component->pivot->percentage,
-                    'based_on' => $component->pivot->based_on,
+                    'formula' => $component->pivot->formula,
+                    'min_value' => $component->pivot->min_value,
+                    'max_value' => $component->pivot->max_value,
+                    'is_mandatory' => $component->pivot->is_mandatory ?? false,
+                    'sort_order' => $component->pivot->sort_order ?? 0,
                     'is_active' => $component->pivot->is_active ?? true,
                 ]);
             }
@@ -233,5 +242,36 @@ class HrSalaryStructureController extends Controller
             DB::rollBack();
             return back()->with('error', 'Error duplicating salary structure: ' . $e->getMessage());
         }
+    }
+
+    private function buildPivotPayload(array $component, $existingComponent = null, int $index = 0): array
+    {
+        $existingPivot = $existingComponent?->pivot;
+        $calculationType = $component['calculation_type'];
+
+        return [
+            'calculation_type' => $calculationType,
+            'value' => $calculationType === 'fixed' ? ($component['calculation_value'] ?? $existingPivot?->value ?? 0) : ($existingPivot?->value ?? 0),
+            'percentage' => str_starts_with($calculationType, 'percent_') ? ($component['percentage'] ?? $existingPivot?->percentage) : ($existingPivot?->percentage),
+            'formula' => $calculationType === 'formula' ? ($component['formula'] ?? $existingPivot?->formula) : ($existingPivot?->formula),
+            'min_value' => array_key_exists('min_value', $component) ? $component['min_value'] : $existingPivot?->min_value,
+            'max_value' => array_key_exists('max_value', $component) ? $component['max_value'] : $existingPivot?->max_value,
+            'is_mandatory' => array_key_exists('is_mandatory', $component) ? (bool) $component['is_mandatory'] : (bool) ($existingPivot?->is_mandatory ?? false),
+            'sort_order' => $component['sort_order'] ?? $existingPivot?->sort_order ?? ($index + 1),
+            'is_active' => true,
+        ];
+    }
+
+    private function generateDuplicateCode(string $baseCode): string
+    {
+        $candidate = $baseCode . '_COPY';
+        $suffix = 2;
+
+        while (HrSalaryStructure::query()->where('code', $candidate)->exists()) {
+            $candidate = $baseCode . '_COPY' . $suffix;
+            $suffix++;
+        }
+
+        return $candidate;
     }
 }

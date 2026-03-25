@@ -77,7 +77,7 @@
                     <div class="card border-primary">
                         <div class="card-body text-center py-2">
                             <h3 class="mb-0 text-primary">{{ $summary['ot_hours'] }}</h3>
-                            <small>OT Hours</small>
+                            <small>Approved OT Hours</small>
                         </div>
                     </div>
                 </div>
@@ -225,7 +225,7 @@
                                     </tr>
 
                                     {{-- View Modal --}}
-                                    <div class="modal fade" id="viewModal{{ $attendance->id }}" tabindex="-1">
+                                    <div class="modal fade" id="viewModal{{ $attendance->id }}" tabindex="-1" data-bs-backdrop="false">
                                         <div class="modal-dialog">
                                             <div class="modal-content">
                                                 <div class="modal-header">
@@ -324,7 +324,7 @@
         </div>
 
         {{-- Process Attendance Modal --}}
-        <div class="modal fade" id="processModal" tabindex="-1">
+        <div class="modal fade" id="processModal" data-bs-backdrop="false">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <form action="{{ route('hr.attendance.process') }}" method="POST">
@@ -366,7 +366,7 @@
         </div>
 
         {{-- Date Picker Modal --}}
-        <div class="modal fade" id="datePickerModal" tabindex="-1">
+        <div class="modal fade" id="datePickerModal" data-bs-backdrop="false">
             <div class="modal-dialog modal-sm">
                 <div class="modal-content">
                     <div class="modal-header">

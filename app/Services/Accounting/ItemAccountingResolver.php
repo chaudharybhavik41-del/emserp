@@ -45,6 +45,48 @@ class ItemAccountingResolver
     }
 
     /**
+     * Resolve the stock-holding ledger for store-side postings.
+     *
+     * This intentionally stays on the inventory/stock side of the accounting flow:
+     * - item.inventory_account_id
+     * - subcategory.inventory_account_id
+     * - type/default inventory fallback
+     *
+     * It does NOT switch to expense/fixed-asset posting rules, because store issue/return/
+     * adjustment flows still credit/debit stock-holding ledgers rather than purchase debit ledgers.
+     */
+    public function resolveInventoryHoldingAccount(?Item $item, ?int $companyId = null): ?Account
+    {
+        if (! $item) {
+            return null;
+        }
+
+        $type = $item->relationLoaded('type') ? $item->getRelation('type') : $item->type;
+        $subcategory = $item->relationLoaded('subcategory') ? $item->getRelation('subcategory') : $item->subcategory;
+
+        if ($item->inventoryAccount) {
+            return $item->inventoryAccount;
+        }
+
+        if ($subcategory && $subcategory->inventoryAccount) {
+            return $subcategory->inventoryAccount;
+        }
+
+        $typeCode = strtoupper(trim((string) ($type?->code ?? '')));
+        if (in_array($typeCode, ['CONSUMABLE', 'CONSUMABLES', 'SPARE', 'SPARES'], true)) {
+            $consCode = Config::get('accounting.store.inventory_consumables_account_code');
+            $consAcc = $this->findFallbackAccountByCode($consCode, $companyId);
+            if ($consAcc) {
+                return $consAcc;
+            }
+        }
+
+        $code = Config::get('accounting.default_accounts.inventory_raw_material_code') ?: 'INV-RM';
+
+        return $this->findFallbackAccountByCode($code, $companyId);
+    }
+
+    /**
      * Resolve the correct debit Account for an item.
      *
      * Supported call patterns:
@@ -136,7 +178,7 @@ class ItemAccountingResolver
         // Consumables should go to Inventory - Consumables (not Raw Material)
         // when there is no explicit mapping.
         $typeCode = strtoupper(trim((string) ($type?->code ?? '')));
-        if (in_array($typeCode, ['CONSUMABLE', 'CONSUMABLES'], true)) {
+        if (in_array($typeCode, ['CONSUMABLE', 'CONSUMABLES', 'SPARE', 'SPARES'], true)) {
             $consCode = Config::get('accounting.store.inventory_consumables_account_code');
             $consAcc  = $this->findFallbackAccountByCode($consCode);
             if ($consAcc) {
@@ -210,12 +252,15 @@ class ItemAccountingResolver
         return $acc;
     }
 
-    protected function findFallbackAccountByCode(?string $code): ?Account
+    protected function findFallbackAccountByCode(?string $code, ?int $companyId = null): ?Account
     {
         if (! $code) {
             return null;
         }
 
-        return Account::where('code', $code)->first();
+        return Account::query()
+            ->when($companyId, fn ($q) => $q->where('company_id', $companyId))
+            ->where('code', $code)
+            ->first();
     }
 }

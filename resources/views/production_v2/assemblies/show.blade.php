@@ -144,6 +144,7 @@
                             <th class="text-end">Qty</th>
                             <th>UOM</th>
                             <th>Mandatory</th>
+                            <th>Client Dispatch</th>
                             <th>Remarks</th>
                         </tr>
                     </thead>
@@ -157,11 +158,12 @@
                             <td class="text-end">{{ number_format((float) $requirement->required_qty, 3) }}</td>
                             <td>{{ $requirement->uom?->code ?: $requirement->partDefinition?->uom?->code }}</td>
                             <td>{{ $requirement->is_mandatory ? 'Yes' : 'No' }}</td>
+                            <td>{{ $requirement->is_client_dispatchable ? 'Yes' : 'No' }}</td>
                             <td>{{ $requirement->remarks ?: '-' }}</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">No part requirements assigned.</td>
+                            <td colspan="6" class="text-center text-muted py-4">No part requirements assigned.</td>
                         </tr>
                     @endforelse
                     </tbody>
@@ -181,6 +183,10 @@
                             <div class="pv2-mobile-card__row">
                                 <span class="pv2-mobile-card__label">Qty</span>
                                 <span>{{ number_format((float) $requirement->required_qty, 3) }} {{ $requirement->uom?->code ?: $requirement->partDefinition?->uom?->code }}</span>
+                            </div>
+                            <div class="pv2-mobile-card__row">
+                                <span class="pv2-mobile-card__label">Client Dispatch</span>
+                                <span>{{ $requirement->is_client_dispatchable ? 'Yes' : 'No' }}</span>
                             </div>
                             <div class="pv2-mobile-card__row">
                                 <span class="pv2-mobile-card__label">Remarks</span>

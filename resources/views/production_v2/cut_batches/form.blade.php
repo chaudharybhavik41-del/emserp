@@ -10,6 +10,33 @@
 @endsection
 
 @section('content')
+    @php
+        $draftPlanCount = (int) ($planStatusCounts['draft'] ?? 0);
+        $approvedPlanCount = (int) ($planStatusCounts['approved'] ?? 0);
+        $releasedPlanCount = (int) ($planStatusCounts['released'] ?? 0);
+        $hasUnreleasedPlans = ($draftPlanCount + $approvedPlanCount) > 0;
+    @endphp
+
+    @if($releasedPlanCount === 0 && $hasUnreleasedPlans)
+        <div class="alert alert-warning">
+            No released cutting plans are available for production yet.
+            Current plan status in this project:
+            <strong>{{ $draftPlanCount }}</strong> draft,
+            <strong>{{ $approvedPlanCount }}</strong> approved,
+            <strong>{{ $releasedPlanCount }}</strong> released.
+            Release the required cutting plans from Design V2 before creating the cut batch.
+            <div class="mt-2 d-flex flex-wrap gap-2">
+                <a href="{{ route('projects.production-v2.cutting-plans.index', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-primary">Open Cutting Plans</a>
+                <a href="{{ route('projects.production-v2.design-releases.index', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-dark">Open Design Releases</a>
+            </div>
+        </div>
+    @elseif($releasedPlanCount > 0 && $hasUnreleasedPlans)
+        <div class="alert alert-light border">
+            Only released cutting plans are shown here.
+            This project still has <strong>{{ $draftPlanCount }}</strong> draft and <strong>{{ $approvedPlanCount }}</strong> approved plans waiting for release.
+        </div>
+    @endif
+
     <div class="card mb-3">
         <div class="card-body">
             <form method="GET" action="{{ request()->url() }}" class="row g-2 align-items-end">
@@ -26,6 +53,9 @@
                             </option>
                         @endforeach
                     </select>
+                    <div class="form-text">
+                        Production cutting can load only released plans from this project.
+                    </div>
                 </div>
                 <div class="col-12 col-md-4 d-flex gap-2">
                     <button class="btn btn-outline-primary w-100">Load Plan</button>
@@ -257,7 +287,13 @@
             </div>
         </form>
     @else
-        <div class="alert alert-info">Select a cutting plan first.</div>
+        <div class="alert alert-info">
+            @if($releasedPlanCount > 0)
+                Select a released cutting plan first.
+            @else
+                No released cutting plans are available for this project yet.
+            @endif
+        </div>
     @endif
 @endsection
 

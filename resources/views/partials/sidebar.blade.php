@@ -635,6 +635,7 @@
                 
                                     $hrAdminAccess = auth()->check() && auth()->user()->canany([
                                         'hr.dashboard.view',
+                                        'hr.candidate.view',
                                         'hr.employee.view',
                                         'hr.attendance.view',
                                         'hr.leave.view',
@@ -722,6 +723,18 @@
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
                                               {{ $isRoute('hr.employees.*') ? 'active' : 'text-body-secondary' }}">
                                         <i class="bi bi-person-vcard me-2"></i><span>Employees</span>
+                                    </a>
+                                </li>
+                            @endif
+                        @endcan
+
+                        @can('hr.candidate.view')
+                            @if(Route::has('hr.candidates.index'))
+                                <li class="nav-item">
+                                    <a data-erp-menu-item href="{{ route('hr.candidates.index') }}"
+                                       class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
+                                              {{ $isRoute('hr.candidates.*') ? 'active' : 'text-body-secondary' }}">
+                                        <i class="bi bi-person-lines-fill me-2"></i><span>Candidates</span>
                                     </a>
                                 </li>
                             @endif
@@ -1662,14 +1675,32 @@
                             </li>
 
                             @if(\Illuminate\Support\Facades\Route::has('accounting.contra-vouchers.index'))
-                                <li class="nav-item">
+                                <!-- <li class="nav-item">
                                     <a data-erp-menu-item href="{{ route('accounting.contra-vouchers.index') }}"
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
                                               {{ $isRoute('accounting.contra-vouchers.*') ? 'active' : 'text-body-secondary' }}">
                                         <i class="bi bi-arrow-left-right me-2"></i>
                                         <span>Contra Entries</span>
                                     </a>
-                                </li>
+                                </li> -->
+                                
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('accounting.vouchers.index', ['type' => 'journal']) }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ (request('type') == 'journal' && $isRoute(['accounting.vouchers.index'])) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-journal-text me-2"></i>
+                                    <span>Journal Entries</span>
+                                </a>
+                            </li>
+
+                            <li class="nav-item">
+                                <a data-erp-menu-item href="{{ route('accounting.contra-vouchers.index') }}"
+                                   class="nav-link erp-nav-link d-flex align-items-center px-3 py-1 ps-4
+                                          {{ $isRoute(['accounting.contra-vouchers.*']) ? 'active' : 'text-body-secondary' }}">
+                                    <i class="bi bi-arrow-left-right me-2"></i>
+                                    <span>Contra Entries</span>
+                                </a>
+                            </li>
                             @endif
 
                             <li class="nav-item">
@@ -1710,14 +1741,14 @@
                             @endcan
                         @endif
 
-                        @if(\Illuminate\Support\Facades\Route::has('accounting.client-ra.index'))
+                        @if(\Illuminate\Support\Facades\Route::has('accounting.client-billing.index') || \Illuminate\Support\Facades\Route::has('accounting.client-ra.index'))
                             @can('client_ra.view')
                                 <li class="nav-item">
-                                    <a data-erp-menu-item href="{{ route('accounting.client-ra.index') }}"
+                                    <a data-erp-menu-item href="{{ $safeRoute($pickRoute(['accounting.client-billing.index', 'accounting.client-ra.index'])) }}"
                                        class="nav-link erp-nav-link d-flex align-items-center px-3 py-1
-                                              {{ $isRoute('accounting.client-ra.*') ? 'active' : 'text-body-secondary' }}">
+                                              {{ $isRoute(['accounting.client-billing.*', 'accounting.client-ra.*']) ? 'active' : 'text-body-secondary' }}">
                                         <i class="bi bi-receipt-cutoff me-2"></i>
-                                        <span>Client RA Bills</span>
+                                        <span>Client Billing</span>
                                     </a>
                                 </li>
                             @endcan
@@ -1794,6 +1825,7 @@
                                     <span>Receipts</span>
                                 </a>
                             </li>
+
                         @endif
 
                         @if($onAccountRoute)

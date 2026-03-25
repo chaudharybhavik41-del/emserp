@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Users\AuditedUserCreator;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,10 @@ use Illuminate\View\View;
 
 class RegisteredUserController extends Controller
 {
+    public function __construct(
+        protected AuditedUserCreator $userCreator
+    ) {}
+
     /**
      * Display the registration view.
      */
@@ -35,10 +40,15 @@ class RegisteredUserController extends Controller
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
-        $user = User::create([
+        $user = $this->userCreator->create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+        ], [
+            'source' => 'auth.register',
+            'metadata' => [
+                'creation_flow' => 'self_registration',
+            ],
         ]);
 
         event(new Registered($user));

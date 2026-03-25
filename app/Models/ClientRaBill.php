@@ -22,6 +22,22 @@ class ClientRaBill extends Model
     use HasFactory;
     use HasPostingStatus;
 
+    public const BILL_KIND_PROJECT_MFG_SERVICE = 'project_mfg_service';
+    public const BILL_KIND_PROJECT_LABOUR_SERVICE = 'project_labour_service';
+    public const BILL_KIND_MATERIAL_SALES = 'material_sales';
+    public const BILL_KIND_SCRAP_SALES = 'scrap_sales';
+    public const BILL_KIND_OTHER = 'other';
+
+    public const SOURCE_BASIS_MANUAL = 'manual';
+    public const SOURCE_BASIS_PRODUCTION_DISPATCH = 'production_dispatch';
+    public const SOURCE_BASIS_PRODUCTION_PROGRESS = 'production_progress';
+    public const SOURCE_BASIS_STOCK_SALE = 'stock_sale';
+
+    public const MATERIAL_SCOPE_OWN = 'own_material';
+    public const MATERIAL_SCOPE_CLIENT = 'client_material';
+    public const MATERIAL_SCOPE_SCRAP = 'scrap';
+    public const MATERIAL_SCOPE_NA = 'na';
+
     protected $table = 'client_ra_bills';
 
     protected $guarded = [];
@@ -49,6 +65,7 @@ class ClientRaBill extends Model
         'total_gst'              => 'float',
         'tds_rate'               => 'float',
         'tds_amount'             => 'float',
+        'round_off'              => 'float',
         'total_amount'           => 'float',
         'receivable_amount'      => 'float',
     ];
@@ -124,6 +141,7 @@ class ClientRaBill extends Model
             'igst_amount',
             'total_gst',
             'tds_amount',
+            'round_off',
             'total_amount',
             'receivable_amount',
         ];
@@ -186,7 +204,7 @@ class ClientRaBill extends Model
 
         $lastNumber = static::where('company_id', $companyId)
             ->where('ra_number', 'like', $prefix . '%')
-            ->orderByDesc('id')
+            ->orderByDesc('ra_number')
             ->value('ra_number');
 
         if ($lastNumber) {
@@ -216,7 +234,8 @@ class ClientRaBill extends Model
 
         $lastNumber = static::where('company_id', $companyId)
             ->where('invoice_number', 'like', $prefix . '%')
-            ->orderByDesc('id')
+            ->whereNotNull('invoice_number')
+            ->orderByDesc('invoice_number')
             ->value('invoice_number');
 
         if ($lastNumber && preg_match('/(\d+)$/', $lastNumber, $matches)) {
@@ -259,8 +278,12 @@ class ClientRaBill extends Model
         // GST on net amount (Output GST)
         $this->total_gst = $this->cgst_amount + $this->sgst_amount + $this->igst_amount;
 
-        // Total invoice amount = Net + GST
-        $this->total_amount = $this->net_amount + $this->total_gst;
+        $calculatedTotal = round($this->net_amount + $this->total_gst, 2);
+        $invoiceTotal = $this->total_amount !== null
+            ? round((float) $this->total_amount, 2)
+            : round($calculatedTotal, 0);
+        $this->round_off = round($invoiceTotal - $calculatedTotal, 2);
+        $this->total_amount = $invoiceTotal;
 
         // Receivable = Total - TDS (TDS will be deducted by client)
         $this->receivable_amount = $this->total_amount - $this->tds_amount;
@@ -298,5 +321,100 @@ class ClientRaBill extends Model
             'other'       => 'Other Revenue',
             default       => 'Revenue',
         };
+    }
+
+    public static function billKindOptions(): array
+    {
+        return [
+            self::BILL_KIND_PROJECT_MFG_SERVICE => 'MFG Project Billing',
+            self::BILL_KIND_PROJECT_LABOUR_SERVICE => 'Service (Labour)',
+            self::BILL_KIND_MATERIAL_SALES => 'Sales Bill',
+            self::BILL_KIND_SCRAP_SALES => 'Scrap Sales',
+            self::BILL_KIND_OTHER => 'Other Billing',
+        ];
+    }
+
+    public static function sourceBasisOptions(): array
+    {
+        return [
+            self::SOURCE_BASIS_MANUAL => 'Manual',
+            self::SOURCE_BASIS_PRODUCTION_DISPATCH => 'Production Dispatch',
+            self::SOURCE_BASIS_PRODUCTION_PROGRESS => 'Production Progress',
+            self::SOURCE_BASIS_STOCK_SALE => 'Stock / Direct Sale',
+        ];
+    }
+
+    public static function materialScopeOptions(): array
+    {
+        return [
+            self::MATERIAL_SCOPE_OWN => 'Own Material',
+            self::MATERIAL_SCOPE_CLIENT => 'Client Material',
+            self::MATERIAL_SCOPE_SCRAP => 'Scrap',
+            self::MATERIAL_SCOPE_NA => 'Not Applicable',
+        ];
+    }
+
+    public static function defaultBillKindFor(?string $revenueType, bool $hasDispatchSource = false): string
+    {
+        if ($hasDispatchSource) {
+            return self::BILL_KIND_MATERIAL_SALES;
+        }
+
+        return match ($revenueType) {
+            'fabrication', 'erection' => self::BILL_KIND_PROJECT_MFG_SERVICE,
+            'supply' => self::BILL_KIND_MATERIAL_SALES,
+            'service' => self::BILL_KIND_PROJECT_LABOUR_SERVICE,
+            default => self::BILL_KIND_OTHER,
+        };
+    }
+
+    public static function defaultSourceBasisFor(string $billKind, bool $hasDispatchSource = false): string
+    {
+        if ($hasDispatchSource) {
+            return self::SOURCE_BASIS_PRODUCTION_DISPATCH;
+        }
+
+        return match ($billKind) {
+            self::BILL_KIND_MATERIAL_SALES => self::SOURCE_BASIS_STOCK_SALE,
+            default => self::SOURCE_BASIS_MANUAL,
+        };
+    }
+
+    public static function defaultMaterialScopeFor(string $billKind): string
+    {
+        return match ($billKind) {
+            self::BILL_KIND_PROJECT_MFG_SERVICE, self::BILL_KIND_MATERIAL_SALES => self::MATERIAL_SCOPE_OWN,
+            self::BILL_KIND_PROJECT_LABOUR_SERVICE => self::MATERIAL_SCOPE_CLIENT,
+            self::BILL_KIND_SCRAP_SALES => self::MATERIAL_SCOPE_SCRAP,
+            default => self::MATERIAL_SCOPE_NA,
+        };
+    }
+
+    public function getBillKindLabelAttribute(): string
+    {
+        return static::billKindOptions()[$this->bill_kind] ?? 'Billing';
+    }
+
+    public function getSourceBasisLabelAttribute(): string
+    {
+        return static::sourceBasisOptions()[$this->source_basis] ?? 'Manual';
+    }
+
+    public function getMaterialScopeLabelAttribute(): string
+    {
+        return static::materialScopeOptions()[$this->material_scope] ?? 'Not Applicable';
+    }
+
+    public function isMaterialBilling(): bool
+    {
+        return in_array($this->bill_kind, [
+            self::BILL_KIND_MATERIAL_SALES,
+            self::BILL_KIND_SCRAP_SALES,
+        ], true);
+    }
+
+    public function isServiceBilling(): bool
+    {
+        return ! $this->isMaterialBilling();
     }
 }

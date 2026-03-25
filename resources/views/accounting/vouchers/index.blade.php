@@ -35,7 +35,7 @@
             @endif
 
             @can('accounting.vouchers.create')
-                <a href="{{ $createRoute }}" class="btn btn-primary btn-sm">{{ $createLabel }}</a>
+                <a href="{{ $createRoute }}{{ request('type') ? '?type='.request('type') : '' }}" class="btn btn-primary btn-sm">{{ $createLabel }}</a>
             @endcan
         </div>
     </div>
@@ -98,12 +98,21 @@
                 @unless($hideTypeFilter)
                     <div class="col-md-2">
                         <label class="form-label small fw-bold">Type</label>
-                        <select name="type" class="form-select form-select-sm">
-                            <option value="">All Types</option>
-                            @foreach($voucherTypes as $val => $lbl)
-                                <option value="{{ $val }}" {{ request('type') === $val ? 'selected' : '' }}>{{ $lbl }}</option>
-                            @endforeach
-                        </select>
+                        @if(request('type'))
+                            <input type="hidden" name="type" value="{{ request('type') }}">
+                            <select class="form-select form-select-sm" disabled>
+                                @foreach($voucherTypes as $val => $lbl)
+                                    <option value="{{ $val }}" {{ request('type') === $val ? 'selected' : '' }}>{{ $lbl }}</option>
+                                @endforeach
+                            </select>
+                        @else
+                            <select name="type" class="form-select form-select-sm">
+                                <option value="">All Types</option>
+                                @foreach($voucherTypes as $val => $lbl)
+                                    <option value="{{ $val }}" {{ request('type') === $val ? 'selected' : '' }}>{{ $lbl }}</option>
+                                @endforeach
+                            </select>
+                        @endif
                     </div>
                 @endunless
                  <div class="col-md-2">

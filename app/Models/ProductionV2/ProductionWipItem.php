@@ -67,10 +67,20 @@ class ProductionWipItem extends Model
         return $this->belongsTo(StoreStockItem::class, 'mother_stock_item_id');
     }
 
-    public static function generateReference(string $projectCode, string $prefix = 'WIP'): string
+    public function cutBatch()
     {
-        $year = now()->year;
-        $base = strtoupper($prefix) . '-' . strtoupper($projectCode) . '-' . $year . '-';
+        return $this->belongsTo(ProductionCutBatch::class, 'cut_batch_id');
+    }
+
+    public static function generateReference(string $projectCode, string $prefix = 'WIP', ?string $planNumber = null): string
+    {
+        $base = strtoupper($prefix) . '-' . static::compactProjectCode($projectCode);
+
+        if ($planNumber) {
+            $base .= '-' . static::compactPlanNumber($planNumber);
+        }
+
+        $base .= '-';
 
         $last = static::query()
             ->where(function ($query) use ($base) {
@@ -87,6 +97,18 @@ class ProductionWipItem extends Model
             $seq = ((int) $matches[1]) + 1;
         }
 
-        return $base . str_pad((string) $seq, 6, '0', STR_PAD_LEFT);
+        return $base . str_pad((string) $seq, 4, '0', STR_PAD_LEFT);
+    }
+
+    protected static function compactProjectCode(string $projectCode): string
+    {
+        $compact = strtoupper(preg_replace('/[^A-Z0-9]+/i', '', $projectCode));
+
+        return preg_replace('/^([A-Z]+)20(\d+)$/', '$1$2', $compact) ?: $compact;
+    }
+
+    protected static function compactPlanNumber(string $planNumber): string
+    {
+        return strtoupper(preg_replace('/[^A-Z0-9]+/i', '', $planNumber));
     }
 }

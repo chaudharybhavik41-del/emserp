@@ -4,6 +4,7 @@ namespace App\Services\Hr;
 
 use App\Models\Hr\HrEmployee;
 use App\Models\User;
+use App\Services\Users\AuditedUserCreator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -22,6 +23,10 @@ use Illuminate\Validation\ValidationException;
  */
 class EmployeeUserProvisioningService
 {
+    public function __construct(
+        protected AuditedUserCreator $userCreator
+    ) {}
+
     /**
      * Create/link/sync the user account for a given employee and set primary department.
      *
@@ -45,6 +50,7 @@ class EmployeeUserProvisioningService
             if ($employee->user) {
                 $user = $this->syncUserFromEmployee($employee->user, $employee);
                 $this->syncPrimaryDepartment($user, $employee);
+
                 return $user;
             }
 
@@ -64,7 +70,7 @@ class EmployeeUserProvisioningService
                 }
 
                 // If the user already has an employee_code, it must match.
-                if (!empty($existingUser->employee_code) && $existingUser->employee_code !== $employee->employee_code) {
+                if (! empty($existingUser->employee_code) && $existingUser->employee_code !== $employee->employee_code) {
                     throw ValidationException::withMessages([
                         'official_email' => 'This email belongs to another employee account.',
                     ]);
@@ -83,7 +89,7 @@ class EmployeeUserProvisioningService
             // Otherwise, create a new user.
             $defaultPassword = env('EMPLOYEE_DEFAULT_PASSWORD', 'password123');
 
-            $user = User::create([
+            $user = $this->userCreator->create([
                 'name' => $employee->full_name,
                 'email' => $email,
                 'password' => bcrypt($defaultPassword),
@@ -91,6 +97,13 @@ class EmployeeUserProvisioningService
                 'phone' => $employee->personal_mobile,
                 'designation' => optional($employee->designation)->name,
                 'is_active' => (bool) ($employee->is_active ?? true),
+            ], [
+                'source' => 'hr.employee.provisioning',
+                'metadata' => [
+                    'creation_flow' => 'hr_employee_provisioning',
+                    'employee_id' => $employee->id,
+                    'employee_code' => $employee->employee_code,
+                ],
             ]);
 
             $employee->user_id = $user->id;
@@ -131,12 +144,12 @@ class EmployeeUserProvisioningService
         $user->designation = optional($employee->designation)->name;
 
         // Keep existing phone if employee phone is empty.
-        if (!empty($employee->personal_mobile)) {
+        if (! empty($employee->personal_mobile)) {
             $user->phone = $employee->personal_mobile;
         }
 
         // Keep user active status aligned with employee (if employee has is_active column)
-        if (!is_null($employee->is_active)) {
+        if (! is_null($employee->is_active)) {
             $user->is_active = (bool) $employee->is_active;
         }
 

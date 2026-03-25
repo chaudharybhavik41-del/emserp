@@ -485,7 +485,7 @@ class StoreRequisitionController extends Controller
      */
     protected function machineSpareAllowedTypeCodes(): array
     {
-        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['CONSUMABLE']);
+        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['SPARE', 'CONSUMABLE']);
         if (! is_array($codes)) {
             $codes = [$codes];
         }
@@ -495,7 +495,7 @@ class StoreRequisitionController extends Controller
             $codes
         ))));
 
-        return $normalized ?: ['CONSUMABLE'];
+        return $normalized ?: ['SPARE', 'CONSUMABLE'];
     }
 
     /**

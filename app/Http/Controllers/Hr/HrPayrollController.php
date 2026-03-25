@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Hr;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
+use App\Services\Accounting\HrPayrollPostingService;
 use App\Models\Department;
 use App\Models\Hr\HrAttendance;
 use App\Models\Hr\HrEmployee;
@@ -15,29 +17,35 @@ use App\Models\Hr\HrPayrollBatch;
 use App\Models\Hr\HrPayrollComponent;
 use App\Models\Hr\HrPayrollPeriod;
 use App\Models\Hr\HrPfSlab;
+use App\Models\Hr\HrOvertimeRecord;
 use App\Models\Hr\HrProfessionalTaxSlab;
 use App\Models\Hr\HrSalaryAdvance;
 use App\Models\Hr\HrSalaryComponent;
+use App\Models\Hr\HrTaxDeclaration;
+use App\Models\Hr\HrTdsSlab;
+use App\Models\Hr\HrLwfSlab;
+use App\Enums\Hr\AttendanceStatus;
 use App\Enums\Hr\PayrollStatus;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class HrPayrollController extends Controller
 {
-    public function __construct()
-    {
+    use AuthorizesEmployeeWorkspace;
+
+    public function __construct(
+        protected HrPayrollPostingService $hrPayrollPostingService
+    ) {
         $this->middleware('auth');
 
         // Core viewing
         $this->middleware('permission:hr.payroll.view')->only([
             'index',
             'period',
-            'show',
-            'payslip',
-            'payslipPdf',
 
             // Reports
             'bankStatement',
@@ -66,11 +74,13 @@ class HrPayrollController extends Controller
         $this->middleware('permission:hr.payroll.approve')->only([
             'approve',
             'bulkApprove',
+            'unapprove',
         ]);
 
         $this->middleware('permission:hr.payroll.pay')->only([
             'pay',
             'bulkPay',
+            'unpay',
         ]);
 
         // Hold / release
@@ -260,7 +270,12 @@ class HrPayrollController extends Controller
                 $period->update(['status' => 'processing']);
             }
 
-            $query = HrEmployee::active();
+            $query = HrEmployee::query()
+                ->whereDate('date_of_joining', '<=', $period->attendance_end)
+                ->where(function (Builder $builder) use ($period): void {
+                    $builder->whereNull('date_of_leaving')
+                        ->orWhereDate('date_of_leaving', '>', $period->attendance_start);
+                });
 
             if (!empty($validated['employee_ids'])) {
                 $query->whereIn('id', $validated['employee_ids']);
@@ -288,7 +303,7 @@ class HrPayrollController extends Controller
                     return back()->with('error', 'Payroll processing failed. ' . implode(' ', $errors));
                 }
 
-                return back()->with('error', 'No active employees matched the selected payroll filters.');
+                return back()->with('error', 'No employees matched the selected payroll filters for this period.');
             }
 
             // Finalize period status
@@ -298,7 +313,7 @@ class HrPayrollController extends Controller
 
             $message = "Payroll processed for {$processed} employees.";
             if (!empty($errors)) {
-                $message .= " Errors: " . count($errors);
+                $message .= ' Errors: ' . count($errors) . '. ' . implode(' ', array_slice($errors, 0, 5));
             }
 
             return back()->with('success', $message);
@@ -311,6 +326,10 @@ class HrPayrollController extends Controller
 
     public function show(HrPayroll $payroll): View
     {
+        $employee = HrEmployee::find($payroll->hr_employee_id);
+        $this->authorizeEmployeeRead($employee, ['hr.payroll.view', 'hr.employee.view']);
+        $payroll->setRelation('employee', $employee);
+
         $payroll->load([
             'employee',
             'period',
@@ -325,6 +344,10 @@ class HrPayrollController extends Controller
 
     public function payslip(HrPayroll $payroll): View
     {
+        $employee = HrEmployee::find($payroll->hr_employee_id);
+        $this->authorizeEmployeeRead($employee, ['hr.payroll.view', 'hr.employee.view']);
+        $payroll->setRelation('employee', $employee);
+
         $payroll->load([
             'employee.department',
             'employee.designation',
@@ -337,6 +360,10 @@ class HrPayrollController extends Controller
 
     public function payslipPdf(HrPayroll $payroll)
     {
+        $employee = HrEmployee::find($payroll->hr_employee_id);
+        $this->authorizeEmployeeRead($employee, ['hr.payroll.view', 'hr.employee.view']);
+        $payroll->setRelation('employee', $employee);
+
         $payroll->load([
             'employee.department',
             'employee.designation',
@@ -359,27 +386,50 @@ class HrPayrollController extends Controller
 
     public function approve(HrPayroll $payroll): RedirectResponse
     {
+        $payroll->loadMissing('period');
+
+        if ($payroll->period?->is_stale) {
+            return back()->with('error', 'Payroll source data changed after processing. Reprocess the payroll period before approval.');
+        }
+
         if (!$payroll->canApprove()) {
             return back()->with('error', 'This payroll cannot be approved in its current state.');
         }
 
-        $payroll->update([
-            'status' => PayrollStatus::APPROVED,
-        ]);
+        try {
+            DB::transaction(function () use ($payroll): void {
+                $lockedPayroll = HrPayroll::query()
+                    ->with('period')
+                    ->lockForUpdate()
+                    ->findOrFail($payroll->id);
 
-        // If all payrolls are approved (or paid), mark the period as approved
-        $periodId = $payroll->hr_payroll_period_id;
-        if ($periodId) {
-            $allApproved = HrPayroll::where('hr_payroll_period_id', $periodId)
-                ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
-                ->doesntExist();
-
-            if ($allApproved) {
-                $period = HrPayrollPeriod::find($periodId);
-                if ($period && !in_array($period->status, ['paid', 'closed'])) {
-                    $period->markAsApproved();
+                if (!$lockedPayroll->canApprove()) {
+                    throw new \RuntimeException('This payroll cannot be approved in its current state.');
                 }
-            }
+
+                $lockedPayroll->update([
+                    'status' => PayrollStatus::APPROVED,
+                ]);
+
+                $this->hrPayrollPostingService->postAccrual($lockedPayroll);
+
+                // If all payrolls are approved (or paid), mark the period as approved
+                $periodId = $lockedPayroll->hr_payroll_period_id;
+                if ($periodId) {
+                    $allApproved = HrPayroll::where('hr_payroll_period_id', $periodId)
+                        ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
+                        ->doesntExist();
+
+                    if ($allApproved) {
+                        $period = HrPayrollPeriod::query()->lockForUpdate()->find($periodId);
+                        if ($period && !in_array($period->status, ['paid', 'closed'])) {
+                            $period->markAsApproved();
+                        }
+                    }
+                }
+            });
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to approve payroll: ' . $e->getMessage());
         }
 
         return back()->with('success', 'Payroll approved successfully.');
@@ -387,23 +437,46 @@ class HrPayrollController extends Controller
 
     public function bulkApprove(Request $request, HrPayrollPeriod $period): RedirectResponse
     {
+        if ($period->is_stale) {
+            return back()->with('error', 'Payroll source data changed after processing. Reprocess the payroll period before approval.');
+        }
+
         $validated = $request->validate([
             'payroll_ids' => 'required|array',
             'payroll_ids.*' => 'exists:hr_payrolls,id',
         ]);
 
-        $approved = HrPayroll::where('hr_payroll_period_id', $period->id)
-            ->whereIn('id', $validated['payroll_ids'])
-            ->where('status', PayrollStatus::PROCESSED->value)
-            ->update(['status' => PayrollStatus::APPROVED->value]);
+        $approved = 0;
 
-        // If all payrolls in this period are approved (or paid), mark period as approved
-        $allApproved = HrPayroll::where('hr_payroll_period_id', $period->id)
-            ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
-            ->doesntExist();
+        try {
+            DB::transaction(function () use ($validated, $period, &$approved): void {
+                $payrolls = HrPayroll::query()
+                    ->where('hr_payroll_period_id', $period->id)
+                    ->whereIn('id', $validated['payroll_ids'])
+                    ->where('status', PayrollStatus::PROCESSED->value)
+                    ->lockForUpdate()
+                    ->get();
 
-        if ($allApproved && !in_array($period->status, ['paid', 'closed'])) {
-            $period->markAsApproved();
+                foreach ($payrolls as $payroll) {
+                    $payroll->update(['status' => PayrollStatus::APPROVED->value]);
+                    $this->hrPayrollPostingService->postAccrual($payroll);
+                    $approved++;
+                }
+
+                // If all payrolls in this period are approved (or paid), mark period as approved
+                $allApproved = HrPayroll::where('hr_payroll_period_id', $period->id)
+                    ->whereNotIn('status', [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])
+                    ->doesntExist();
+
+                if ($allApproved && !in_array($period->status, ['paid', 'closed'])) {
+                    $lockedPeriod = HrPayrollPeriod::query()->lockForUpdate()->find($period->id);
+                    if ($lockedPeriod) {
+                        $lockedPeriod->markAsApproved();
+                    }
+                }
+            });
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to approve payrolls: ' . $e->getMessage());
         }
 
         return back()->with('success', "{$approved} payrolls approved.");
@@ -411,46 +484,162 @@ class HrPayrollController extends Controller
 
     public function pay(HrPayroll $payroll): RedirectResponse
     {
+        $payroll->loadMissing('period');
+
+        if ($payroll->period?->is_stale) {
+            return back()->with('error', 'Payroll source data changed after approval. Reprocess the payroll period before payment.');
+        }
+
         if (!$payroll->canPay()) {
             return back()->with('error', 'This payroll cannot be marked as paid.');
         }
 
-        $paymentDate = now();
+        try {
+            DB::transaction(function () use ($payroll): void {
+                $lockedPayroll = HrPayroll::query()
+                    ->with('period')
+                    ->lockForUpdate()
+                    ->findOrFail($payroll->id);
 
-        $payroll->update([
-            'status' => PayrollStatus::PAID->value,
-            'payment_date' => $paymentDate,
-        ]);
-
-        // Update loan repayments linked to this payroll
-        HrLoanRepayment::where('hr_payroll_id', $payroll->id)
-            ->update([
-                'status' => 'paid',
-                'paid_date' => $paymentDate,
-            ]);
-
-        $this->applyAdvanceRecoveries($payroll);
-
-        // Update period if all payrolls are paid
-        $periodId = $payroll->hr_payroll_period_id;
-        if ($periodId) {
-            $allPaid = HrPayroll::where('hr_payroll_period_id', $periodId)
-                ->where('status', '!=', PayrollStatus::PAID)
-                ->doesntExist();
-
-            if ($allPaid) {
-                $period = HrPayrollPeriod::find($periodId);
-                if ($period && $period->status !== 'closed') {
-                    $period->markAsPaid();
+                if (!$lockedPayroll->canPay()) {
+                    throw new \RuntimeException('This payroll cannot be marked as paid.');
                 }
-            }
+
+                $paymentDate = now();
+
+                $this->hrPayrollPostingService->postAccrual($lockedPayroll);
+
+                $lockedPayroll->update([
+                    'status' => PayrollStatus::PAID->value,
+                    'payment_date' => $paymentDate,
+                ]);
+
+                $this->applyLoanRecoveries($lockedPayroll, $paymentDate);
+                $this->applyAdvanceRecoveries($lockedPayroll);
+                $this->hrPayrollPostingService->postPayment($lockedPayroll->fresh(['period', 'employee']));
+
+                // Update period if all payrolls are paid
+                $periodId = $lockedPayroll->hr_payroll_period_id;
+                if ($periodId) {
+                    $allPaid = HrPayroll::where('hr_payroll_period_id', $periodId)
+                        ->where('status', '!=', PayrollStatus::PAID)
+                        ->doesntExist();
+
+                    if ($allPaid) {
+                        $period = HrPayrollPeriod::query()->lockForUpdate()->find($periodId);
+                        if ($period && $period->status !== 'closed') {
+                            $period->markAsPaid();
+                        }
+                    }
+                }
+            });
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to mark payroll paid: ' . $e->getMessage());
         }
 
         return back()->with('success', 'Payroll marked as paid.');
     }
 
+    public function unapprove(Request $request, HrPayroll $payroll): RedirectResponse
+    {
+        $validated = $request->validate([
+            'reversal_date' => 'required|date',
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        if ($payroll->status !== PayrollStatus::APPROVED) {
+            return back()->with('error', 'Only approved payrolls can be moved back to processed.');
+        }
+
+        try {
+            $lockedPayroll = HrPayroll::query()
+                ->with('period')
+                ->findOrFail($payroll->id);
+
+            if ($lockedPayroll->status !== PayrollStatus::APPROVED) {
+                throw new \RuntimeException('Only approved payrolls can be moved back to processed.');
+            }
+
+            if (!empty($lockedPayroll->payment_voucher_id)) {
+                throw new \RuntimeException('Payroll payment exists. Undo payment first.');
+            }
+
+            $this->hrPayrollPostingService->reverseAccrual(
+                $lockedPayroll,
+                $validated['reversal_date'],
+                $validated['reason']
+            );
+
+            DB::table('hr_payrolls')
+                ->where('id', $payroll->id)
+                ->update([
+                    'status' => PayrollStatus::PROCESSED->value,
+                ]);
+
+            $this->refreshPeriodStatus($lockedPayroll->hr_payroll_period_id);
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to rollback payroll approval: ' . $e->getMessage());
+        }
+
+        return back()->with('success', 'Payroll moved back to processed and accrual reversed.');
+    }
+
+    public function unpay(Request $request, HrPayroll $payroll): RedirectResponse
+    {
+        $validated = $request->validate([
+            'reversal_date' => 'required|date',
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        if ($payroll->status !== PayrollStatus::PAID) {
+            return back()->with('error', 'Only paid payrolls can be moved back to approved.');
+        }
+
+        try {
+            DB::transaction(function () use ($payroll, $validated): void {
+                $lockedPayroll = HrPayroll::query()
+                    ->with(['period', 'employee'])
+                    ->lockForUpdate()
+                    ->findOrFail($payroll->id);
+
+                if ($lockedPayroll->status !== PayrollStatus::PAID) {
+                    throw new \RuntimeException('Only paid payrolls can be moved back to approved.');
+                }
+
+                if ($this->hasLaterPaidPayroll($lockedPayroll)) {
+                    throw new \RuntimeException('A later paid payroll exists for this employee. Undo the latest payment first.');
+                }
+
+                $this->hrPayrollPostingService->reversePayment(
+                    $lockedPayroll,
+                    $validated['reversal_date'],
+                    $validated['reason']
+                );
+
+                $this->restoreLoanRecoveries($lockedPayroll);
+                $this->restoreAdvanceRecoveries($lockedPayroll);
+
+                $lockedPayroll->update([
+                    'status' => PayrollStatus::APPROVED->value,
+                    'payment_date' => null,
+                    'payment_reference' => null,
+                ]);
+
+                $this->refreshPeriodStatus($lockedPayroll->hr_payroll_period_id);
+            });
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to rollback payroll payment: ' . $e->getMessage());
+        }
+
+        return back()->with('success', 'Payroll moved back to approved and payment reversed.');
+    }
+
     public function bulkPay(Request $request, HrPayrollPeriod $period): RedirectResponse
     {
+        if ($period->is_stale) {
+            return back()->with('error', 'Payroll source data changed after approval. Reprocess the payroll period before payment.');
+        }
+
         $validated = $request->validate([
             'payroll_ids' => 'required|array',
             'payroll_ids.*' => 'exists:hr_payrolls,id',
@@ -458,39 +647,47 @@ class HrPayrollController extends Controller
             'payment_reference' => 'nullable|string|max:100',
         ]);
 
-        $payrollIds = HrPayroll::where('hr_payroll_period_id', $period->id)
-            ->whereIn('id', $validated['payroll_ids'])
-            ->where('status', PayrollStatus::APPROVED->value)
-            ->pluck('id')
-            ->all();
+        $paid = 0;
 
-        $paid = HrPayroll::whereIn('id', $payrollIds)
-            ->update([
-                'status' => PayrollStatus::PAID->value,
-                'payment_date' => $validated['payment_date'],
-                'payment_reference' => $validated['payment_reference'],
-            ]);
+        try {
+            DB::transaction(function () use ($validated, $period, &$paid): void {
+                $payrolls = HrPayroll::query()
+                    ->with(['period', 'employee'])
+                    ->where('hr_payroll_period_id', $period->id)
+                    ->whereIn('id', $validated['payroll_ids'])
+                    ->where('status', PayrollStatus::APPROVED->value)
+                    ->lockForUpdate()
+                    ->get();
 
-        // Update loan repayments
-        HrLoanRepayment::whereIn('hr_payroll_id', $payrollIds)
-            ->update([
-                'status' => 'paid',
-                'paid_date' => $validated['payment_date'],
-            ]);
+                foreach ($payrolls as $payroll) {
+                    $this->hrPayrollPostingService->postAccrual($payroll);
 
-        HrPayroll::whereIn('id', $payrollIds)
-            ->get()
-            ->each(function (HrPayroll $payroll): void {
-                $this->applyAdvanceRecoveries($payroll);
+                    $payroll->update([
+                        'status' => PayrollStatus::PAID->value,
+                        'payment_date' => $validated['payment_date'],
+                        'payment_reference' => $validated['payment_reference'],
+                    ]);
+
+                    $this->applyLoanRecoveries($payroll, Carbon::parse($validated['payment_date']));
+                    $this->applyAdvanceRecoveries($payroll);
+                    $this->hrPayrollPostingService->postPayment($payroll->fresh(['period', 'employee']));
+                    $paid++;
+                }
+
+                // Update period
+                $allPaid = HrPayroll::where('hr_payroll_period_id', $period->id)
+                    ->where('status', '!=', PayrollStatus::PAID)
+                    ->doesntExist();
+
+                if ($allPaid) {
+                    $lockedPeriod = HrPayrollPeriod::query()->lockForUpdate()->find($period->id);
+                    if ($lockedPeriod) {
+                        $lockedPeriod->markAsPaid();
+                    }
+                }
             });
-
-        // Update period
-        $allPaid = HrPayroll::where('hr_payroll_period_id', $period->id)
-            ->where('status', '!=', PayrollStatus::PAID)
-            ->doesntExist();
-
-        if ($allPaid) {
-            $period->markAsPaid();
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Failed to mark payrolls paid: ' . $e->getMessage());
         }
 
         return back()->with('success', "{$paid} payrolls marked as paid.");
@@ -550,7 +747,7 @@ class HrPayrollController extends Controller
             'total_eps' => $payrolls->sum('eps_employer'),
             'total_edli' => $payrolls->sum('edli_employer'),
             'total_admin_charges' => $payrolls->sum('pf_admin_charges'),
-            'total_contribution' => $payrolls->sum('pf_employee') + $payrolls->sum('pf_employer') + 
+            'total_contribution' => $payrolls->sum('pf_employee') + $payrolls->sum('pf_employer') +
                 $payrolls->sum('eps_employer') + $payrolls->sum('edli_employer') + $payrolls->sum('pf_admin_charges'),
         ];
 
@@ -622,6 +819,7 @@ class HrPayrollController extends Controller
             'total_gross' => $payrolls->sum('gross_salary'),
             'total_earnings' => $payrolls->sum('total_earnings'),
             'total_deductions' => $payrolls->sum('total_deductions'),
+            'total_round_off' => $payrolls->sum('round_off'),
             'total_net' => $payrolls->sum('net_payable'),
             'total_pf' => $payrolls->sum('pf_employee'),
             'total_esi' => $payrolls->sum('esi_employee'),
@@ -669,15 +867,22 @@ class HrPayrollController extends Controller
             throw new \Exception('No salary structure assigned');
         }
 
-        // Get attendance summary for the period
-        $attendanceSummary = $this->getAttendanceSummary($employee, $period);
+        [$employmentStart, $employmentEnd] = $this->getPayrollEmploymentWindow($employee, $period);
+
+        if (!$employmentStart || !$employmentEnd) {
+            throw new \Exception('Employee is not employed during this payroll period');
+        }
+
+        // Get attendance summary for the payable service window.
+        $attendanceSummary = $this->getAttendanceSummary($employee, $employmentStart, $employmentEnd);
 
         // Calculate paid days
         $paidDays = $attendanceSummary['paid_days'];
-        $lopDays = $period->working_days - $paidDays;
+        $employmentWorkingDays = $employmentStart->diffInWeekdays($employmentEnd) + 1;
+        $employmentServiceDays = $employmentStart->diffInDays($employmentEnd) + 1;
+        $lopDays = max(0, $employmentServiceDays - $paidDays);
 
-        // Calculate per day salary
-        $perDaySalary = $salary->monthly_gross / 30;
+        $calendarDayDivisor = $this->calendarDayDivisor($period);
 
         $payroll = HrPayroll::firstOrNew([
             'hr_payroll_period_id' => $period->id,
@@ -686,6 +891,7 @@ class HrPayrollController extends Controller
         $payroll->hr_payroll_period_id ??= $period->id;
 
         $payroll->fill([
+            'company_id' => $period->company_id ?: 1,
             'payroll_number' => $payroll->exists
                 ? $payroll->payroll_number
                 : HrPayroll::generateNumber((int) $payroll->hr_payroll_period_id),
@@ -697,7 +903,7 @@ class HrPayrollController extends Controller
             'bank_account' => $employee->bank_account_number,
             'bank_ifsc' => $employee->bank_ifsc,
             'payment_mode' => $employee->payment_mode,
-            'working_days' => max(0, (int) $period->working_days),
+            'working_days' => max(0, (int) $employmentWorkingDays),
             'present_days' => $attendanceSummary['present'],
             'paid_days' => $paidDays,
             'absent_days' => $attendanceSummary['absent'],
@@ -717,18 +923,16 @@ class HrPayrollController extends Controller
         HrPayrollComponent::where('hr_payroll_id', $payroll->id)->delete();
 
         // Calculate earnings
-        $this->calculateEarnings($payroll, $salary, $paidDays, $attendanceSummary);
+        $this->calculateEarnings($payroll, $salary, $paidDays, $attendanceSummary, $calendarDayDivisor);
 
         // Calculate statutory deductions
-        $this->calculateStatutoryDeductions($payroll, $employee);
+        $this->calculateStatutoryDeductions($payroll, $employee, $period);
 
         // Calculate loan and advance deductions
         $this->calculateLoanDeductions($payroll, $employee, $period);
 
-        // Calculate LOP deduction
-        if ($lopDays > 0) {
-            $payroll->lop_deduction = round($perDaySalary * $lopDays, 2);
-        }
+        // Earnings are already prorated by paid days, so LOP remains informational.
+        $payroll->lop_deduction = 0;
 
         // Calculate totals
         $payroll->calculateTotals();
@@ -737,68 +941,177 @@ class HrPayrollController extends Controller
         return $payroll;
     }
 
-    private function getAttendanceSummary(HrEmployee $employee, HrPayrollPeriod $period): array
+    private function getAttendanceSummary(HrEmployee $employee, Carbon $attendanceStart, Carbon $attendanceEnd): array
     {
         $attendances = HrAttendance::where('hr_employee_id', $employee->id)
-            ->whereBetween('attendance_date', [$period->attendance_start, $period->attendance_end])
+            ->whereDate('attendance_date', '>=', $attendanceStart->toDateString())
+            ->whereDate('attendance_date', '<=', $attendanceEnd->toDateString())
+            ->with(['shift', 'overtimeRecord'])
             ->get();
 
+        $presentCount = $attendances->filter(fn(HrAttendance $attendance) => in_array($attendance->status, [
+            AttendanceStatus::PRESENT,
+            AttendanceStatus::LATE,
+            AttendanceStatus::EARLY_LEAVING,
+            AttendanceStatus::LATE_AND_EARLY,
+            AttendanceStatus::ON_DUTY,
+        ], true))->count();
+        $halfDayCount = $attendances->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::HALF_DAY)->count();
+        $weeklyOffCount = $attendances->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::WEEKLY_OFF)->count();
+        $holidayCount = $attendances->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::HOLIDAY)->count();
+        $paidLeaveCount = $attendances
+            ->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::LEAVE
+                && ($attendance->leaveApplication?->leaveType?->is_paid ?? false))
+            ->count();
+        $paidDays = $presentCount + $weeklyOffCount + $holidayCount + $paidLeaveCount + ($halfDayCount * 0.5);
+
         return [
-            'present' => $attendances->whereIn('status', ['present', 'late', 'early_leaving', 'late_and_early', 'on_duty'])->count(),
-            'absent' => $attendances->where('status', 'absent')->count(),
-            'half_day' => $attendances->where('status', 'half_day')->count(),
-            'leave' => $attendances->where('status', 'leave')->count(),
-            'weekly_off' => $attendances->where('status', 'weekly_off')->count(),
-            'holiday' => $attendances->where('status', 'holiday')->count(),
+            'present' => $presentCount,
+            'absent' => $attendances->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::ABSENT)->count(),
+            'half_day' => $halfDayCount,
+            'leave' => $attendances->filter(fn(HrAttendance $attendance) => $attendance->status === AttendanceStatus::LEAVE)->count(),
+            'weekly_off' => $weeklyOffCount,
+            'holiday' => $holidayCount,
             'late' => $attendances->where('late_minutes', '>', 0)->count(),
             'ot_hours' => $attendances->sum('ot_hours_approved'),
-            'paid_days' => $attendances->sum('paid_days'),
+            'ot_attendances' => $attendances->filter(fn (HrAttendance $attendance) => (float) $attendance->ot_hours_approved > 0)->values(),
+            'paid_days' => $paidDays,
         ];
     }
 
-    private function calculateEarnings(HrPayroll $payroll, HrEmployeeSalary $salary, float $paidDays, array $attendance): void
+    private function getPayrollEmploymentWindow(HrEmployee $employee, HrPayrollPeriod $period): array
     {
-        $ratio = $paidDays / 30;
+        $employmentStart = $employee->date_of_joining
+            ? $employee->date_of_joining->copy()->startOfDay()
+            : null;
+
+        if (!$employmentStart) {
+            return [null, null];
+        }
+
+        $windowStart = $employmentStart->greaterThan($period->attendance_start)
+            ? $employmentStart
+            : $period->attendance_start->copy()->startOfDay();
+
+        $windowEnd = $period->attendance_end->copy()->startOfDay();
+
+        if ($employee->date_of_leaving) {
+            $lastWorkingDay = $employee->date_of_leaving->copy()->subDay()->startOfDay();
+
+            if ($lastWorkingDay->lessThan($windowEnd)) {
+                $windowEnd = $lastWorkingDay;
+            }
+        }
+
+        if ($windowEnd->lessThan($windowStart)) {
+            return [null, null];
+        }
+
+        return [$windowStart, $windowEnd];
+    }
+
+    private function calculateEarnings(HrPayroll $payroll, HrEmployeeSalary $salary, float $paidDays, array $attendance, int $calendarDayDivisor): void
+    {
+        $ratio = $paidDays / max(1, $calendarDayDivisor);
 
         // Get component values from employee salary
         $components = $salary->components()->with('salaryComponent')->get();
 
-        foreach ($components as $comp) {
-            $amount = round($comp->monthly_amount * $ratio, 2);
-            $componentType = $comp->salaryComponent->category;
+        if ($components->isEmpty()) {
+            $basicAmount = round(((float) $salary->monthly_basic) * $ratio, 2);
+            $grossAmount = round(((float) $salary->monthly_gross) * $ratio, 2);
+            $otherEarnings = max(0, round($grossAmount - $basicAmount, 2));
 
-            match ($componentType) {
-                'basic' => $payroll->basic = $amount,
-                'hra' => $payroll->hra = $amount,
-                'da' => $payroll->da = $amount,
-                'special_allowance' => $payroll->special_allowance = $amount,
-                'conveyance' => $payroll->conveyance = $amount,
-                'medical' => $payroll->medical = $amount,
-                default => $payroll->other_earnings += $amount,
-            };
+            $payroll->basic = $basicAmount;
+            $payroll->other_earnings = $otherEarnings;
+            $payroll->total_earnings = $grossAmount;
+            $payroll->gross_salary = $grossAmount;
 
-            // Store component detail
-            HrPayrollComponent::updateOrCreate(
-                [
-                    'hr_payroll_id' => $payroll->id,
-                    'hr_salary_component_id' => $comp->hr_salary_component_id,
-                ],
-                [
-                    'component_code' => $comp->salaryComponent->code,
-                    'component_name' => $comp->salaryComponent->name,
-                    'component_type' => $comp->salaryComponent->component_type,
-                    'base_amount' => $comp->monthly_amount,
-                    'calculated_amount' => $amount,
-                    'final_amount' => $amount,
-                    'sort_order' => $comp->salaryComponent->sort_order,
-                ]
-            );
+            if ($basicAmount > 0) {
+                $this->upsertPayrollComponent(
+                    $payroll,
+                    null,
+                    'BASIC',
+                    'Basic Salary',
+                    'earning',
+                    (float) $salary->monthly_basic,
+                    $basicAmount,
+                    1
+                );
+            }
+
+            if ($otherEarnings > 0) {
+                $this->upsertPayrollComponent(
+                    $payroll,
+                    null,
+                    'SPECIAL',
+                    'Other Earnings',
+                    'earning',
+                    max(0, round(((float) $salary->monthly_gross) - ((float) $salary->monthly_basic), 2)),
+                    $otherEarnings,
+                    99
+                );
+            }
+        } else {
+            foreach ($components as $comp) {
+                if ($comp->salaryComponent->component_type !== 'earning') {
+                    continue;
+                }
+
+                $amount = round($comp->monthly_amount * $ratio, 2);
+                $componentCategory = $comp->salaryComponent->category;
+                $componentType = $comp->salaryComponent->component_type;
+
+                match ($componentCategory) {
+                    'basic' => $payroll->basic = $amount,
+                    'hra' => $payroll->hra = $amount,
+                    'da' => $payroll->da = $amount,
+                    'special_allowance' => $payroll->special_allowance = $amount,
+                    'conveyance' => $payroll->conveyance = $amount,
+                    'medical' => $payroll->medical = $amount,
+                    default => $componentType === 'earning' ? $payroll->other_earnings += $amount : null,
+                };
+
+                // Store component detail
+                $this->upsertPayrollComponent(
+                    $payroll,
+                    $comp->hr_salary_component_id,
+                    $comp->salaryComponent->code,
+                    $comp->salaryComponent->name,
+                    $comp->salaryComponent->component_type,
+                    (float) $comp->monthly_amount,
+                    $amount,
+                    (int) $comp->salaryComponent->sort_order
+                );
+            }
         }
 
         // Calculate OT
-        if ($attendance['ot_hours'] > 0) {
-            $hourlyRate = ($payroll->basic / 30) / 8;
-            $payroll->ot_amount = round($hourlyRate * $attendance['ot_hours'] * 1.5, 2);
+        if (($salary->employee?->overtime_applicable ?? $salary->employee()->value('overtime_applicable')) && $attendance['ot_hours'] > 0) {
+            $otAmount = 0.0;
+
+            foreach (($attendance['ot_attendances'] ?? collect()) as $otAttendance) {
+                $hourlyRate = $this->resolveAttendanceOtHourlyRate($payroll, $otAttendance, $calendarDayDivisor);
+                $multiplier = $this->resolveAttendanceOtMultiplier($otAttendance);
+                $rowAmount = round($hourlyRate * (float) $otAttendance->ot_hours_approved * $multiplier, 2);
+                $otAmount += $rowAmount;
+                $this->syncAttendanceOvertimeRecordForPayroll($otAttendance, $payroll, $hourlyRate, $multiplier, $rowAmount);
+            }
+
+            $payroll->ot_amount = round($otAmount, 2);
+
+            if ($payroll->ot_amount > 0) {
+                $this->upsertPayrollComponent(
+                    $payroll,
+                    null,
+                    'OT',
+                    'Overtime',
+                    'earning',
+                    $payroll->ot_amount,
+                    $payroll->ot_amount,
+                    110
+                );
+            }
         }
 
         $payroll->total_earnings = $payroll->basic + $payroll->hra + $payroll->da +
@@ -808,12 +1121,87 @@ class HrPayrollController extends Controller
         $payroll->gross_salary = $payroll->total_earnings;
     }
 
-    private function calculateStatutoryDeductions(HrPayroll $payroll, HrEmployee $employee): void
+    private function resolveAttendanceOtMultiplier(HrAttendance $attendance): float
     {
+        $shift = $attendance->shift;
+        $policy = $attendance->employee?->getApplicableAttendancePolicy($attendance->attendance_date)
+            ?? HrEmployee::query()->find($attendance->hr_employee_id)?->getApplicableAttendancePolicy($attendance->attendance_date);
+
+        if ($attendance->is_holiday || $attendance->is_week_off) {
+            if ($attendance->is_holiday) {
+                return (float) ($policy?->holiday_ot_multiplier ?: $shift?->ot_rate_holiday_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5);
+            }
+
+            return (float) ($policy?->week_off_ot_multiplier ?: $shift?->ot_rate_holiday_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5);
+        }
+
+        return (float) ($policy?->ot_rate_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5);
+    }
+
+    private function resolveAttendanceOtHourlyRate(HrPayroll $payroll, HrAttendance $attendance, int $calendarDayDivisor): float
+    {
+        $policy = $attendance->employee?->getApplicableAttendancePolicy($attendance->attendance_date)
+            ?? HrEmployee::query()->find($attendance->hr_employee_id)?->getApplicableAttendancePolicy($attendance->attendance_date);
+
+        $basis = $policy?->ot_calculation_basis ?? 'basic';
+        if ($basis === 'fixed') {
+            $employee = $attendance->employee ?: ($payroll->relationLoaded('employee') ? $payroll->employee : $payroll->employee()->first());
+            $fixedRate = (float) ($employee?->ot_hourly_rate ?? 0);
+
+            if ($fixedRate <= 0) {
+                throw new \RuntimeException('OT hourly rate is not configured for fixed-basis overtime.');
+            }
+
+            return round($fixedRate, 2);
+        }
+
+        $salary = $payroll->relationLoaded('employeeSalary')
+            ? $payroll->employeeSalary
+            : $payroll->employeeSalary()->first();
+
+        $monthlyBase = $basis === 'gross'
+            ? (float) ($salary?->monthly_gross ?? $payroll->gross_salary)
+            : (float) ($salary?->monthly_basic ?? $payroll->basic);
+
+        return round($monthlyBase / max(1, $calendarDayDivisor) / 8, 2);
+    }
+
+    private function syncAttendanceOvertimeRecordForPayroll(HrAttendance $attendance, HrPayroll $payroll, float $hourlyRate, float $multiplier, float $otAmount): void
+    {
+        HrOvertimeRecord::updateOrCreate(
+            ['hr_attendance_id' => $attendance->id],
+            [
+                'ot_number' => sprintf('OT-%s-%d', optional($attendance->attendance_date)->format('Ymd') ?: now()->format('Ymd'), $attendance->id),
+                'hr_employee_id' => $attendance->hr_employee_id,
+                'ot_date' => optional($attendance->attendance_date)->toDateString() ?: now()->toDateString(),
+                'ot_start_time' => $attendance->last_out ?: now()->startOfDay(),
+                'ot_end_time' => $attendance->last_out ?: now()->startOfDay(),
+                'ot_hours' => (float) $attendance->ot_hours,
+                'approved_hours' => (float) $attendance->ot_hours_approved,
+                'ot_type' => $attendance->is_holiday ? 'holiday' : ($attendance->is_week_off ? 'weekly_off' : 'normal'),
+                'rate_multiplier' => round($multiplier, 2),
+                'hourly_rate' => round($hourlyRate, 2),
+                'ot_amount' => round($otAmount, 2),
+                'status' => (string) ($attendance->ot_status ?: 'approved'),
+                'requested_by' => $attendance->created_by,
+                'requested_at' => $attendance->created_at,
+                'approved_by' => $attendance->ot_approved_by,
+                'approved_at' => $attendance->ot_approved_at,
+                'rejection_reason' => $attendance->ot_status === 'rejected' ? 'Rejected from attendance OT approval' : null,
+                'hr_payroll_id' => $payroll->id,
+                'is_paid' => false,
+            ]
+        );
+    }
+
+    private function calculateStatutoryDeductions(HrPayroll $payroll, HrEmployee $employee, HrPayrollPeriod $period): void
+    {
+        $effectiveDate = $period->period_end?->toDateString() ?: now()->toDateString();
+
         // PF Calculation
         if ($employee->pf_applicable) {
             $pfSlab = HrPfSlab::where('is_active', true)
-                ->where('effective_from', '<=', now())
+                ->where('effective_from', '<=', $effectiveDate)
                 ->orderByDesc('effective_from')
                 ->first();
 
@@ -824,40 +1212,97 @@ class HrPayrollController extends Controller
                 $payroll->eps_employer = round($pfWages * $pfSlab->employer_eps_rate / 100, 0);
                 $payroll->edli_employer = round($pfWages * $pfSlab->employer_edli_rate / 100, 0);
                 $payroll->pf_admin_charges = round($pfWages * ($pfSlab->admin_charges_rate + $pfSlab->edli_admin_rate) / 100, 0);
+
+                if ($payroll->pf_employee > 0) {
+                    $this->upsertPayrollComponent($payroll, null, 'PF_EE', 'Provident Fund (Employee)', 'deduction', $payroll->pf_employee, $payroll->pf_employee, 201);
+                }
             }
         }
 
         // ESI Calculation
         if ($employee->esi_applicable) {
             $esiSlab = HrEsiSlab::where('is_active', true)
-                ->where('effective_from', '<=', now())
+                ->where('effective_from', '<=', $effectiveDate)
                 ->orderByDesc('effective_from')
                 ->first();
 
             if ($esiSlab && $payroll->gross_salary <= $esiSlab->wage_ceiling) {
                 $payroll->esi_employee = round($payroll->gross_salary * $esiSlab->employee_rate / 100, 0);
                 $payroll->esi_employer = round($payroll->gross_salary * $esiSlab->employer_rate / 100, 0);
+
+                if ($payroll->esi_employee > 0) {
+                    $this->upsertPayrollComponent($payroll, null, 'ESI_EE', 'ESI (Employee)', 'deduction', $payroll->esi_employee, $payroll->esi_employee, 202);
+                }
             }
         }
 
         // Professional Tax
         if ($employee->pt_applicable && $employee->pt_state) {
-            $ptSlab = HrProfessionalTaxSlab::where('state_code', $employee->pt_state)
+            $employeeState = mb_strtolower(trim((string) $employee->pt_state));
+            $employeeGender = mb_strtolower((string) ($employee->gender ?? 'all'));
+
+            $ptSlab = HrProfessionalTaxSlab::query()
                 ->where('is_active', true)
+                ->where('effective_from', '<=', $effectiveDate)
+                ->where(function ($query) use ($effectiveDate) {
+                    $query->whereNull('effective_to')
+                        ->orWhere('effective_to', '>=', $effectiveDate);
+                })
                 ->where('salary_from', '<=', $payroll->gross_salary)
                 ->where('salary_to', '>=', $payroll->gross_salary)
-                ->first();
+                ->get()
+                ->first(function (HrProfessionalTaxSlab $slab) use ($employeeState, $employeeGender) {
+                    $slabStateCode = mb_strtolower(trim((string) $slab->state_code));
+                    $slabStateName = mb_strtolower(trim((string) $slab->state_name));
+                    $slabGender = mb_strtolower((string) ($slab->gender ?? 'all'));
+
+                    $stateMatches = $employeeState !== ''
+                        && ($employeeState === $slabStateCode || $employeeState === $slabStateName);
+
+                    $genderMatches = $slabGender === 'all'
+                        || $employeeGender === ''
+                        || $employeeGender === $slabGender;
+
+                    return $stateMatches && $genderMatches;
+                });
 
             if ($ptSlab) {
                 $payroll->professional_tax = $ptSlab->tax_amount;
+
+                if ($payroll->professional_tax > 0) {
+                    $this->upsertPayrollComponent($payroll, null, 'PT', 'Professional Tax', 'deduction', $payroll->professional_tax, $payroll->professional_tax, 203);
+                }
             }
         }
 
-        // TDS would be calculated based on annual projections and declarations
-        // Simplified for now
         if ($employee->tds_applicable) {
-            // TDS calculation logic would go here
-            $payroll->tds = 0;
+            $payroll->tds = $this->calculateMonthlyTds($employee, $payroll, $period);
+
+            if ($payroll->tds > 0) {
+                $this->upsertPayrollComponent($payroll, null, 'TDS', 'Tax Deducted at Source', 'deduction', $payroll->tds, $payroll->tds, 204);
+            }
+        }
+
+        if ($employee->lwf_applicable && $employee->pt_state) {
+            $lwfSlab = HrLwfSlab::query()
+                ->where('state_code', $employee->pt_state)
+                ->where('is_active', true)
+                ->where('effective_from', '<=', $effectiveDate)
+                ->where(function ($query) use ($effectiveDate) {
+                    $query->whereNull('effective_to')
+                        ->orWhere('effective_to', '>=', $effectiveDate);
+                })
+                ->orderByDesc('effective_from')
+                ->first();
+
+            if ($lwfSlab && $this->isLwfApplicableForPeriod($lwfSlab, $period)) {
+                $payroll->lwf_employee = round((float) $lwfSlab->employee_contribution, 2);
+                $payroll->lwf_employer = round((float) $lwfSlab->employer_contribution, 2);
+
+                if ($payroll->lwf_employee > 0) {
+                    $this->upsertPayrollComponent($payroll, null, 'LWF_EE', 'Labour Welfare Fund', 'deduction', $payroll->lwf_employee, $payroll->lwf_employee, 205);
+                }
+            }
         }
     }
 
@@ -873,6 +1318,19 @@ class HrPayrollController extends Controller
         foreach ($loanRepayments as $repayment) {
             $payroll->loan_deduction += $repayment->emi_amount;
             $repayment->update(['hr_payroll_id' => $payroll->id]);
+        }
+
+        if ($payroll->loan_deduction > 0) {
+            $this->upsertPayrollComponent(
+                $payroll,
+                null,
+                'LOAN',
+                'Loan Recovery',
+                'deduction',
+                (float) $payroll->loan_deduction,
+                (float) $payroll->loan_deduction,
+                297
+            );
         }
 
         // Active advances
@@ -891,6 +1349,100 @@ class HrPayrollController extends Controller
             $deduction = min($advance->monthly_deduction, $advance->balance_amount);
             $payroll->advance_deduction += $deduction;
         }
+
+        if ($payroll->advance_deduction > 0) {
+            $this->upsertPayrollComponent(
+                $payroll,
+                null,
+                'ADV',
+                'Advance Recovery',
+                'deduction',
+                (float) $payroll->advance_deduction,
+                (float) $payroll->advance_deduction,
+                298
+            );
+        }
+    }
+
+    private function upsertPayrollComponent(
+        HrPayroll $payroll,
+        ?int $salaryComponentId,
+        string $code,
+        string $name,
+        string $componentType,
+        float $baseAmount,
+        float $finalAmount,
+        int $sortOrder
+    ): void {
+        $salaryComponentId ??= $this->resolvePayrollComponentId($code, $name, $componentType, $sortOrder);
+
+        HrPayrollComponent::updateOrCreate(
+            [
+                'hr_payroll_id' => $payroll->id,
+                'hr_salary_component_id' => $salaryComponentId,
+                'component_code' => $code,
+            ],
+            [
+                'component_name' => $name,
+                'component_type' => $componentType,
+                'base_amount' => $baseAmount,
+                'calculated_amount' => $finalAmount,
+                'final_amount' => $finalAmount,
+                'sort_order' => $sortOrder,
+            ]
+        );
+    }
+
+    private function resolvePayrollComponentId(
+        string $code,
+        string $name,
+        string $componentType,
+        int $sortOrder
+    ): int {
+        $canonicalCode = $code;
+
+        $component = HrSalaryComponent::query()
+            ->where('code', $canonicalCode)
+            ->first();
+
+        if ($component) {
+            return $component->id;
+        }
+
+        $category = match ($canonicalCode) {
+            'BASIC' => 'basic',
+            'HRA' => 'hra',
+            'DA' => 'da',
+            'CONV' => 'conveyance',
+            'MED' => 'medical',
+            'SPECIAL' => 'special_allowance',
+            'OTH' => 'other_earning',
+            'OT' => 'overtime',
+            'PF_EE' => 'pf_employee',
+            'ESI_EE' => 'esi_employee',
+            'PT' => 'professional_tax',
+            'TDS' => 'tds',
+            'LOAN' => 'loan_recovery',
+            'ADV' => 'advance_recovery',
+            'LOP' => 'other_deduction',
+            'ODED' => 'other_deduction',
+            default => $componentType === 'deduction' ? 'other_deduction' : 'other_earning',
+        };
+
+        $component = HrSalaryComponent::query()->create([
+            'code' => $canonicalCode,
+            'name' => $name,
+            'component_type' => $componentType,
+            'category' => $category,
+            'calculation_type' => 'fixed',
+            'default_value' => 0,
+            'sort_order' => $sortOrder,
+            'show_in_payslip' => true,
+            'show_if_zero' => false,
+            'is_active' => true,
+        ]);
+
+        return $component->id;
     }
 
     private function resetCalculatedAmounts(HrPayroll $payroll): void
@@ -971,5 +1523,345 @@ class HrPayrollController extends Controller
 
             $remaining -= $recovery;
         }
+    }
+
+    private function applyLoanRecoveries(HrPayroll $payroll, Carbon $paymentDate): void
+    {
+        $repayments = HrLoanRepayment::query()
+            ->with('loan')
+            ->where('hr_payroll_id', $payroll->id)
+            ->get();
+
+        if ($repayments->isEmpty()) {
+            return;
+        }
+
+        $repaymentsByLoan = $repayments->groupBy('hr_employee_loan_id');
+
+        foreach ($repaymentsByLoan as $loanId => $loanRepayments) {
+            $loan = $loanRepayments->first()?->loan;
+            if (!$loan) {
+                continue;
+            }
+
+            $principalRecovered = 0.0;
+            $interestRecovered = 0.0;
+
+            foreach ($loanRepayments as $repayment) {
+                $principalRecovered += (float) $repayment->principal_amount;
+                $interestRecovered += (float) $repayment->interest_amount;
+
+                $repayment->update([
+                    'status' => 'paid',
+                    'paid_date' => $paymentDate->toDateString(),
+                    'paid_amount' => (float) $repayment->emi_amount,
+                ]);
+            }
+
+            $newPrincipalOutstanding = max(0, (float) $loan->principal_outstanding - $principalRecovered);
+            $newInterestOutstanding = max(0, (float) $loan->interest_outstanding - $interestRecovered);
+            $newEmisPaid = min((int) $loan->tenure_months, (int) $loan->emis_paid + $loanRepayments->count());
+            $newEmisPending = max(0, (int) $loan->tenure_months - $newEmisPaid);
+            $newTotalOutstanding = round($newPrincipalOutstanding + $newInterestOutstanding, 2);
+
+            $loan->update([
+                'principal_outstanding' => $newPrincipalOutstanding,
+                'interest_outstanding' => $newInterestOutstanding,
+                'total_outstanding' => $newTotalOutstanding,
+                'total_recovered' => (float) $loan->total_recovered + $principalRecovered + $interestRecovered,
+                'emis_paid' => $newEmisPaid,
+                'emis_pending' => $newEmisPending,
+                'status' => $newTotalOutstanding <= 0 ? 'closed' : 'active',
+            ]);
+        }
+    }
+
+    private function restoreAdvanceRecoveries(HrPayroll $payroll): void
+    {
+        if ((float) $payroll->advance_deduction <= 0) {
+            return;
+        }
+
+        $remaining = (float) $payroll->advance_deduction;
+        $advances = HrSalaryAdvance::query()
+            ->where('hr_employee_id', $payroll->hr_employee_id)
+            ->where('recovered_amount', '>', 0)
+            ->orderByDesc('recovery_start_date')
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($advances as $advance) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $restore = min($remaining, (float) $advance->recovered_amount);
+            if ($restore <= 0) {
+                continue;
+            }
+
+            $newRecovered = max(0, (float) $advance->recovered_amount - $restore);
+            $newBalance = (float) $advance->balance_amount + $restore;
+
+            $advance->update([
+                'recovered_amount' => $newRecovered,
+                'balance_amount' => $newBalance,
+                'status' => $newBalance <= 0 ? 'closed' : 'recovering',
+            ]);
+
+            $remaining -= $restore;
+        }
+    }
+
+    private function restoreLoanRecoveries(HrPayroll $payroll): void
+    {
+        $repayments = HrLoanRepayment::query()
+            ->with('loan')
+            ->where('hr_payroll_id', $payroll->id)
+            ->get();
+
+        if ($repayments->isEmpty()) {
+            return;
+        }
+
+        $repaymentsByLoan = $repayments->groupBy('hr_employee_loan_id');
+
+        foreach ($repaymentsByLoan as $loanRepayments) {
+            $loan = $loanRepayments->first()?->loan;
+            if (!$loan) {
+                continue;
+            }
+
+            $principalRestore = 0.0;
+            $interestRestore = 0.0;
+
+            foreach ($loanRepayments as $repayment) {
+                $principalRestore += (float) $repayment->principal_amount;
+                $interestRestore += (float) $repayment->interest_amount;
+
+                $repayment->update([
+                    'status' => 'pending',
+                    'paid_date' => null,
+                    'paid_amount' => 0,
+                ]);
+            }
+
+            $newPrincipalOutstanding = (float) $loan->principal_outstanding + $principalRestore;
+            $newInterestOutstanding = (float) $loan->interest_outstanding + $interestRestore;
+            $newEmisPaid = max(0, (int) $loan->emis_paid - $loanRepayments->count());
+            $newEmisPending = min((int) $loan->tenure_months, (int) $loan->emis_pending + $loanRepayments->count());
+
+            $loan->update([
+                'principal_outstanding' => $newPrincipalOutstanding,
+                'interest_outstanding' => $newInterestOutstanding,
+                'total_outstanding' => round($newPrincipalOutstanding + $newInterestOutstanding, 2),
+                'total_recovered' => max(0, (float) $loan->total_recovered - $principalRestore - $interestRestore),
+                'emis_paid' => $newEmisPaid,
+                'emis_pending' => $newEmisPending,
+                'status' => 'active',
+            ]);
+        }
+    }
+
+    private function hasLaterPaidPayroll(HrPayroll $payroll): bool
+    {
+        $period = $payroll->period;
+        if (!$period) {
+            return false;
+        }
+
+        return HrPayroll::query()
+            ->join('hr_payroll_periods as period_lookup', 'period_lookup.id', '=', 'hr_payrolls.hr_payroll_period_id')
+            ->where('hr_payrolls.hr_employee_id', $payroll->hr_employee_id)
+            ->where('hr_payrolls.status', PayrollStatus::PAID->value)
+            ->where('hr_payrolls.id', '!=', $payroll->id)
+            ->where(function ($query) use ($period) {
+                $query->where('period_lookup.year', '>', $period->year)
+                    ->orWhere(function ($nested) use ($period) {
+                        $nested->where('period_lookup.year', $period->year)
+                            ->where('period_lookup.month', '>', $period->month);
+                    });
+            })
+            ->exists();
+    }
+
+    private function refreshPeriodStatus(?int $periodId): void
+    {
+        if (!$periodId) {
+            return;
+        }
+
+        $period = HrPayrollPeriod::query()->lockForUpdate()->find($periodId);
+        if (!$period || $period->status === 'closed') {
+            return;
+        }
+
+        $statuses = HrPayroll::query()
+            ->where('hr_payroll_period_id', $periodId)
+            ->pluck('status')
+            ->map(fn($status) => $status instanceof PayrollStatus ? $status->value : (string) $status)
+            ->all();
+
+        if ($statuses === []) {
+            return;
+        }
+
+        if (count(array_diff($statuses, [PayrollStatus::PAID->value])) === 0) {
+            $period->markAsPaid();
+            return;
+        }
+
+        if (count(array_diff($statuses, [PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])) === 0) {
+            $period->markAsApproved();
+            return;
+        }
+
+        if (count(array_diff($statuses, [PayrollStatus::PROCESSED->value, PayrollStatus::APPROVED->value, PayrollStatus::PAID->value])) === 0) {
+            $period->markAsProcessed();
+        }
+    }
+
+    private function calculateMonthlyTds(HrEmployee $employee, HrPayroll $payroll, HrPayrollPeriod $period): float
+    {
+        $financialYear = $this->financialYearForDate($period->period_end);
+        $declaration = HrTaxDeclaration::query()
+            ->where('hr_employee_id', $employee->id)
+            ->where('financial_year', $financialYear)
+            ->first();
+
+        $regime = (string) ($declaration?->tax_regime ?: $employee->tax_regime ?: 'new');
+        $annualIncome = max(0, round((float) $payroll->gross_salary * 12, 2));
+        $totalExemption = (float) ($declaration?->total_verified ?? $declaration?->total_declared ?? $declaration?->total_exemption ?? 0);
+        $taxableIncome = max(0, $annualIncome - $totalExemption);
+
+        $annualTax = $this->estimateAnnualTaxFromSlabs($taxableIncome, $financialYear, $regime);
+        if ($annualTax <= 0) {
+            return 0;
+        }
+
+        return round($annualTax / 12, 2);
+    }
+
+    private function estimateAnnualTaxFromSlabs(float $taxableIncome, string $financialYear, string $regime): float
+    {
+        $slabs = HrTdsSlab::query()
+            ->whereIn('financial_year', $this->financialYearAliases($financialYear))
+            ->where('regime', $regime)
+            ->where('category', 'general')
+            ->where('is_active', true)
+            ->orderBy('income_from')
+            ->get();
+
+        if ($slabs->isEmpty()) {
+            return $this->estimateAnnualTaxFallback($taxableIncome, $regime);
+        }
+
+        $tax = 0.0;
+        $cessPercent = 0.0;
+
+        foreach ($slabs as $slab) {
+            $slabStart = (float) $slab->income_from;
+            $slabEnd = (float) $slab->income_to;
+            if ($taxableIncome <= $slabStart) {
+                continue;
+            }
+
+            $taxablePortion = min($taxableIncome, $slabEnd) - $slabStart;
+            if ($taxablePortion <= 0) {
+                continue;
+            }
+
+            $tax += $taxablePortion * ((float) $slab->tax_percent / 100);
+            $tax += $taxablePortion * ((float) $slab->surcharge_percent / 100);
+            $cessPercent = max($cessPercent, (float) $slab->cess_percent);
+        }
+
+        if ($tax <= 0) {
+            return 0;
+        }
+
+        return round($tax * (1 + ($cessPercent / 100)), 2);
+    }
+
+    private function estimateAnnualTaxFallback(float $taxableIncome, string $regime): float
+    {
+        if ($taxableIncome <= 300000) {
+            return 0;
+        }
+
+        $tax = 0.0;
+        $slabs = $regime === 'old'
+            ? [
+                [250000, 0],
+                [500000, 5],
+                [1000000, 20],
+                [INF, 30],
+            ]
+            : [
+                [300000, 0],
+                [700000, 5],
+                [1000000, 10],
+                [1200000, 15],
+                [1500000, 20],
+                [INF, 30],
+            ];
+
+        $previous = 0.0;
+        foreach ($slabs as [$limit, $rate]) {
+            if ($taxableIncome <= $previous) {
+                break;
+            }
+
+            $amount = min($taxableIncome, $limit) - $previous;
+            if ($amount > 0) {
+                $tax += $amount * ($rate / 100);
+            }
+
+            $previous = $limit;
+        }
+
+        return round($tax * 1.04, 2);
+    }
+
+    private function isLwfApplicableForPeriod(HrLwfSlab $slab, HrPayrollPeriod $period): bool
+    {
+        return match ((string) $slab->frequency) {
+            'monthly' => true,
+            'half_yearly' => in_array((int) $period->month, [6, 12], true),
+            'annual' => (int) $period->month === 12,
+            default => false,
+        };
+    }
+
+    private function financialYearForDate(Carbon $date): string
+    {
+        $startYear = $date->month >= 4 ? $date->year : $date->year - 1;
+
+        return sprintf('%d-%02d', $startYear, ($startYear + 1) % 100);
+    }
+
+    private function financialYearAliases(string $financialYear): array
+    {
+        if (!preg_match('/^(\d{4})-(\d{2}|\d{4})$/', $financialYear, $matches)) {
+            return [$financialYear];
+        }
+
+        $startYear = (int) $matches[1];
+        $endYear = $matches[2];
+        $endYearFull = strlen($endYear) === 2 ? (int) substr((string) ($startYear + 1), 0, 2) . $endYear : (int) $endYear;
+
+        return array_values(array_unique([
+            sprintf('%d-%02d', $startYear, $endYearFull % 100),
+            sprintf('%d-%d', $startYear, $endYearFull),
+        ]));
+    }
+
+    private function calendarDayDivisor(HrPayrollPeriod $period): int
+    {
+        if ((int) ($period->total_days ?? 0) > 0) {
+            return (int) $period->total_days;
+        }
+
+        return max(1, $period->period_start->diffInDays($period->period_end) + 1);
     }
 }

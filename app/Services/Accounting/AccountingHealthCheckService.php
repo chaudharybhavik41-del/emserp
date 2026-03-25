@@ -7,6 +7,10 @@ use App\Models\Accounting\AccountingPeriodLock;
 use App\Models\Accounting\AccountGroup;
 use App\Models\Company;
 use App\Models\ClientRaBill;
+use App\Models\Hr\HrEmployee;
+use App\Models\Hr\HrEmployeeLoan;
+use App\Models\Hr\HrPayroll;
+use App\Models\Hr\HrSalaryAdvance;
 use App\Models\Party;
 use App\Models\PurchaseBill;
 use App\Models\SubcontractorRaBill;
@@ -31,6 +35,7 @@ class AccountingHealthCheckService
             $this->buildSalesPostingSection($companyId),
             $this->buildSubcontractorPostingSection($companyId),
             $this->buildOperationsPostingSection($companyId),
+            $this->buildHrIntegrationSection($companyId),
             $this->buildPartyLinkSection($companyId),
         ];
 
@@ -179,13 +184,26 @@ class AccountingHealthCheckService
     {
         return [
             'title' => 'Sales / Client RA Posting',
-            'description' => 'Ledger readiness for client RA bills, GST output, and TDS receivable.',
+            'description' => 'Ledger readiness for client billing, GST output, TDS receivable, and material/service revenue splits.',
             'rows' => [
                 $this->accountRow($companyId, 'Output CGST ledger', 'accounting.gst.cgst_output_account_code'),
                 $this->accountRow($companyId, 'Output SGST ledger', 'accounting.gst.sgst_output_account_code'),
                 $this->accountRow($companyId, 'Output IGST ledger', 'accounting.gst.igst_output_account_code'),
                 $this->accountRow($companyId, 'TDS receivable ledger', 'accounting.tds.tds_receivable_account_code'),
                 $this->accountRow($companyId, 'Default sales revenue ledger', 'accounting.sales.default_revenue_code', 'REV-FABRICATION'),
+                $this->accountRow($companyId, 'Fabrication revenue ledger', 'accounting.sales.fabrication_revenue_code', 'REV-FABRICATION'),
+                $this->accountRow($companyId, 'Erection revenue ledger', 'accounting.sales.erection_revenue_code', 'REV-ERECTION'),
+                $this->accountRow($companyId, 'Service revenue ledger', 'accounting.sales.service_revenue_code', 'REV-SERVICE'),
+                $this->accountRow($companyId, 'Supply revenue ledger', 'accounting.sales.supply_revenue_code', 'REV-SUPPLY'),
+                $this->accountRow($companyId, 'Scrap revenue ledger', 'accounting.sales.scrap_revenue_code', 'REV-SCRAP'),
+                [
+                    'label' => 'Material billing posting mode',
+                    'status' => 'ok',
+                    'detail' => Config::get('accounting.sales.material_sales_revenue_only_mode', true)
+                        ? 'Revenue only'
+                        : 'Inventory / COGS required',
+                    'message' => 'Production V2 dispatch still needs reliable cost basis before client material sales can credit inventory and debit COGS safely.',
+                ],
             ],
         ];
     }
@@ -252,6 +270,81 @@ class AccountingHealthCheckService
                     'Stale party ledger links',
                     $this->countStalePartyLedgerLinks($companyId),
                     'Ledger accounts linked to missing party records.',
+                ),
+            ],
+        ];
+    }
+
+    protected function buildHrIntegrationSection(int $companyId): array
+    {
+        return [
+            'title' => 'HR Integration',
+            'description' => 'Ledger readiness and posting integrity for payroll, employee ledgers, loans, and salary advances.',
+            'rows' => [
+                $this->groupRow($companyId, 'Employee ledger group', 'accounting.hr.employee_ledger_group_code'),
+                $this->accountRow($companyId, 'Loan interest income ledger', 'accounting.hr.loan_interest_income_account_code'),
+                $this->accountRow($companyId, 'Salary expense ledger', 'accounting.hr.salary_expense_account_code'),
+                $this->accountRow($companyId, 'Employer contribution expense ledger', 'accounting.hr.employer_contribution_expense_account_code'),
+                $this->accountRow($companyId, 'Salary payable ledger', 'accounting.hr.salary_payable_account_code'),
+                $this->accountRow($companyId, 'PF payable ledger', 'accounting.hr.pf_payable_account_code'),
+                $this->accountRow($companyId, 'ESI payable ledger', 'accounting.hr.esi_payable_account_code'),
+                $this->accountRow($companyId, 'Professional tax payable ledger', 'accounting.hr.professional_tax_payable_account_code'),
+                $this->accountRow($companyId, 'LWF payable ledger', 'accounting.hr.lwf_payable_account_code'),
+                $this->accountRow($companyId, 'TDS payable ledger', 'accounting.tds.tds_payable_account_code'),
+                $this->accountRow($companyId, 'Payroll deductions clearing ledger', 'accounting.hr.other_deductions_account_code'),
+                $this->accountRow($companyId, 'Payroll round off ledger', 'accounting.hr.round_off_account_code'),
+                $this->accountRow($companyId, 'HR bank ledger', 'accounting.hr.bank_account_code'),
+                $this->accountRow($companyId, 'HR cheque ledger', 'accounting.hr.cheque_account_code'),
+                $this->accountRow($companyId, 'HR cash ledger', 'accounting.hr.cash_account_code'),
+                $this->metricRow(
+                    'Missing active employee ledgers',
+                    $this->countEmployeesMissingLedger($companyId),
+                    'Active employees without a linked accounting ledger.'
+                ),
+                $this->metricRow(
+                    'Stale employee ledger links',
+                    $this->countStaleEmployeeLedgerLinks($companyId),
+                    'Ledger accounts linked to missing HR employee records.'
+                ),
+                $this->metricRow(
+                    'Approved / paid payrolls missing accrual posting',
+                    $this->countPayrollsMissingAccrualPosting($companyId),
+                    'Approved or paid payrolls should carry a posted accrual voucher unless intentionally marked not required.'
+                ),
+                $this->metricRow(
+                    'Posted payroll accruals with missing voucher records',
+                    $this->countPayrollsMissingLinkedVoucher($companyId, 'accrual'),
+                    'Payroll says accrual is posted, but the linked voucher record is missing.'
+                ),
+                $this->metricRow(
+                    'Paid payrolls missing payment posting',
+                    $this->countPayrollsMissingPaymentPosting($companyId),
+                    'Paid payrolls should carry a posted payment voucher unless intentionally marked not required.'
+                ),
+                $this->metricRow(
+                    'Posted payroll payments with missing voucher records',
+                    $this->countPayrollsMissingLinkedVoucher($companyId, 'payment'),
+                    'Payroll says payment is posted, but the linked voucher record is missing.'
+                ),
+                $this->metricRow(
+                    'Disbursed loans missing accounting posting',
+                    $this->countLoansMissingDisbursementPosting($companyId),
+                    'Active or disbursed employee loans should carry a posted disbursement voucher.'
+                ),
+                $this->metricRow(
+                    'Posted loan disbursements with missing voucher records',
+                    $this->countLoansMissingLinkedVoucher($companyId),
+                    'Loan says disbursement is posted, but the linked voucher record is missing.'
+                ),
+                $this->metricRow(
+                    'Disbursed advances missing accounting posting',
+                    $this->countAdvancesMissingDisbursementPosting($companyId),
+                    'Recovering or disbursed salary advances should carry a posted disbursement voucher.'
+                ),
+                $this->metricRow(
+                    'Posted advances with missing voucher records',
+                    $this->countAdvancesMissingLinkedVoucher($companyId),
+                    'Salary advance says disbursement is posted, but the linked voucher record is missing.'
                 ),
             ],
         ];
@@ -380,6 +473,153 @@ class AccountingHealthCheckService
                     ->from('parties')
                     ->whereColumn('parties.id', 'accounts.related_model_id');
             })
+            ->count();
+    }
+
+    protected function countEmployeesMissingLedger(int $companyId): int
+    {
+        return HrEmployee::query()
+            ->active()
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->whereDoesntHave('accountingLedger', function ($query) use ($companyId) {
+                $query->where('company_id', $companyId);
+            })
+            ->count();
+    }
+
+    protected function countStaleEmployeeLedgerLinks(int $companyId): int
+    {
+        return Account::query()
+            ->where('company_id', $companyId)
+            ->where('related_model_type', HrEmployee::class)
+            ->whereNotNull('related_model_id')
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('hr_employees')
+                    ->whereColumn('hr_employees.id', 'accounts.related_model_id');
+            })
+            ->count();
+    }
+
+    protected function countPayrollsMissingAccrualPosting(int $companyId): int
+    {
+        return HrPayroll::query()
+            ->whereIn('status', ['approved', 'paid'])
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->where(function ($query) {
+                $query->whereNull('accrual_accounting_status')
+                    ->orWhereIn('accrual_accounting_status', ['pending', 'failed', 'reversed'])
+                    ->orWhere(function ($nested) {
+                        $nested->where('accrual_accounting_status', 'posted')
+                            ->whereNull('accrual_voucher_id');
+                    });
+            })
+            ->count();
+    }
+
+    protected function countPayrollsMissingPaymentPosting(int $companyId): int
+    {
+        return HrPayroll::query()
+            ->where('status', 'paid')
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->where(function ($query) {
+                $query->whereNull('payment_accounting_status')
+                    ->orWhereIn('payment_accounting_status', ['pending', 'failed', 'reversed'])
+                    ->orWhere(function ($nested) {
+                        $nested->where('payment_accounting_status', 'posted')
+                            ->whereNull('payment_voucher_id');
+                    });
+            })
+            ->count();
+    }
+
+    protected function countPayrollsMissingLinkedVoucher(int $companyId, string $stage): int
+    {
+        $statusColumn = $stage . '_accounting_status';
+        $voucherColumn = $stage . '_voucher_id';
+        $relation = $stage . 'Voucher';
+
+        return HrPayroll::query()
+            ->where($statusColumn, 'posted')
+            ->whereNotNull($voucherColumn)
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->whereDoesntHave($relation)
+            ->count();
+    }
+
+    protected function countLoansMissingDisbursementPosting(int $companyId): int
+    {
+        return HrEmployeeLoan::query()
+            ->whereIn('status', ['active', 'disbursed'])
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->where(function ($query) {
+                $query->whereNull('disbursement_accounting_status')
+                    ->orWhereIn('disbursement_accounting_status', ['pending', 'failed', 'reversed'])
+                    ->orWhere(function ($nested) {
+                        $nested->where('disbursement_accounting_status', 'posted')
+                            ->whereNull('disbursement_voucher_id');
+                    });
+            })
+            ->count();
+    }
+
+    protected function countLoansMissingLinkedVoucher(int $companyId): int
+    {
+        return HrEmployeeLoan::query()
+            ->where('disbursement_accounting_status', 'posted')
+            ->whereNotNull('disbursement_voucher_id')
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->whereDoesntHave('disbursementVoucher')
+            ->count();
+    }
+
+    protected function countAdvancesMissingDisbursementPosting(int $companyId): int
+    {
+        return HrSalaryAdvance::query()
+            ->whereIn('status', ['recovering', 'disbursed'])
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->where(function ($query) {
+                $query->whereNull('disbursement_accounting_status')
+                    ->orWhereIn('disbursement_accounting_status', ['pending', 'failed', 'reversed'])
+                    ->orWhere(function ($nested) {
+                        $nested->where('disbursement_accounting_status', 'posted')
+                            ->whereNull('disbursement_voucher_id');
+                    });
+            })
+            ->count();
+    }
+
+    protected function countAdvancesMissingLinkedVoucher(int $companyId): int
+    {
+        return HrSalaryAdvance::query()
+            ->where('disbursement_accounting_status', 'posted')
+            ->whereNotNull('disbursement_voucher_id')
+            ->where(function ($query) use ($companyId) {
+                $query->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            })
+            ->whereDoesntHave('disbursementVoucher')
             ->count();
     }
 }

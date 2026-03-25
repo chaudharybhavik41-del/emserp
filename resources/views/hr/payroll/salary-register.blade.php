@@ -96,6 +96,7 @@
 
                         <th class="text-end">Gross</th>
                         <th class="text-end">Deduct.</th>
+                        <th class="text-end">Round Off</th>
                         <th class="text-end">Net</th>
                     </tr>
                 </thead>
@@ -132,11 +133,12 @@
 
                             <td class="text-end fw-semibold">{{ number_format($p->gross_salary ?? 0, 2) }}</td>
                             <td class="text-end fw-semibold">{{ number_format($p->total_deductions ?? 0, 2) }}</td>
+                            <td class="text-end fw-semibold">{{ number_format($p->round_off ?? 0, 2) }}</td>
                             <td class="text-end fw-bold">{{ number_format($p->net_payable ?? 0, 2) }}</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="24" class="text-center text-muted py-4">No payrolls found.</td>
+                            <td colspan="25" class="text-center text-muted py-4">No payrolls found.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -147,6 +149,7 @@
                             <th colspan="21" class="text-end">Totals</th>
                             <th class="text-end">₹{{ number_format($summary['total_gross'] ?? 0, 2) }}</th>
                             <th class="text-end">₹{{ number_format($summary['total_deductions'] ?? 0, 2) }}</th>
+                            <th class="text-end">₹{{ number_format($summary['total_round_off'] ?? 0, 2) }}</th>
                             <th class="text-end">₹{{ number_format($summary['total_net'] ?? 0, 2) }}</th>
                         </tr>
                     </tfoot>

@@ -67,8 +67,23 @@
                 </div>
             @endif
 
-            <div class="form-check mt-3"><input type="checkbox" class="form-check-input" id="is_active" name="is_active" value="1" @checked(old('is_active', $slab->is_active ?? true))><label class="form-check-label" for="is_active">Active</label></div>
+            <!-- <div class="form-check mt-3"><input type="checkbox" class="form-check-input" id="is_active" name="is_active" value="1" @checked(old('is_active', $slab->is_active ?? true))><label class="form-check-label" for="is_active">Active</label></div> -->
 
+            <div class="form-check mt-3">
+
+    <!-- Always send value -->
+    <input type="hidden" name="is_active" value="0">
+
+    <!-- Checkbox -->
+    <input type="checkbox"
+           class="form-check-input"
+           id="is_active"
+           name="is_active"
+           value="1"
+           {{ old('is_active', isset($slab) ? $slab->is_active : 1) ? 'checked' : '' }}>
+
+    <label class="form-check-label" for="is_active">Active</label>
+</div>
             <div class="mt-3 d-flex gap-2">
                 <button class="btn btn-primary">Save</button>
                 <a href="{{ route('hr.settings.' . $type . '-slabs.index') }}" class="btn btn-outline-secondary">Cancel</a>

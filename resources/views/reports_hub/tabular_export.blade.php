@@ -12,21 +12,22 @@
         $label = $f['label'] ?? $name;
 
         $val = $filters[$name] ?? request()->query($name, $f['default'] ?? null);
-        if ($val === null || $val === '') continue;
+        if ($val === null || $val === '')
+            continue;
 
         // if select, map to label
         if (($f['type'] ?? '') === 'select') {
             $mapped = null;
             foreach (($f['options'] ?? []) as $opt) {
-                if ((string)($opt['value'] ?? '') === (string)$val) {
-                    $mapped = (string)($opt['label'] ?? $val);
+                if ((string) ($opt['value'] ?? '') === (string) $val) {
+                    $mapped = (string) ($opt['label'] ?? $val);
                     break;
                 }
             }
             $val = $mapped ?? $val;
         }
 
-        $filterSummary[] = [$label, (string)$val];
+        $filterSummary[] = [$label, (string) $val];
     }
 @endphp
 
@@ -48,11 +49,13 @@
             </div>
 
             <div class="no-print" style="text-align:right;">
-                <a href="{{ url()->previous() }}" style="text-decoration:none; border:1px solid #e5e7eb; padding:6px 10px; border-radius:6px; color:#111827;">
+                <a href="{{ url()->previous() }}"
+                    style="text-decoration:none; border:1px solid #e5e7eb; padding:6px 10px; border-radius:6px; color:#111827;">
                     Back
                 </a>
                 @if(($exportType ?? '') === 'print')
-                    <a href="#" onclick="window.print(); return false;" style="text-decoration:none; border:1px solid #e5e7eb; padding:6px 10px; border-radius:6px; margin-left:6px; color:#111827;">
+                    <a href="#" onclick="window.print(); return false;"
+                        style="text-decoration:none; border:1px solid #e5e7eb; padding:6px 10px; border-radius:6px; margin-left:6px; color:#111827;">
                         Print
                     </a>
                 @endif
@@ -64,6 +67,14 @@
                 <strong>Filters:</strong>
                 @foreach($filterSummary as $pair)
                     <span class="badge">{{ $pair[0] }}: {{ $pair[1] }}</span>
+                @endforeach
+            </div>
+        @endif
+
+        @if(method_exists($report, 'headerData') && $hData = $report->headerData($filters))
+            <div class="rpt-meta" style="margin-top:8px; padding-top:8px; border-top:1px dashed #e5e7eb;">
+                @foreach($hData as $label => $val)
+                    <span style="margin-right:20px;"><strong>{{ $label }}:</strong> {{ $val }}</span>
                 @endforeach
             </div>
         @endif
@@ -83,43 +94,43 @@
     <div class="{{ $cls }}">
         <table class="rpt-table">
             <thead>
-            <tr>
-                @foreach($columns as $c)
-                    @php
-                        $width = $c['width'] ?? null;
-                        $style = $width ? ('width:' . $width . ';') : '';
-                        $align = $c['align'] ?? null;
-                        $thClass = trim(($align === 'right' ? 'text-end' : ($align === 'center' ? 'text-center' : '')));
-                    @endphp
-                    <th class="{{ $thClass }}" style="{{ $style }}">{{ $c['label'] ?? '' }}</th>
-                @endforeach
-            </tr>
-            </thead>
-            <tbody>
-            @forelse($rows as $row)
                 <tr>
                     @foreach($columns as $c)
                         @php
+                            $width = $c['width'] ?? null;
+                            $style = $width ? ('width:' . $width . ';') : '';
                             $align = $c['align'] ?? null;
-                            $tdClass = trim(($align === 'right' ? 'text-end' : ($align === 'center' ? 'text-center' : '')));
-                            $val = $report->resolveValue($c, $row, false);
+                            $thClass = trim(($align === 'right' ? 'text-end' : ($align === 'center' ? 'text-center' : '')));
                         @endphp
-                        <td class="{{ $tdClass }}">
-                            @if(is_string($val) && $val !== '')
-                                {!! nl2br(e($val)) !!}
-                            @else
-                                {{ $val }}
-                            @endif
-                        </td>
+                        <th class="{{ $thClass }}" style="{{ $style }}">{{ $c['label'] ?? '' }}</th>
                     @endforeach
                 </tr>
-            @empty
-                <tr>
-                    <td colspan="{{ count($columns) }}" class="text-center text-muted" style="padding: 18px;">
-                        No data found for selected filters.
-                    </td>
-                </tr>
-            @endforelse
+            </thead>
+            <tbody>
+                @forelse($rows as $row)
+                    <tr>
+                        @foreach($columns as $c)
+                            @php
+                                $align = $c['align'] ?? null;
+                                $tdClass = trim(($align === 'right' ? 'text-end' : ($align === 'center' ? 'text-center' : '')));
+                                $val = $report->resolveValue($c, $row, false);
+                            @endphp
+                            <td class="{{ $tdClass }}">
+                                @if(is_string($val) && $val !== '')
+                                    {!! nl2br(e($val)) !!}
+                                @else
+                                    {{ $val }}
+                                @endif
+                            </td>
+                        @endforeach
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="{{ count($columns) }}" class="text-center text-muted" style="padding: 18px;">
+                            No data found for selected filters.
+                        </td>
+                    </tr>
+                @endforelse
             </tbody>
         </table>
     </div>

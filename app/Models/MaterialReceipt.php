@@ -16,8 +16,8 @@ class MaterialReceipt extends Model
     protected $guarded = [];
 
     protected $casts = [
-        'receipt_date'       => 'date',
-        'invoice_date'       => 'date',
+        'receipt_date' => 'date',
+        'invoice_date' => 'date',
         'is_client_material' => 'boolean',
     ];
 
@@ -50,8 +50,8 @@ class MaterialReceipt extends Model
     {
         return $this->morphMany(Attachment::class, 'attachable');
     }
-  
-  	public function purchaseOrder(): BelongsTo
+
+    public function purchaseOrder(): BelongsTo
     {
         return $this->belongsTo(PurchaseOrder::class, 'purchase_order_id');
     }

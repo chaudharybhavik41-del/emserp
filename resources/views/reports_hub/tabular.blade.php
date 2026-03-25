@@ -11,6 +11,18 @@
         @if($report->description())
             <div class="text-muted small">{{ $report->description() }}</div>
         @endif
+        @if(method_exists($report, 'headerData') && $hData = $report->headerData($filters ?? []))
+            <div class="mt-2 py-1 px-2 bg-light border-start border-4 border-primary rounded-1">
+                <div class="d-flex flex-wrap gap-3">
+                    @foreach($hData as $label => $val)
+                        <div class="small">
+                            <span class="text-muted">{{ $label }}:</span>
+                            <span class="fw-semibold">{{ $val }}</span>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
     </div>
 
     @include('reports_hub.partials.actions', ['report' => $report])

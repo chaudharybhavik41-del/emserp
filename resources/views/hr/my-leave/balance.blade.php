@@ -12,6 +12,11 @@
         </div>
 
         <div class="d-flex gap-2">
+            @if(\Illuminate\Support\Facades\Route::has('hr.my.workspace'))
+                <a href="{{ route('hr.my.workspace', 'leave') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-person-vcard me-1"></i> My HR Workspace
+                </a>
+            @endif
             <a href="{{ route('hr.my.leave.index') }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left me-1"></i> Back to My Leave
             </a>

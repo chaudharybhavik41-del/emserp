@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\ProductionV2\ProductionAssembly;
 use App\Models\ProductionV2\ProductionAssemblyPartRequirement;
+use App\Models\ProductionV2\ProductionDispatch;
 use App\Models\ProductionV2\ProductionInspectionEvent;
 use App\Models\ProductionV2\ProductionOperationEvent;
 use App\Models\ProductionV2\ProductionPartDefinition;
@@ -56,6 +57,7 @@ class ProductionV2WorkbenchController extends Controller
             'rework_events' => ProductionReworkEvent::query()->where('project_id', $project->id)->count(),
             'trial_assemblies' => ProductionTrialAssembly::query()->where('project_id', $project->id)->count(),
             'operation_events' => ProductionOperationEvent::query()->where('project_id', $project->id)->count(),
+            'dispatches' => ProductionDispatch::query()->where('project_id', $project->id)->count(),
             'dprs' => $this->dprManager->dprQuery($project)->count(),
         ];
 
@@ -141,6 +143,52 @@ class ProductionV2WorkbenchController extends Controller
             ->filter()
             ->values();
 
+        $alreadyDispatchedMap = ProductionDispatch::query()
+            ->where('project_id', $project->id)
+            ->whereIn('status', ['draft', 'finalized'])
+            ->join('production_v2_dispatch_lines', 'production_v2_dispatch_lines.dispatch_id', '=', 'production_v2_dispatches.id')
+            ->groupBy('production_v2_dispatch_lines.assembly_id')
+            ->selectRaw('production_v2_dispatch_lines.assembly_id as assembly_id, SUM(production_v2_dispatch_lines.qty) as qty_sum')
+            ->pluck('qty_sum', 'assembly_id');
+
+        $openReworkCounts = ProductionReworkEvent::query()
+            ->where('project_id', $project->id)
+            ->whereIn('final_result', ['pending', 'failed', 'reoffer', 'hold'])
+            ->whereNotNull('assembly_id')
+            ->groupBy('assembly_id')
+            ->selectRaw('assembly_id, COUNT(*) as total_rows')
+            ->pluck('total_rows', 'assembly_id');
+
+        $dispatchReadyRows = $assembliesWithCounts
+            ->map(function (ProductionAssembly $assembly) use ($alreadyDispatchedMap, $openReworkCounts) {
+                if ($assembly->routeSteps->isEmpty()) {
+                    return null;
+                }
+
+                $next = $this->routeProgressService->nextAssemblyStep($assembly);
+                if ($next !== null) {
+                    return null;
+                }
+
+                if ((int) ($openReworkCounts[$assembly->id] ?? 0) > 0) {
+                    return null;
+                }
+
+                $alreadyDispatchedQty = (float) ($alreadyDispatchedMap[$assembly->id] ?? 0);
+                $remainingQty = max(0.0, (float) $assembly->planned_qty - $alreadyDispatchedQty);
+                if ($remainingQty <= 0.0001) {
+                    return null;
+                }
+
+                return [
+                    'assembly' => $assembly,
+                    'remaining_qty' => $remainingQty,
+                    'already_dispatched_qty' => $alreadyDispatchedQty,
+                ];
+            })
+            ->filter()
+            ->values();
+
         $exceptionSummary = [
             'shortages' => $shortageRows->count(),
             'missing_fitup' => $assemblyNextSteps->where('step.operation_code', 'fitup')->count(),
@@ -153,6 +201,7 @@ class ProductionV2WorkbenchController extends Controller
                 ->whereIn('final_result', ['pending', 'failed', 'reoffer', 'hold'])
                 ->count(),
             'part_route_pending' => $partRouteRows->count(),
+            'dispatch_ready' => $dispatchReadyRows->count(),
         ];
 
         $missingStageRows = $assemblyNextSteps->take(12);
@@ -209,6 +258,7 @@ class ProductionV2WorkbenchController extends Controller
             'latestParts' => $latestParts,
             'latestAssemblies' => $latestAssemblies,
             'latestDprs' => $latestDprs,
+            'dispatchReadyRows' => $dispatchReadyRows->take(8),
         ]);
     }
 

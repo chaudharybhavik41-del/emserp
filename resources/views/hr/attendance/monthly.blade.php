@@ -133,9 +133,10 @@
                                                 'HO' => 'bg-primary text-white',
                                                 'LT' => 'bg-orange',
                                                 'OD' => 'bg-purple text-white',
+                                                'NA' => 'text-muted bg-light',
                                                 default => '',
                                             };
-                                            $title = $dayData['in'] ?? '';
+                                            $title = $dayData['title'] ?? ($dayData['in'] ?? '');
                                             if (isset($dayData['out'])) $title .= ' - ' . $dayData['out'];
                                         @endphp
                                         <td class="text-center {{ $bgClass }}" title="{{ $title }}" style="cursor: pointer;">
@@ -207,7 +208,7 @@
                 <div class="card text-center">
                     <div class="card-body py-3">
                         <div class="text-primary fs-4 fw-bold">{{ number_format($totalOT, 1) }}</div>
-                        <small class="text-muted">OT Hours</small>
+                        <small class="text-muted">Approved OT Hours</small>
                     </div>
                 </div>
             </div>

@@ -5,6 +5,7 @@ namespace App\Models\Hr;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class HrSalaryComponent extends Model
 {
@@ -66,7 +67,7 @@ class HrSalaryComponent extends Model
             'hr_salary_component_id',
             'hr_salary_structure_id'
         )
-        ->withPivot(['calculation_type', 'calculation_value', 'percentage', 'based_on', 'is_active'])
+        ->withPivot(['calculation_type', 'value', 'percentage', 'formula', 'min_value', 'max_value', 'is_mandatory', 'sort_order', 'is_active'])
         ->withTimestamps();
     }
 
@@ -74,6 +75,16 @@ class HrSalaryComponent extends Model
     public function structures(): BelongsToMany
     {
         return $this->salaryStructures();
+    }
+
+    public function employeeSalaryComponents(): HasMany
+    {
+        return $this->hasMany(HrEmployeeSalaryComponent::class, 'hr_salary_component_id');
+    }
+
+    public function payrollComponents(): HasMany
+    {
+        return $this->hasMany(HrPayrollComponent::class, 'hr_salary_component_id');
     }
 
     // ==================== SCOPES ====================

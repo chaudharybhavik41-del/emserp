@@ -649,12 +649,13 @@ class HrLeaveController extends Controller
             ->pluck('holiday_date')
             ->map(fn($d) => Carbon::parse($d)->format('Y-m-d'))
             ->toArray();
+        $employee = HrEmployee::find($employeeId);
 
         $days = 0;
 
         foreach (CarbonPeriod::create($start, $end) as $date) {
-            // Skip weekends (assuming Sunday is weekly off)
-            if ($date->isSunday()) {
+            // Skip employee-specific weekly offs
+            if ($employee && $employee->isWeeklyOffOn($date)) {
                 continue;
             }
 

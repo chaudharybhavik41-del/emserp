@@ -45,7 +45,9 @@ class PurchaseOrderRegisterReport extends BaseTabularReport
     public function filters(Request $request): array
     {
         $projects = DB::table('projects')->orderBy('name')->limit(300)->get(['id', 'code', 'name']);
-        $suppliers = DB::table('parties')->where('is_supplier', 1)->orderBy('name')->limit(600)->get(['id', 'name']);
+        $suppliers = DB::table('parties')
+            ->where('is_supplier', 1)->orWhere('is_contractor', 1)
+            ->orderBy('name')->limit(600)->get(['id', 'name']);
 
         $statusOptions = DB::table('purchase_orders')
             ->select('status')
@@ -67,7 +69,7 @@ class PurchaseOrderRegisterReport extends BaseTabularReport
                 ])->all(),
             ],
             [
-                'name' => 'supplier_id', 'label' => 'Supplier', 'type' => 'select', 'col' => 3,
+                'name' => 'supplier_id', 'label' => 'Supplier/Contractor', 'type' => 'select', 'col' => 3,
                 'options' => collect($suppliers)->map(fn ($s) => ['value' => $s->id, 'label' => $s->name])->all(),
             ],
             [
@@ -84,7 +86,7 @@ class PurchaseOrderRegisterReport extends BaseTabularReport
             ['label' => 'PO No', 'value' => 'po_number', 'w' => '14%'],
             ['label' => 'PO Date', 'value' => 'po_date', 'w' => '9%'],
             ['label' => 'Project', 'value' => fn ($r) => trim(($r->project_code ? $r->project_code . ' - ' : '') . ($r->project_name ?? '')), 'w' => '22%'],
-            ['label' => 'Supplier', 'value' => 'supplier_name', 'w' => '16%'],
+            ['label' => 'Supplier/Contractor', 'value' => 'supplier_name', 'w' => '16%'],
             ['label' => 'Indent', 'value' => 'indent_code', 'w' => '10%'],
             ['label' => 'RFQ', 'value' => 'rfq_code', 'w' => '10%'],
             ['label' => 'Status', 'value' => fn ($r) => strtoupper((string) $r->status), 'w' => '8%'],
@@ -102,7 +104,7 @@ class PurchaseOrderRegisterReport extends BaseTabularReport
 
     public function query(array $filters): QueryBuilder
     {
-        $q = DB::table('purchase_orders as po')
+        $q1 = DB::table('purchase_orders as po')
             ->leftJoin('parties as s', 's.id', '=', 'po.vendor_party_id')
             ->leftJoin('projects as p', 'p.id', '=', 'po.project_id')
             ->leftJoin('purchase_indents as pi', 'pi.id', '=', 'po.purchase_indent_id')
@@ -119,34 +121,59 @@ class PurchaseOrderRegisterReport extends BaseTabularReport
                 'p.name as project_name',
                 'pi.code as indent_code',
                 'r.code as rfq_code',
+                'po.vendor_party_id as supplier_id',
+                'po.project_id',
             ]);
 
+        $q2 = DB::table('subcontractor_work_orders as wo')
+            ->leftJoin('parties as s', 's.id', '=', 'wo.subcontractor_id')
+            ->leftJoin('projects as p', 'p.id', '=', 'wo.project_id')
+            ->select([
+                'wo.id',
+                'wo.work_order_number as po_number',
+                'wo.work_order_date as po_date',
+                DB::raw('NULL as expected_delivery_date'),
+                'wo.status',
+                'wo.total_amount',
+                's.name as supplier_name',
+                'p.code as project_code',
+                'p.name as project_name',
+                DB::raw('NULL as indent_code'),
+                DB::raw('NULL as rfq_code'),
+                'wo.subcontractor_id as supplier_id',
+                'wo.project_id',
+            ]);
+
+        $query = DB::table(DB::raw("({$q1->toSql()} UNION {$q2->toSql()}) AS combined"))
+            ->mergeBindings($q1)
+            ->mergeBindings($q2);
+
         if (!empty($filters['from_date'])) {
-            $q->whereDate('po.po_date', '>=', $filters['from_date']);
+            $query->whereDate('po_date', '>=', $filters['from_date']);
         }
         if (!empty($filters['to_date'])) {
-            $q->whereDate('po.po_date', '<=', $filters['to_date']);
+            $query->whereDate('po_date', '<=', $filters['to_date']);
         }
         if (!empty($filters['project_id'])) {
-            $q->where('po.project_id', $filters['project_id']);
+            $query->where('project_id', $filters['project_id']);
         }
         if (!empty($filters['supplier_id'])) {
-            $q->where('po.vendor_party_id', $filters['supplier_id']);
+            $query->where('supplier_id', $filters['supplier_id']);
         }
         if (!empty($filters['status'])) {
-            $q->where('po.status', $filters['status']);
+            $query->where('status', $filters['status']);
         }
         if (!empty($filters['q'])) {
             $term = trim((string) $filters['q']);
-            $q->where(function ($sub) use ($term) {
-                $sub->where('po.code', 'like', "%{$term}%")
-                    ->orWhere('s.name', 'like', "%{$term}%")
-                    ->orWhere('pi.code', 'like', "%{$term}%")
-                    ->orWhere('r.code', 'like', "%{$term}%");
+            $query->where(function ($sub) use ($term) {
+                $sub->where('po_number', 'like', "%{$term}%")
+                    ->orWhere('supplier_name', 'like', "%{$term}%")
+                    ->orWhere('indent_code', 'like', "%{$term}%")
+                    ->orWhere('rfq_code', 'like', "%{$term}%");
             });
         }
 
-        return $q;
+        return $query;
     }
 
     public function totals(EloquentBuilder|QueryBuilder $query, array $filters): array

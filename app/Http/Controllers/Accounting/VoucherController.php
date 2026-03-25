@@ -200,8 +200,10 @@ class VoucherController extends Controller
 
     protected function createViewPayload(): array
     {
-        $accounts    = Account::with('group')->orderBy('name')->get();
-        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
+$accounts = Account::with('group')
+    ->where('is_active', '!=', 0)
+    ->orderBy('name')
+    ->get();        $contraAccountIds = $this->resolveContraAccountIdsFromCollection($accounts);
 
         $costCenters = CostCenter::orderBy('name')->get();
         $projects    = Project::orderBy('code')->orderBy('name')->get(['id', 'code', 'name']);
@@ -308,7 +310,7 @@ class VoucherController extends Controller
         ));
     }
 
-    public function create()
+    public function create(Request $request)
     {
         return view('accounting.vouchers.create', array_merge(
             $this->createViewPayload(),
@@ -316,7 +318,7 @@ class VoucherController extends Controller
                 'pageTitle' => 'Create Voucher',
                 'formAction' => route('accounting.vouchers.store'),
                 'cancelRoute' => route('accounting.vouchers.index'),
-                'fixedVoucherType' => null,
+                'fixedVoucherType' => $request->get('type'),
             ]
         ));
     }

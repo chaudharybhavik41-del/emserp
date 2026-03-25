@@ -91,10 +91,18 @@
                                     <option value="overtime" {{ old('category', $component->category ?? '') == 'overtime' ? 'selected' : '' }}>Overtime</option>
                                     <option value="bonus" {{ old('category', $component->category ?? '') == 'bonus' ? 'selected' : '' }}>Bonus</option>
                                     <option value="pf" {{ old('category', $component->category ?? '') == 'pf' ? 'selected' : '' }}>Provident Fund</option>
+                                    <option value="pf_employee" {{ old('category', $component->category ?? '') == 'pf_employee' ? 'selected' : '' }}>Provident Fund (Employee)</option>
+                                    <option value="pf_employer" {{ old('category', $component->category ?? '') == 'pf_employer' ? 'selected' : '' }}>Provident Fund (Employer)</option>
                                     <option value="esi" {{ old('category', $component->category ?? '') == 'esi' ? 'selected' : '' }}>ESI</option>
+                                    <option value="esi_employee" {{ old('category', $component->category ?? '') == 'esi_employee' ? 'selected' : '' }}>ESI (Employee)</option>
+                                    <option value="esi_employer" {{ old('category', $component->category ?? '') == 'esi_employer' ? 'selected' : '' }}>ESI (Employer)</option>
                                     <option value="professional_tax" {{ old('category', $component->category ?? '') == 'professional_tax' ? 'selected' : '' }}>Professional Tax</option>
                                     <option value="tds" {{ old('category', $component->category ?? '') == 'tds' ? 'selected' : '' }}>TDS</option>
                                     <option value="loan" {{ old('category', $component->category ?? '') == 'loan' ? 'selected' : '' }}>Loan</option>
+                                    <option value="loan_recovery" {{ old('category', $component->category ?? '') == 'loan_recovery' ? 'selected' : '' }}>Loan Recovery</option>
+                                    <option value="advance_recovery" {{ old('category', $component->category ?? '') == 'advance_recovery' ? 'selected' : '' }}>Advance Recovery</option>
+                                    <option value="other_earning" {{ old('category', $component->category ?? '') == 'other_earning' ? 'selected' : '' }}>Other Earning</option>
+                                    <option value="other_deduction" {{ old('category', $component->category ?? '') == 'other_deduction' ? 'selected' : '' }}>Other Deduction</option>
                                     <option value="gratuity" {{ old('category', $component->category ?? '') == 'gratuity' ? 'selected' : '' }}>Gratuity</option>
                                     <option value="other" {{ old('category', $component->category ?? '') == 'other' ? 'selected' : '' }}>Other</option>
                                 </select>

@@ -94,7 +94,7 @@
         <div class="col-md-3">
             <div class="card bg-info text-white">
                 <div class="card-body">
-                    <h6>Total OT Hours</h6>
+                    <h6>Approved OT Hours</h6>
                     <h3 class="mb-0">{{ number_format($totalOT, 1) }}</h3>
                 </div>
             </div>
@@ -123,7 +123,7 @@
                             <th class="text-center">W/O</th>
                             <th class="text-center">Holiday</th>
                             <th class="text-center">Late</th>
-                            <th class="text-center">OT Hrs</th>
+                            <th class="text-center">Approved OT Hrs</th>
                             <th class="text-center">Paid Days</th>
                         </tr>
                     </thead>

@@ -1,9 +1,11 @@
 @if(($bill->status ?? null) === 'posted' && empty($bill->reversal_voucher_id) && empty($bill->reversed_at))
-    <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#reversePurchaseBillModal">
-        <i class="bi bi-arrow-counterclockwise"></i> Reverse Bill
-    </button>
+    @if(auth()->check() && auth()->user()->roles->contains('id', 10))
+        <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#reversePurchaseBillModal">
+            <i class="bi bi-arrow-counterclockwise"></i> Reverse Bill
+        </button>
+    @endif
 
-    <div class="modal fade" id="reversePurchaseBillModal" tabindex="-1" aria-labelledby="reversePurchaseBillModalLabel" aria-hidden="true">
+    <div class="modal fade" id="reversePurchaseBillModal" tabindex="-1" aria-labelledby="reversePurchaseBillModalLabel" aria-hidden="true" data-bs-backdrop="false">
         <div class="modal-dialog">
             <div class="modal-content border-warning">
                 <div class="modal-header bg-warning-subtle">

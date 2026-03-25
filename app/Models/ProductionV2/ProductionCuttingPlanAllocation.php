@@ -14,6 +14,7 @@ class ProductionCuttingPlanAllocation extends Model
 
     protected $fillable = [
         'cutting_plan_id',
+        'cutting_plan_plate_id',
         'part_definition_id',
         'planned_qty',
         'planned_blank_ref',
@@ -40,6 +41,11 @@ class ProductionCuttingPlanAllocation extends Model
     public function cuttingPlan()
     {
         return $this->belongsTo(ProductionCuttingPlan::class, 'cutting_plan_id');
+    }
+
+    public function plannedPlate()
+    {
+        return $this->belongsTo(ProductionCuttingPlanPlate::class, 'cutting_plan_plate_id');
     }
 
     public function partDefinition()

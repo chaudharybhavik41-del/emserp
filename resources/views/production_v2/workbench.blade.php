@@ -25,6 +25,9 @@
         <a href="{{ route('projects.production-v2.cut-batches.index', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-bounding-box-circles me-1"></i>Cut Batches
         </a>
+        <a href="{{ route('projects.production-v2.dispatches.index', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-truck me-1"></i>Dispatch
+        </a>
         <a href="{{ route('projects.production-v2.fitups.index', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-bezier2 me-1"></i>Fit-ups
         </a>
@@ -129,6 +132,14 @@
                 </div>
             </div>
         </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="card h-100 border-success-subtle">
+                <div class="card-body">
+                    <div class="small text-uppercase text-success mb-1">Dispatch Ready</div>
+                    <div class="display-6 mb-0">{{ number_format($exceptionSummary['dispatch_ready']) }}</div>
+                </div>
+            </div>
+        </div>
 
         <div class="col-12 col-md-4">
             <div class="card h-100">
@@ -215,6 +226,14 @@
                 <div class="card-body">
                     <div class="small text-uppercase text-body-secondary mb-1">Trial Assemblies</div>
                     <div class="display-6 mb-0">{{ number_format($summary['trial_assemblies']) }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small text-uppercase text-body-secondary mb-1">Dispatches</div>
+                    <div class="display-6 mb-0">{{ number_format($summary['dispatches']) }}</div>
                 </div>
             </div>
         </div>
@@ -422,6 +441,48 @@
                                 </tr>
                             @empty
                                 <tr><td colspan="3" class="text-center text-muted py-4">No pending part route steps detected.</td></tr>
+                            @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Dispatch Ready</span>
+                    <a href="{{ route('projects.production-v2.dispatches.create', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-success">Create Dispatch</a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Assembly</th>
+                                    <th>Route</th>
+                                    <th class="text-end">Remaining Qty</th>
+                                    <th class="text-end">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @forelse($dispatchReadyRows as $row)
+                                <tr>
+                                    <td>
+                                        <a href="{{ route('projects.production-v2.assemblies.show', ['project' => $project->id, 'assembly' => $row['assembly']->id]) }}">
+                                            {{ $row['assembly']->assembly_code }}
+                                        </a>
+                                        <div class="small text-body-secondary">{{ $row['assembly']->assembly_name }}</div>
+                                    </td>
+                                    <td>{{ $row['assembly']->routeTemplate?->template_name ?: 'Route complete' }}</td>
+                                    <td class="text-end">{{ number_format((float) $row['remaining_qty'], 3) }}</td>
+                                    <td class="text-end">
+                                        <a href="{{ route('projects.production-v2.dispatches.create', ['project' => $project->id]) }}" class="btn btn-sm btn-outline-success">Dispatch</a>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="4" class="text-center text-muted py-4">No assemblies are dispatch-ready yet.</td></tr>
                             @endforelse
                             </tbody>
                         </table>

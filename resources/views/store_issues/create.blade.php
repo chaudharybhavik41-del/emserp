@@ -309,11 +309,14 @@
         $stockItemsForJs[] = [
             'id' => $stock->id,
             'item_id' => $stock->item_id,
+            'item_code' => $stock->item->code ?? '',
             'item_name' => $stock->item->name ?? ('Item #' . $stock->item_id),
             'uom' => $stock->item->uom->name ?? '',
             'available' => (float) ($stock->weight_kg_available ?? 0),
             'project_code' => $stock->project->code ?? null,
             'brand' => trim((string) ($stock->brand ?? '')),
+            'source_reference' => trim((string) ($stock->source_reference ?? '')),
+            'source_type' => trim((string) ($stock->source_type ?? '')),
         ];
     }
                                                             @endphp
@@ -424,10 +427,15 @@
                                 if (brandNorm && normBrand(s.brand) !== brandNorm) return;
 
                                 let label = s.item_name;
+                                if (s.item_code) {
+                                    label = s.item_code + ' - ' + label;
+                                }
 
                                 if (s.brand) label += ' | Brand: ' + s.brand;
                                 if (s.project_code) label += ' [' + s.project_code + ']';
                                 else label += ' [GENERAL]';
+                                if (s.source_reference) label += ' | Ref: ' + s.source_reference;
+                                if (s.source_type) label += ' | Source: ' + String(s.source_type).toUpperCase();
 
                                 label += ' - Avl: ' + (s.available || 0).toFixed(3) + ' ' + (s.uom || '');
 

@@ -1,63 +1,54 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-
+use App\Http\Controllers\Hr\HrAdvanceController;
 // Dashboard & Core
-use App\Http\Controllers\Hr\HrDashboardController;
-use App\Http\Controllers\Hr\HrEmployeeController;
-
+use App\Http\Controllers\Hr\HrAttendanceController;
+use App\Http\Controllers\Hr\HrAttendancePolicyController;
+use App\Http\Controllers\Hr\HrCandidateController;
 // Self Service
-use App\Http\Controllers\Hr\HrMyLeaveController;
-
+use App\Http\Controllers\Hr\HrDashboardController;
 // Masters
 use App\Http\Controllers\Hr\HrDesignationController;
-use App\Http\Controllers\Hr\HrGradeController;
-use App\Http\Controllers\Hr\HrShiftController;
-use App\Http\Controllers\Hr\HrWorkLocationController;
-use App\Http\Controllers\Hr\HrAttendancePolicyController;
-use App\Http\Controllers\Hr\HrLeaveTypeController;
-use App\Http\Controllers\Hr\HrLeavePolicyController;
-use App\Http\Controllers\Hr\HrHolidayCalendarController;
-use App\Http\Controllers\Hr\HrHolidayController;
-use App\Http\Controllers\Hr\HrSalaryComponentController;
-use App\Http\Controllers\Hr\HrSalaryStructureController;
-use App\Http\Controllers\Hr\HrLoanTypeController;
-
-// Employee Sub-modules
-use App\Http\Controllers\Hr\HrEmployeeDocumentController;
-use App\Http\Controllers\Hr\HrEmployeeQualificationController;
-use App\Http\Controllers\Hr\HrEmployeeExperienceController;
-use App\Http\Controllers\Hr\HrEmployeeDependentController;
-use App\Http\Controllers\Hr\HrEmployeeNomineeController;
-use App\Http\Controllers\Hr\HrEmployeeBankAccountController;
 use App\Http\Controllers\Hr\HrEmployeeAssetController;
-
-// Operations
-use App\Http\Controllers\Hr\HrAttendanceController;
-use App\Http\Controllers\Hr\HrAttendanceBulkEntryController;
-use App\Http\Controllers\Hr\HrLeaveController;
-use App\Http\Controllers\Hr\HrLeaveApplicationController;
-use App\Http\Controllers\Hr\HrSalaryController;
-use App\Http\Controllers\Hr\HrPayrollController;
-
-// Loans & Advances
-use App\Http\Controllers\Hr\HrLoanController;
+use App\Http\Controllers\Hr\HrEmployeeBankAccountController;
+use App\Http\Controllers\Hr\HrEmployeeController;
+use App\Http\Controllers\Hr\HrEmployeeDependentController;
+use App\Http\Controllers\Hr\HrEmployeeDocumentController;
+use App\Http\Controllers\Hr\HrEmployeeExperienceController;
 use App\Http\Controllers\Hr\HrEmployeeLoanController;
-use App\Http\Controllers\Hr\HrAdvanceController;
+use App\Http\Controllers\Hr\HrEmployeeNomineeController;
+use App\Http\Controllers\Hr\HrEmployeeQualificationController;
+use App\Http\Controllers\Hr\HrEsiSlabController;
+// Employee Sub-modules
+use App\Http\Controllers\Hr\HrGradeController;
+use App\Http\Controllers\Hr\HrHolidayCalendarController;
+use App\Http\Controllers\Hr\HrLeaveApplicationController;
+use App\Http\Controllers\Hr\HrLeaveController;
+use App\Http\Controllers\Hr\HrLeavePolicyController;
+use App\Http\Controllers\Hr\HrLeaveTypeController;
+use App\Http\Controllers\Hr\HrLoanController;
+// Operations
+use App\Http\Controllers\Hr\HrLoanTypeController;
+use App\Http\Controllers\Hr\HrLwfSlabController;
+use App\Http\Controllers\Hr\HrMyLeaveController;
+use App\Http\Controllers\Hr\HrPayrollController;
+use App\Http\Controllers\Hr\HrPfSlabController;
+// Loans & Advances
+use App\Http\Controllers\Hr\HrPtSlabController;
+use App\Http\Controllers\Hr\HrReportController;
 use App\Http\Controllers\Hr\HrSalaryAdvanceController;
-
+use App\Http\Controllers\Hr\HrSalaryComponentController;
 // Tax
+use App\Http\Controllers\Hr\HrSalaryController;
+use App\Http\Controllers\Hr\HrSalaryStructureController;
+// Reports & Settings
+use App\Http\Controllers\Hr\HrSettingsController;
+use App\Http\Controllers\Hr\HrShiftController;
 use App\Http\Controllers\Hr\HrTaxController;
 use App\Http\Controllers\Hr\HrTaxDeclarationController;
-
-// Reports & Settings
-use App\Http\Controllers\Hr\HrReportController;
-use App\Http\Controllers\Hr\HrSettingsController;
-use App\Http\Controllers\Hr\HrPfSlabController;
-use App\Http\Controllers\Hr\HrEsiSlabController;
-use App\Http\Controllers\Hr\HrPtSlabController;
 use App\Http\Controllers\Hr\HrTdsSlabController;
-use App\Http\Controllers\Hr\HrLwfSlabController;
+use App\Http\Controllers\Hr\HrWorkLocationController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -70,22 +61,24 @@ Route::middleware(['auth'])->prefix('hr')->name('hr.')->group(function () {
     // Dashboard
     Route::get('/', [HrDashboardController::class, 'index'])->name('dashboard');
 
-// ===========================
-// SELF SERVICE (Employee)
-// ===========================
-// Any authenticated user with a linked HR Employee profile (hr_employees.user_id)
-// can apply and track their own leave.
-Route::prefix('my')->name('my.')->group(function () {
-    Route::prefix('leave')->name('leave.')->group(function () {
-        Route::get('/', [HrMyLeaveController::class, 'index'])->name('index');
-        Route::get('balance', [HrMyLeaveController::class, 'balance'])->name('balance');
+    // ===========================
+    // SELF SERVICE (Employee)
+    // ===========================
+    // Any authenticated user with a linked HR Employee profile (hr_employees.user_id)
+    // can apply and track their own leave.
+    Route::prefix('my')->name('my.')->group(function () {
+        Route::get('workspace/{section?}', [HrEmployeeController::class, 'myWorkspace'])->name('workspace');
 
-        Route::get('create', [HrMyLeaveController::class, 'create'])->name('create');
-        Route::post('/', [HrMyLeaveController::class, 'store'])->name('store');
+        Route::prefix('leave')->name('leave.')->group(function () {
+            Route::get('/', [HrMyLeaveController::class, 'index'])->name('index');
+            Route::get('balance', [HrMyLeaveController::class, 'balance'])->name('balance');
 
-        Route::post('{application}/cancel', [HrMyLeaveController::class, 'cancel'])->name('cancel');
+            Route::get('create', [HrMyLeaveController::class, 'create'])->name('create');
+            Route::post('/', [HrMyLeaveController::class, 'store'])->name('store');
+
+            Route::post('{application}/cancel', [HrMyLeaveController::class, 'cancel'])->name('cancel');
+        });
     });
-});
 
     // ===========================
     // MASTERS
@@ -133,6 +126,10 @@ Route::prefix('my')->name('my.')->group(function () {
     // EMPLOYEE MANAGEMENT
     // ===========================
 
+    Route::get('candidates/{candidate}/resume', [HrCandidateController::class, 'downloadResume'])->name('candidates.resume');
+    Route::get('candidates/{candidate}/convert-to-employee', [HrCandidateController::class, 'convertToEmployee'])->name('candidates.convert-to-employee');
+    Route::resource('candidates', HrCandidateController::class);
+
     Route::resource('employees', HrEmployeeController::class);
 
     // Employee Additional Actions
@@ -140,6 +137,12 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::post('confirm', [HrEmployeeController::class, 'confirm'])->name('confirm');
         Route::post('separation', [HrEmployeeController::class, 'separation'])->name('separation');
         Route::get('id-card', [HrEmployeeController::class, 'idCard'])->name('id-card');
+        Route::get('attendance', [HrEmployeeController::class, 'attendance'])->name('attendance');
+        Route::get('leave', [HrEmployeeController::class, 'leave'])->name('leave');
+        Route::get('payroll', [HrEmployeeController::class, 'payroll'])->name('payroll');
+        Route::get('loans-advances', [HrEmployeeController::class, 'loansAdvances'])->name('loans-advances');
+        Route::get('compliance', [HrEmployeeController::class, 'compliance'])->name('compliance');
+        Route::get('timeline', [HrEmployeeController::class, 'timeline'])->name('timeline');
 
         // Documents
         Route::resource('documents', HrEmployeeDocumentController::class)->except(['show', 'edit', 'update']);
@@ -188,11 +191,11 @@ Route::prefix('my')->name('my.')->group(function () {
 
         // Manual Entry (must be before {attendance} route)
         Route::match(['get', 'post'], 'manual-entry', [HrAttendanceController::class, 'manualEntry'])->name('manual-entry');
-        
+
         // Bulk Entry (All Employees) - must be before {attendance} route
-		Route::match(['get', 'post'], 'bulk-entry', [\App\Http\Controllers\Hr\HrAttendanceBulkEntryController::class, 'handle'])
-   			 ->name('bulk-entry');
-      
+        Route::match(['get', 'post'], 'bulk-entry', [\App\Http\Controllers\Hr\HrAttendanceBulkEntryController::class, 'handle'])
+            ->name('bulk-entry');
+
         // Process Attendance
         Route::post('process', [HrAttendanceController::class, 'process'])->name('process');
 
@@ -280,7 +283,9 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::get('{payroll}/payslip', [HrPayrollController::class, 'payslip'])->name('payslip');
         Route::get('{payroll}/payslip-pdf', [HrPayrollController::class, 'payslipPdf'])->name('payslip-pdf');
         Route::post('{payroll}/approve', [HrPayrollController::class, 'approve'])->name('approve');
+        Route::post('{payroll}/unapprove', [HrPayrollController::class, 'unapprove'])->name('unapprove');
         Route::post('{payroll}/pay', [HrPayrollController::class, 'pay'])->name('pay');
+        Route::post('{payroll}/unpay', [HrPayrollController::class, 'unpay'])->name('unpay');
         Route::post('{payroll}/hold', [HrPayrollController::class, 'hold'])->name('hold');
         Route::post('{payroll}/release', [HrPayrollController::class, 'release'])->name('release');
 
@@ -306,6 +311,7 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::post('employee-loans/{loan}/approve', [HrEmployeeLoanController::class, 'approve'])->name('employee-loans.approve');
         Route::post('employee-loans/{loan}/reject', [HrEmployeeLoanController::class, 'reject'])->name('employee-loans.reject');
         Route::post('employee-loans/{loan}/disburse', [HrEmployeeLoanController::class, 'disburse'])->name('employee-loans.disburse');
+        Route::post('employee-loans/{loan}/cancel', [HrEmployeeLoanController::class, 'cancel'])->name('employee-loans.cancel');
         Route::get('employee-loans/{loan}/schedule', [HrEmployeeLoanController::class, 'schedule'])->name('employee-loans.schedule');
     });
 
@@ -315,6 +321,7 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::post('salary-advances/{advance}/approve', [HrSalaryAdvanceController::class, 'approve'])->name('salary-advances.approve');
         Route::post('salary-advances/{advance}/reject', [HrSalaryAdvanceController::class, 'reject'])->name('salary-advances.reject');
         Route::post('salary-advances/{advance}/disburse', [HrSalaryAdvanceController::class, 'disburse'])->name('salary-advances.disburse');
+        Route::post('salary-advances/{advance}/cancel', [HrSalaryAdvanceController::class, 'cancel'])->name('salary-advances.cancel');
     });
 
     // ===========================
@@ -344,6 +351,7 @@ Route::prefix('my')->name('my.')->group(function () {
         Route::get('document-expiry', [HrReportController::class, 'documentExpiry'])->name('document-expiry');
         Route::get('employee-directory', [HrReportController::class, 'employeeDirectory'])->name('employee-directory');
         Route::get('muster-roll', [HrReportController::class, 'musterRoll'])->name('muster-roll');
+        Route::get('accounting-reconciliation', [HrReportController::class, 'accountingReconciliation'])->name('accounting-reconciliation');
     });
 
     // ===========================

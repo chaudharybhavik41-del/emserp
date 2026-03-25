@@ -25,10 +25,15 @@
                     @foreach($payroll->components->where('component_type', 'deduction') as $row)
                         <tr><td>{{ $row->component_name }}</td><td class="text-end">₹{{ number_format($row->final_amount, 2) }}</td></tr>
                     @endforeach
+                    @if(abs((float) $payroll->round_off) > 0)
+                        <tr><td>Round Off</td><td class="text-end">₹{{ number_format($payroll->round_off, 2) }}</td></tr>
+                    @endif
                 </table>
             </div>
         </div>
         <hr>
+        <div class="d-flex justify-content-between"><span>Net Before Round Off</span><span>₹{{ number_format($payroll->net_pay, 2) }}</span></div>
+        <div class="d-flex justify-content-between"><span>Round Off</span><span>₹{{ number_format($payroll->round_off, 2) }}</span></div>
         <div class="d-flex justify-content-between"><strong>Net Payable</strong><strong>₹{{ number_format($payroll->net_payable, 2) }}</strong></div>
     </div></div>
 </div>

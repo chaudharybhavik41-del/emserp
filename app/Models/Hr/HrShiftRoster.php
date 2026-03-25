@@ -37,6 +37,11 @@ class HrShiftRoster extends Model
         return $this->belongsTo(HrShift::class, 'hr_shift_id');
     }
 
+    public function weeklyOffPattern(): BelongsTo
+    {
+        return $this->belongsTo(HrWeeklyOffPattern::class, 'hr_weekly_off_pattern_id');
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
