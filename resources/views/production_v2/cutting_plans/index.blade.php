@@ -38,8 +38,8 @@
         <div class="col-12 col-md-6 col-xl-3">
             <div class="card h-100 border-primary-subtle">
                 <div class="card-body">
-                    <div class="small text-uppercase text-primary mb-1">Mixed Source</div>
-                    <div class="display-6 mb-0">{{ number_format($summary['mixed']) }}</div>
+                    <div class="small text-uppercase text-primary mb-1">Planned Plates</div>
+                    <div class="display-6 mb-0">{{ number_format($summary['plates']) }}</div>
                 </div>
             </div>
         </div>
@@ -61,8 +61,8 @@
                         <tr>
                             <th>Plan No</th>
                             <th>Date</th>
-                            <th>Grade</th>
-                            <th>Thickness</th>
+                            <th>Material Item</th>
+                            <th>Grade / Thickness</th>
                             <th>Source</th>
                             <th class="text-end">Allocations</th>
                             <th>Status</th>
@@ -74,8 +74,8 @@
                         <tr>
                             <td><strong>{{ $plan->plan_number }}</strong></td>
                             <td>{{ $plan->plan_date?->format('Y-m-d') ?: '-' }}</td>
-                            <td>{{ $plan->grade ?: '-' }}</td>
-                            <td>{{ $plan->thickness_mm ?: '-' }}</td>
+                            <td>{{ $plan->materialItem?->code ?: '-' }}</td>
+                            <td>{{ $plan->grade ?: ($plan->materialItem?->grade ?: '-') }} / {{ $plan->thickness_mm ?: ($plan->materialItem?->thickness ?: '-') }}</td>
                             <td><span class="badge text-bg-light border">{{ str_replace('_', ' ', $plan->source_mode) }}</span></td>
                             <td class="text-end">{{ number_format($plan->allocations_count) }}</td>
                             <td><span class="badge text-bg-light border">{{ ucfirst($plan->status) }}</span></td>
@@ -105,11 +105,15 @@
                         <div class="pv2-mobile-card__meta">
                             <div class="pv2-mobile-card__row">
                                 <span class="pv2-mobile-card__label">Grade</span>
-                                <span>{{ $plan->grade ?: '-' }}</span>
+                                <span>{{ $plan->grade ?: ($plan->materialItem?->grade ?: '-') }}</span>
+                            </div>
+                            <div class="pv2-mobile-card__row">
+                                <span class="pv2-mobile-card__label">Material</span>
+                                <span>{{ $plan->materialItem?->code ?: '-' }}</span>
                             </div>
                             <div class="pv2-mobile-card__row">
                                 <span class="pv2-mobile-card__label">Thickness</span>
-                                <span>{{ $plan->thickness_mm ?: '-' }}</span>
+                                <span>{{ $plan->thickness_mm ?: ($plan->materialItem?->thickness ?: '-') }}</span>
                             </div>
                             <div class="pv2-mobile-card__row">
                                 <span class="pv2-mobile-card__label">Source</span>

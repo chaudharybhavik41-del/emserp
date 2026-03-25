@@ -97,11 +97,17 @@ class PurchaseOrder extends Model
     // --- Helpers ---
 
     /**
-     * Generate next PO code in format: PO-YYYYMM-####.
+     * Generate next PO code in format: PO-2526-0001.
      */
-    public static function generateNextCode(): string
+    public static function generateNextCode($date = null): string
     {
-        $prefix = 'PO-' . now()->format('Ym') . '-';
+        $date = $date ? \Carbon\Carbon::parse($date) : now();
+        $startMonth = (int) config('accounting.financial_year.start_month', 4);
+        $fyStartYear = $date->month >= $startMonth ? $date->year : $date->year - 1;
+        $fyEndYear = $fyStartYear + 1;
+        $fyCode = substr((string) $fyStartYear, -2) . substr((string) $fyEndYear, -2);
+
+        $prefix = 'PO-' . $fyCode . '-';
 
         $last = static::where('code', 'LIKE', $prefix . '%')
             ->orderByDesc('id')
@@ -126,5 +132,4 @@ class PurchaseOrder extends Model
         return $this->hasMany(MaterialReceipt::class, 'purchase_order_id');
     }
 }
-
 

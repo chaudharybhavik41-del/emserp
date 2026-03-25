@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeBankAccount;
@@ -12,13 +13,18 @@ use Illuminate\View\View;
 
 class HrEmployeeBankAccountController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'edit', 'update', 'destroy']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $accounts = $employee->bankAccounts()->latest()->paginate(20)->withQueryString();
 
         $editing = null;
@@ -31,11 +37,15 @@ class HrEmployeeBankAccountController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.bank-accounts.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $this->validateData($request);
         $validated['hr_employee_id'] = $employee->id;
 
@@ -55,6 +65,8 @@ class HrEmployeeBankAccountController extends Controller
 
     public function edit(HrEmployee $employee, HrEmployeeBankAccount $bankAccount): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $bankAccount);
 
         return redirect()->route('hr.employees.bank-accounts.index', ['employee' => $employee->id, 'edit' => $bankAccount->id]);
@@ -62,6 +74,8 @@ class HrEmployeeBankAccountController extends Controller
 
     public function update(Request $request, HrEmployee $employee, HrEmployeeBankAccount $bankAccount): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $bankAccount);
 
         $validated = $this->validateData($request, $bankAccount->id);
@@ -85,6 +99,8 @@ class HrEmployeeBankAccountController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeBankAccount $bankAccount): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $bankAccount);
 
         if ($bankAccount->cancelled_cheque_path) {

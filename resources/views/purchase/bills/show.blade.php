@@ -31,6 +31,10 @@
         </div>
 
         <div>
+            @if(($bill->status ?? null) === 'posted')
+                <a href="{{ route('purchase.bills.tally.download', $bill) }}"
+                   class="btn btn-outline-success btn-sm ms-1">Download Tally XML</a>
+            @endif
             @if(($bill->status ?? null) === 'posted' && $bill->voucher)
                 @canany(['purchase.bill.update', 'purchase.bill.change_posting_date'])
                     <button type="button"

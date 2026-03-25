@@ -40,6 +40,10 @@
     }
 
     $statusValue = old('status', $project->status ?? 'active');
+    $clientBillingMode = old('client_billing_mode', $project->client_billing_mode ?? 'mixed');
+    $defaultBillKind = old('client_billing_default_bill_kind', $project->client_billing_default_bill_kind ?? \App\Models\ClientRaBill::BILL_KIND_PROJECT_MFG_SERVICE);
+    $defaultSourceBasis = old('client_billing_source_basis', $project->client_billing_source_basis ?? \App\Models\ClientRaBill::SOURCE_BASIS_MANUAL);
+    $defaultMaterialScope = old('client_billing_material_scope', $project->client_billing_material_scope ?? \App\Models\ClientRaBill::MATERIAL_SCOPE_OWN);
 @endphp
 
 <form method="POST"
@@ -156,6 +160,9 @@
         <div class="col-md-3">
             <label class="form-label">Status</label>
             <select name="status" class="form-select @error('status') is-invalid @enderror">
+                @if($statusValue === 'open')
+                    <option value="open" selected>Open</option>
+                @endif
                 <option value="active"    {{ $statusValue === 'active'    ? 'selected' : '' }}>Active</option>
                 <option value="on-hold"   {{ $statusValue === 'on-hold'   ? 'selected' : '' }}>On Hold</option>
                 <option value="completed" {{ $statusValue === 'completed' ? 'selected' : '' }}>Completed</option>
@@ -259,6 +266,101 @@
                             ?? ''
                       ) }}</textarea>
             @error('project_special_notes')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <div>
+                <h6 class="text-muted text-uppercase small mb-1">Client Billing Setup</h6>
+                <div class="small text-muted">Maintain commercial defaults here so client billing can pull rates and tax defaults without relying on production users.</div>
+            </div>
+            @if($isEdit && \Illuminate\Support\Facades\Route::has('projects.client-billing-rates.index'))
+                <a href="{{ route('projects.client-billing-rates.index', $project) }}" class="btn btn-outline-primary btn-sm">Manage Billing Rates</a>
+            @endif
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <label class="form-label">Billing Mode</label>
+            <select name="client_billing_mode" class="form-select @error('client_billing_mode') is-invalid @enderror">
+                @foreach(($clientBillingModes ?? []) as $value => $label)
+                    <option value="{{ $value }}" @selected($clientBillingMode === $value)>{{ $label }}</option>
+                @endforeach
+            </select>
+            @error('client_billing_mode')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Default Bill Kind</label>
+            <select name="client_billing_default_bill_kind" class="form-select @error('client_billing_default_bill_kind') is-invalid @enderror">
+                @foreach(($billKindOptions ?? []) as $value => $label)
+                    <option value="{{ $value }}" @selected($defaultBillKind === $value)>{{ $label }}</option>
+                @endforeach
+            </select>
+            @error('client_billing_default_bill_kind')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Default Source Basis</label>
+            <select name="client_billing_source_basis" class="form-select @error('client_billing_source_basis') is-invalid @enderror">
+                @foreach(($sourceBasisOptions ?? []) as $value => $label)
+                    <option value="{{ $value }}" @selected($defaultSourceBasis === $value)>{{ $label }}</option>
+                @endforeach
+            </select>
+            @error('client_billing_source_basis')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Default Material Scope</label>
+            <select name="client_billing_material_scope" class="form-select @error('client_billing_material_scope') is-invalid @enderror">
+                @foreach(($materialScopeOptions ?? []) as $value => $label)
+                    <option value="{{ $value }}" @selected($defaultMaterialScope === $value)>{{ $label }}</option>
+                @endforeach
+            </select>
+            @error('client_billing_material_scope')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <label class="form-label">Default TDS Section</label>
+            <select name="client_billing_tds_section" class="form-select @error('client_billing_tds_section') is-invalid @enderror">
+                <option value="">-- None --</option>
+                @foreach(($tdsSections ?? collect()) as $section)
+                    <option value="{{ $section->code }}" @selected(old('client_billing_tds_section', $project->client_billing_tds_section ?? '') === $section->code)>{{ $section->display_name }}</option>
+                @endforeach
+            </select>
+            @error('client_billing_tds_section')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Default TDS %</label>
+            <input type="number" step="0.0001" min="0" max="100" name="client_billing_tds_rate" class="form-control @error('client_billing_tds_rate') is-invalid @enderror" value="{{ old('client_billing_tds_rate', $project->client_billing_tds_rate ?? '') }}">
+            @error('client_billing_tds_rate')
+                <div class="invalid-feedback">{{ $message }}</div>
+            @enderror
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <div class="form-check mb-2">
+                <input type="hidden" name="client_billing_separate_material_service" value="0">
+                <input class="form-check-input" type="checkbox" name="client_billing_separate_material_service" value="1" id="client_billing_separate_material_service" @checked(old('client_billing_separate_material_service', $project->client_billing_separate_material_service ?? false))>
+                <label class="form-check-label" for="client_billing_separate_material_service">Separate material and service bills</label>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Billing Notes</label>
+            <textarea name="client_billing_notes" rows="2" class="form-control @error('client_billing_notes') is-invalid @enderror">{{ old('client_billing_notes', $project->client_billing_notes ?? '') }}</textarea>
+            @error('client_billing_notes')
                 <div class="invalid-feedback">{{ $message }}</div>
             @enderror
         </div>

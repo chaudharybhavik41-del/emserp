@@ -76,6 +76,11 @@ class HrSalaryComponentController extends Controller
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
+        $validated['category'] = $validated['category'] ?? null;
+
+        if (blank($validated['category'])) {
+            $validated['category'] = 'other';
+        }
         
         // Normalize checkboxes
         $validated['is_active'] = $request->boolean('is_active', true);
@@ -133,6 +138,11 @@ class HrSalaryComponentController extends Controller
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
+        $validated['category'] = $validated['category'] ?? $salaryComponent->category;
+
+        if (blank($validated['category'])) {
+            $validated['category'] = $salaryComponent->category ?: 'other';
+        }
         
         // Normalize checkboxes
         $validated['is_active'] = $request->boolean('is_active', $salaryComponent->is_active);
@@ -161,6 +171,10 @@ class HrSalaryComponentController extends Controller
 
         if ($salaryComponent->salaryStructures()->exists()) {
             return back()->with('error', 'Cannot delete component. It is used in salary structures.');
+        }
+
+        if ($salaryComponent->employeeSalaryComponents()->exists() || $salaryComponent->payrollComponents()->exists()) {
+            return back()->with('error', 'Cannot delete component. It is already used in employee salary or payroll history.');
         }
 
         $salaryComponent->delete();

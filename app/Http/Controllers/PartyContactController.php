@@ -13,7 +13,9 @@ class PartyContactController extends Controller
         $this->middleware('auth');
         // Reuse party permissions for managing contacts
         $this->middleware('permission:core.party.update')
-            ->only(['store', 'update', 'destroy']);
+            ->only(['store', 'update']);
+        $this->middleware('permission:core.party.delete')
+            ->only(['destroy']);
     }
 
     /**
@@ -22,15 +24,15 @@ class PartyContactController extends Controller
     public function store(Request $request, Party $party)
     {
         $data = $request->validate([
-            'name'        => ['required', 'string', 'max:150'],
+            'name' => ['required', 'string', 'max:150'],
             'designation' => ['nullable', 'string', 'max:150'],
-            'phone'       => ['nullable', 'string', 'max:50'],
-            'email'       => ['nullable', 'string', 'max:150', 'email'],
-            'is_primary'  => ['nullable', 'boolean'],
+            'phone' => ['nullable', 'string', 'max:50'],
+            'email' => ['nullable', 'string', 'max:150', 'email'],
+            'is_primary' => ['nullable', 'boolean'],
         ]);
 
         $data['is_primary'] = $request->boolean('is_primary');
-        $data['party_id']   = $party->id;
+        $data['party_id'] = $party->id;
 
         // If this is marked as primary, clear existing primaries
         if ($data['is_primary']) {
@@ -52,11 +54,11 @@ class PartyContactController extends Controller
         $party = $contact->party;
 
         $data = $request->validate([
-            'name'        => ['required', 'string', 'max:150'],
+            'name' => ['required', 'string', 'max:150'],
             'designation' => ['nullable', 'string', 'max:150'],
-            'phone'       => ['nullable', 'string', 'max:50'],
-            'email'       => ['nullable', 'string', 'max:150', 'email'],
-            'is_primary'  => ['nullable', 'boolean'],
+            'phone' => ['nullable', 'string', 'max:50'],
+            'email' => ['nullable', 'string', 'max:150', 'email'],
+            'is_primary' => ['nullable', 'boolean'],
         ]);
 
         $data['is_primary'] = $request->boolean('is_primary');

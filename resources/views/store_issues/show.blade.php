@@ -65,16 +65,32 @@
                     Back to list
                 </a>
 
+                @if($issue->accounting_status === 'posted')
+                    @php
+                        $reportKey = 'stores-issue-accounting';
+                        $qs = '?issue_id=' . $issue->id;
+                    @endphp
+                    <a href="{{ route('store-issues.print', $issue) }}" target="_blank"
+                        class="btn btn-sm btn-outline-secondary mb-1">
+                        <i class="bi bi-printer"></i> Print
+                    </a>
+
+                    <a href="{{ route('store-issues.pdf', $issue) }}" class="btn btn-sm btn-outline-danger mb-1">
+                        <i class="bi bi-file-earmark-pdf"></i> PDF
+                    </a>
+
+                    <a href="{{ route('store-issues.csv', $issue) }}" class="btn btn-sm btn-outline-success mb-1">
+                        <i class="bi bi-filetype-csv"></i> CSV
+                    </a>
+                @endif
+
                 @can('store.issue.post_to_accounts')
                     @if(config('accounting.enable_store_issue_posting'))
                         @if(!$issue->isPostedToAccounts() && !$issue->isAccountsPostingNotRequired())
-                            <form action="{{ route('store-issues.post-to-accounts', $issue) }}"
-                                  method="POST"
-                                  class="d-inline">
+                            <form action="{{ route('store-issues.post-to-accounts', $issue) }}" method="POST" class="d-inline">
                                 @csrf
-                                <button type="submit"
-                                        class="btn btn-sm btn-primary mb-1"
-                                        onclick="return confirm('Post this Store Issue to Accounts?');">
+                                <button type="submit" class="btn btn-sm btn-primary mb-1"
+                                    onclick="return confirm('Post this Store Issue to Accounts?');">
                                     Post to Accounts
                                 </button>
                             </form>
@@ -188,64 +204,64 @@
                 <div class="table-responsive">
                     <table class="table table-sm table-striped mb-0">
                         <thead>
-                        <tr class="small">
-                            <th style="width: 4%">#</th>
-                            <th style="width: 22%">Item</th>
-                            <th style="width: 10%">UOM</th>
-                            <th style="width: 12%" class="text-end">Issued Qty</th>
-                            <th style="width: 12%" class="text-end">Returned Qty</th>
-                            <th style="width: 12%" class="text-end">Balance</th>
-                            <th style="width: 10%">Material</th>
-                            <th style="width: 12%">Brand</th>
-                            <th style="width: 20%">Stock Ref</th>
-                            <th>Remarks</th>
-                        </tr>
+                            <tr class="small">
+                                <th style="width: 4%">#</th>
+                                <th style="width: 22%">Item</th>
+                                <th style="width: 10%">UOM</th>
+                                <th style="width: 12%" class="text-end">Issued Qty</th>
+                                <th style="width: 12%" class="text-end">Returned Qty</th>
+                                <th style="width: 12%" class="text-end">Balance</th>
+                                <th style="width: 10%">Material</th>
+                                <th style="width: 12%">Brand</th>
+                                <th style="width: 20%">Stock Ref</th>
+                                <th>Remarks</th>
+                            </tr>
                         </thead>
                         <tbody>
-                        @forelse($issue->lines as $index => $line)
-                            @php
-                                $stock = $line->stockItem;
-                                $isClient = (bool) ($stock?->is_client_material ?? false);
-                                $qty = (float) ($line->issued_weight_kg ?? 0);
-                                if ($qty <= 0) {
-                                    $qty = (float) ($line->issued_qty_pcs ?? 0);
-                                }
+                            @forelse($issue->lines as $index => $line)
+                                @php
+                                    $stock = $line->stockItem;
+                                    $isClient = (bool) ($stock?->is_client_material ?? false);
+                                    $qty = (float) ($line->issued_weight_kg ?? 0);
+                                    if ($qty <= 0) {
+                                        $qty = (float) ($line->issued_qty_pcs ?? 0);
+                                    }
 
-                                $returnedQty = (float) ($returnedByLine[$line->id] ?? 0);
-                                $balanceQty = max(0.0, $qty - $returnedQty);
-                            @endphp
-                            <tr class="small">
-                                <td>{{ $index + 1 }}</td>
-                                <td>
-                                    @if($line->item)
-                                        <div class="fw-semibold">{{ $line->item->name }}</div>
-                                        <div class="text-muted">{{ $line->item->code }}</div>
-                                    @else
-                                        <span class="text-muted">Item #{{ $line->item_id }}</span>
-                                    @endif
-                                </td>
-                                <td>{{ $line->uom?->name ?? '-' }}</td>
-                                <td class="text-end">{{ number_format($qty, 3) }}</td>
-                        <td class="text-end">{{ number_format($returnedQty, 3) }}</td>
-                        <td class="text-end">{{ number_format($balanceQty, 3) }}</td>
-                                <td>
-                                    @if($isClient)
-                                        <span class="badge bg-info">Client</span>
-                                    @else
-                                        <span class="badge bg-secondary">Own</span>
-                                    @endif
-                                </td>
-                                <td>{{ $stock?->brand ?: '-' }}</td>
-                                <td>{{ $stock?->source_reference ?? '-' }}</td>
-                                <td>{{ $line->remarks ?? '-' }}</td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="8" class="text-center text-muted small py-3">
-                                    No lines found for this Store Issue.
-                                </td>
-                            </tr>
-                        @endforelse
+                                    $returnedQty = (float) ($returnedByLine[$line->id] ?? 0);
+                                    $balanceQty = max(0.0, $qty - $returnedQty);
+                                @endphp
+                                <tr class="small">
+                                    <td>{{ $index + 1 }}</td>
+                                    <td>
+                                        @if($line->item)
+                                            <div class="fw-semibold">{{ $line->item->name }}</div>
+                                            <div class="text-muted">{{ $line->item->code }}</div>
+                                        @else
+                                            <span class="text-muted">Item #{{ $line->item_id }}</span>
+                                        @endif
+                                    </td>
+                                    <td>{{ $line->uom?->name ?? '-' }}</td>
+                                    <td class="text-end">{{ number_format($qty, 3) }}</td>
+                                    <td class="text-end">{{ number_format($returnedQty, 3) }}</td>
+                                    <td class="text-end">{{ number_format($balanceQty, 3) }}</td>
+                                    <td>
+                                        @if($isClient)
+                                            <span class="badge bg-info">Client</span>
+                                        @else
+                                            <span class="badge bg-secondary">Own</span>
+                                        @endif
+                                    </td>
+                                    <td>{{ $stock?->brand ?: '-' }}</td>
+                                    <td>{{ $stock?->source_reference ?? '-' }}</td>
+                                    <td>{{ $line->remarks ?? '-' }}</td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted small py-3">
+                                        No lines found for this Store Issue.
+                                    </td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
                 </div>
@@ -278,45 +294,45 @@
                     <div class="table-responsive">
                         <table class="table table-sm table-striped mb-0">
                             <thead>
-                            <tr class="small">
-                                <th style="width: 20%">When</th>
-                                <th style="width: 20%">User</th>
-                                <th style="width: 20%">Action</th>
-                                <th style="width: 20%">Voucher</th>
-                                <th>Note</th>
-                            </tr>
+                                <tr class="small">
+                                    <th style="width: 20%">When</th>
+                                    <th style="width: 20%">User</th>
+                                    <th style="width: 20%">Action</th>
+                                    <th style="width: 20%">Voucher</th>
+                                    <th>Note</th>
+                                </tr>
                             </thead>
                             <tbody>
-                            @foreach($postingLogs as $log)
-                                @php
-                                    $meta = $log->metadata ?? [];
-                                @endphp
-                                <tr class="small">
-                                    <td>{{ optional($log->created_at)->format('d-m-Y H:i') }}</td>
-                                    <td>{{ $log->user_name ?? $log->user?->name ?? 'System' }}</td>
-                                    <td>
-                                        @if($log->action === 'posted_to_accounts')
-                                            Posted
-                                        @elseif($log->action === 'accounts_posting_not_required')
-                                            Not Required
-                                        @else
-                                            {{ ucfirst(str_replace('_', ' ', $log->action)) }}
-                                        @endif
-                                    </td>
-                                    <td>
-                                        @if(!empty($meta['voucher_no']))
-                                            {{ $meta['voucher_no'] }}
-                                        @elseif(!empty($meta['voucher_id']))
-                                            #{{ $meta['voucher_id'] }}
-                                        @else
-                                            -
-                                        @endif
-                                    </td>
-                                    <td>
-                                        {{ $log->description ?? '-' }}
-                                    </td>
-                                </tr>
-                            @endforeach
+                                @foreach($postingLogs as $log)
+                                    @php
+                                        $meta = $log->metadata ?? [];
+                                    @endphp
+                                    <tr class="small">
+                                        <td>{{ optional($log->created_at)->format('d-m-Y H:i') }}</td>
+                                        <td>{{ $log->user_name ?? $log->user?->name ?? 'System' }}</td>
+                                        <td>
+                                            @if($log->action === 'posted_to_accounts')
+                                                Posted
+                                            @elseif($log->action === 'accounts_posting_not_required')
+                                                Not Required
+                                            @else
+                                                {{ ucfirst(str_replace('_', ' ', $log->action)) }}
+                                            @endif
+                                        </td>
+                                        <td>
+                                            @if(!empty($meta['voucher_no']))
+                                                {{ $meta['voucher_no'] }}
+                                            @elseif(!empty($meta['voucher_id']))
+                                                #{{ $meta['voucher_id'] }}
+                                            @else
+                                                -
+                                            @endif
+                                        </td>
+                                        <td>
+                                            {{ $log->description ?? '-' }}
+                                        </td>
+                                    </tr>
+                                @endforeach
                             </tbody>
                         </table>
                     </div>
@@ -326,5 +342,3 @@
 
     </div>
 @endsection
-
-

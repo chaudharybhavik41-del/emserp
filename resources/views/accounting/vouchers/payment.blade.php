@@ -232,9 +232,9 @@
                 <div class="row g-3 mb-3">
                     <div class="col-md-6">
                         <label class="form-label form-label-sm">Reference (optional)</label>
-                        <input type="text" name="reference"
+                        <input type="text" name="reference" id="voucher_reference"
                                class="form-control form-control-sm @error('reference') is-invalid @enderror"
-                               value="{{ old('reference') }}">
+                               value="{{ old('reference') }}" readonly>
                         @error('reference')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
@@ -268,6 +268,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const paymentType   = document.getElementById('payment_type');
     const dateInput     = document.getElementById('voucher_date');
     const amountInput   = document.getElementById('voucher_amount');
+    const referenceInput = document.getElementById('voucher_reference');
     const singlePayeeBlock = document.getElementById('single-payee-block');
     const onAccountRowsBlock = document.getElementById('on-account-rows-block');
     const onAccountRowsBody = document.getElementById('on-account-rows-body');
@@ -895,6 +896,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 + '  <input type="checkbox"'
                 + '         class="form-check-input mt-0"'
                 + '         data-role="allocate-select"'
+                + '         data-reference-no="' + (bill.reference_no || '') + '"'
                 + '         data-outstanding="' + outstd + '"'
                 + '         ' + (checked ? 'checked' : '') + '>'
                 + '</td>'
@@ -921,6 +923,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         bindAllocationRowEvents();
         updateSummary();
+        syncBillReference();
     }
 
     function suggestedAllocation(outstanding) {
@@ -953,6 +956,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 updateSummary();
                 syncBillAllocationAmount();
+                syncBillReference();
             });
 
             amountField.addEventListener('input', function () {
@@ -975,8 +979,36 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 updateSummary();
                 syncBillAllocationAmount();
+                syncBillReference();
             });
         });
+    }
+
+    function syncBillReference() {
+        if (!referenceInput) return;
+
+        if (paymentType.value === 'bill_allocation') {
+            const selectedReferences = [];
+            tbody.querySelectorAll('input[data-role="allocate-select"]:checked').forEach(function (checkbox) {
+                if (checkbox.dataset.referenceNo) {
+                    selectedReferences.push(checkbox.dataset.referenceNo);
+                }
+            });
+
+            if (selectedReferences.length > 0) {
+                referenceInput.value = 'Invoice No: ' + selectedReferences.join(', ');
+            } else {
+                referenceInput.value = '';
+            }
+        } else {
+            // For other types, use the label of the selected option
+            const selectedLabel = paymentType.options[paymentType.selectedIndex].text;
+            referenceInput.value = selectedLabel;
+        }
+    }
+
+    if (paymentType) {
+        paymentType.addEventListener('change', syncBillReference);
     }
 
     async function loadBills() {

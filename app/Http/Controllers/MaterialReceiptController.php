@@ -49,92 +49,182 @@ class MaterialReceiptController extends Controller
             ->only(['deleteAttachment', 'destroy', 'createReturn', 'storeReturn']);
     }
 
-    public function index(): View
+    public function index(Request $request)
     {
-        $receipts = MaterialReceipt::with([
+        try {
+            $query = MaterialReceipt::with([
                 'supplier',
                 'client',
                 'project',
                 'purchaseOrder',
                 'lines:id,material_receipt_id,qty_pcs,received_weight_kg',
-            ])
-            ->orderByDesc('id')
-            ->paginate(20);
+            ]);
 
-        $receiptCollection = $receipts->getCollection();
-        $lineIds = $receiptCollection
-            ->flatMap(function (MaterialReceipt $receipt) {
-                return $receipt->lines;
-            })
-            ->pluck('id')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $billedQtyByLineId = collect();
-
-        if (! empty($lineIds)) {
-            $billedQtyByLineId = DB::table('purchase_bill_lines as pbl')
-                ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id')
-                ->whereIn('pbl.material_receipt_line_id', $lineIds)
-                ->groupBy('pbl.material_receipt_line_id')
-                ->selectRaw('pbl.material_receipt_line_id, COALESCE(SUM(CASE WHEN pb.status = "cancelled" THEN 0 ELSE pbl.qty END), 0) as billed_qty')
-                ->pluck('billed_qty', 'pbl.material_receipt_line_id');
-        }
-
-        $receiptCollection->transform(function (MaterialReceipt $receipt) use ($billedQtyByLineId) {
-            if ($receipt->is_client_material) {
-                $receipt->billing_status = null;
-                return $receipt;
+            // Filters
+            if ($search = $request->get('search')) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('receipt_number', 'like', "%{$search}%")
+                        ->orWhere('invoice_number', 'like', "%{$search}%")
+                        ->orWhere('po_number', 'like', "%{$search}%")
+                        ->orWhereHas('purchaseOrder', function ($po) use ($search) {
+                            $po->where('code', 'like', "%{$search}%");
+                        });
+                });
             }
 
-            $hasComparableLines = false;
-            $allBilled = true;
+            if ($supplierId = $request->get('supplier_id')) {
+                $query->where('supplier_id', $supplierId);
+            }
 
-            foreach ($receipt->lines as $line) {
-                $grnQty = (float) ($line->received_weight_kg ?? 0);
-                if ($grnQty <= 0 && $line->qty_pcs !== null) {
-                    $grnQty = (float) $line->qty_pcs;
+            if ($projectId = $request->get('project_id')) {
+                $query->where('project_id', $projectId);
+            }
+
+            if ($status = $request->get('status')) {
+                $query->where('status', $status);
+            }
+
+            if ($type = $request->get('type')) {
+                if ($type === 'client') {
+                    $query->where('is_client_material', true);
+                } elseif ($type === 'own') {
+                    $query->where('is_client_material', false);
                 }
+            }
 
-                if ($grnQty <= 0) {
+            $receipts = $query->orderByDesc('id')
+                ->paginate(25)
+                ->withQueryString();
+
+            $receiptCollection = $receipts->getCollection();
+            $receiptIds = $receiptCollection
+                ->pluck('id')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            $lineIds = $receiptCollection
+                ->flatMap(function (MaterialReceipt $receipt) {
+                    return $receipt->lines;
+                })
+                ->pluck('id')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            $billedQtyByLineId = collect();
+            $billedQtyByReceiptId = collect();
+
+            if (!empty($lineIds)) {
+                $billedQtyByLineId = DB::table('purchase_bill_lines as pbl')
+                    ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id')
+                    ->whereIn('pbl.material_receipt_line_id', $lineIds)
+                    ->groupBy('pbl.material_receipt_line_id')
+                    ->selectRaw("pbl.material_receipt_line_id as line_id, COALESCE(SUM(CASE WHEN pb.status = 'cancelled' THEN 0 ELSE pbl.qty END), 0) as billed_qty")
+                    ->pluck('billed_qty', 'line_id');
+            }
+
+            if (!empty($receiptIds)) {
+                $billedQtyByReceiptId = DB::table('purchase_bill_lines as pbl')
+                    ->leftJoin('purchase_bills as pb', 'pb.id', '=', 'pbl.purchase_bill_id')
+                    ->whereNull('pbl.material_receipt_line_id')
+                    ->whereIn('pbl.material_receipt_id', $receiptIds)
+                    ->groupBy('pbl.material_receipt_id')
+                    ->selectRaw("pbl.material_receipt_id as receipt_id, COALESCE(SUM(CASE WHEN pb.status = 'cancelled' THEN 0 ELSE pbl.qty END), 0) as billed_qty")
+                    ->pluck('billed_qty', 'receipt_id');
+            }
+
+            foreach ($receiptCollection as $receipt) {
+                if ($receipt->is_client_material) {
+                    $receipt->billing_status = null;
                     continue;
                 }
 
-                $hasComparableLines = true;
-                $billedQty = (float) ($billedQtyByLineId[$line->id] ?? 0);
+                $hasComparableLines = false;
+                $allBilled = true;
+                $receiptQty = 0.0;
+                $lineLinkedBilledQty = 0.0;
 
-                if ($billedQty + 0.0001 < $grnQty) {
-                    $allBilled = false;
-                    break;
+                foreach ($receipt->lines as $line) {
+                    $grnQty = (float) ($line->received_weight_kg ?? 0);
+                    if ($grnQty <= 0 && $line->qty_pcs !== null) {
+                        $grnQty = (float) $line->qty_pcs;
+                    }
+
+                    if ($grnQty <= 0) {
+                        continue;
+                    }
+
+                    $hasComparableLines = true;
+                    $receiptQty += $grnQty;
+                    $billedQty = (float) ($billedQtyByLineId->get($line->id) ?? 0);
+                    $lineLinkedBilledQty += $billedQty;
+
+                    if ($billedQty + 0.0001 < $grnQty) {
+                        $allBilled = false;
+                    }
                 }
+
+                // Legacy purchase bills may be linked only at GRN header level without material_receipt_line_id.
+                $headerLinkedBilledQty = (float) ($billedQtyByReceiptId->get($receipt->id) ?? 0);
+                $legacyHeaderFullyBilled = $headerLinkedBilledQty > 0
+                    && ($lineLinkedBilledQty + $headerLinkedBilledQty + 0.0001) >= $receiptQty;
+
+                $receipt->billing_status = ($hasComparableLines && ($allBilled || $legacyHeaderFullyBilled))
+                    ? 'billed'
+                    : 'unbilled';
             }
 
-            $receipt->billing_status = ($hasComparableLines && $allBilled) ? 'billed' : 'unbilled';
+            // Filter by billing status if requested
+            if ($billingStatus = $request->get('accounting')) {
+                $receiptCollection = $receiptCollection->filter(function ($receipt) use ($billingStatus) {
+                    if ($billingStatus === 'billed') {
+                        return $receipt->billing_status === 'billed';
+                    } elseif ($billingStatus === 'unbilled') {
+                        return $receipt->billing_status === 'unbilled';
+                    }
+                    return true;
+                });
+                $receipts->setCollection($receiptCollection);
+            }
 
-            return $receipt;
-        });
+            if ($request->ajax()) {
+                return view('material_receipts._list', [
+                    'receipts' => $receipts,
+                ]);
+            }
 
-        return view('material_receipts.index', compact('receipts'));
+            return view('material_receipts.index', [
+                'receipts' => $receipts,
+                'suppliers' => Party::where('is_supplier', true)->orWhere('is_contractor', true)->orderBy('name')->get(['id', 'name']),
+                'projects' => Project::orderBy('code')->get(['id', 'code', 'name']),
+            ]);
+        } catch (\Exception $e) {
+            if ($request->ajax()) {
+                return response()->json(['error' => $e->getMessage()], 500);
+            }
+            return back()->with('error', 'Filter error: ' . $e->getMessage());
+        }
     }
 
     public function create(): View
     {
         // Masters
         $suppliers = Party::where('is_supplier', true)->orderBy('name')->get();
-        $clients   = Party::where('is_client', true)->orderBy('name')->get();
+        $clients = Party::where('is_client', true)->orderBy('name')->get();
 
-        $projects  = Project::orderBy('code')->get();
-        $items     = Item::orderBy('name')->get();
-        $uoms      = Uom::orderBy('name')->get();
+        $projects = Project::orderBy('code')->get();
+        $items = Item::orderBy('name')->get();
+        $uoms = Uom::orderBy('name')->get();
 
         // Fixed categories
         $materialCategories = [
-            'steel_plate'   => 'Steel Plate',
+            'steel_plate' => 'Steel Plate',
             'steel_section' => 'Steel Section',
-            'consumable'    => 'Consumable',
-            'bought_out'    => 'Bought-out Item',
+            'consumable' => 'Consumable',
+            'bought_out' => 'Bought-out Item',
         ];
 
         // Default GRN category per item (auto-select in UI using material taxonomy)
@@ -146,7 +236,7 @@ class MaterialReceiptController extends Controller
 
             foreach ($items as $it) {
                 $typeCode = $typeCodeById[$it->material_type_id] ?? null;
-                $catCode  = $categoryCodeById[$it->material_category_id] ?? null;
+                $catCode = $categoryCodeById[$it->material_category_id] ?? null;
 
                 $itemDefaultCategoryMap[$it->id] = $this->inferGrnCategoryFromTaxonomy($typeCode, $catCode);
             }
@@ -184,7 +274,7 @@ class MaterialReceiptController extends Controller
         // GRN lines count only after QC pass.
         $receivedAgg = collect();
 
-        if (! empty($poItemIds)) {
+        if (!empty($poItemIds)) {
             $receivedAgg = MaterialReceiptLine::query()
                 ->join('material_receipts', 'material_receipt_lines.material_receipt_id', '=', 'material_receipts.id')
                 ->where('material_receipts.status', 'qc_passed')
@@ -228,11 +318,11 @@ class MaterialReceiptController extends Controller
 
                     if ($poQtyPcs > 0) {
                         // Piece-controlled (plates/sections etc.)
-                        $poQty       = $poQtyPcs;
+                        $poQty = $poQtyPcs;
                         $alreadyRecv = $row ? (float) ($row->total_qty_pcs ?? 0) : 0.0;
                     } else {
                         // Quantity-controlled (consumables/bought-out etc.)
-                        $poQty       = (float) ($item->quantity ?? 0);
+                        $poQty = (float) ($item->quantity ?? 0);
                         $alreadyRecv = $row ? (float) ($row->total_weight_kg ?? 0) : 0.0;
                     }
 
@@ -242,7 +332,7 @@ class MaterialReceiptController extends Controller
                     }
 
                     $maxAllowed = $poQty * (1 + ($tolerancePct / 100));
-                    $pending    = $maxAllowed - $alreadyRecv;
+                    $pending = $maxAllowed - $alreadyRecv;
 
                     if ($pending > 0.0001) {
                         // At least one line still has room to receive
@@ -272,39 +362,39 @@ class MaterialReceiptController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'receipt_date'        => ['required', 'date'],
-            'is_client_material'  => ['nullable', 'boolean'],
-            'purchase_order_id'   => ['nullable', 'integer', 'exists:purchase_orders,id'],
-            'po_number'           => ['nullable', 'string', 'max:50'],
-            'supplier_id'         => ['nullable', 'integer', 'exists:parties,id'],
-            'project_id'          => ['nullable', 'integer', 'exists:projects,id'],
-            'client_party_id'     => ['nullable', 'integer', 'exists:parties,id'],
-            'invoice_number'      => ['nullable', 'string', 'max:100'],
-            'invoice_date'        => ['required', 'date'],
-            'challan_number'      => ['nullable', 'string', 'max:100'],
-            'vehicle_number'      => ['nullable', 'string', 'max:100'],
-            'remarks'             => ['nullable', 'string'],
+            'receipt_date' => ['required', 'date'],
+            'is_client_material' => ['nullable', 'boolean'],
+            'purchase_order_id' => ['nullable', 'integer', 'exists:purchase_orders,id'],
+            'po_number' => ['nullable', 'string', 'max:50'],
+            'supplier_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'project_id' => ['nullable', 'integer', 'exists:projects,id'],
+            'client_party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'invoice_number' => ['nullable', 'string', 'max:100'],
+            'invoice_date' => ['required', 'date'],
+            'challan_number' => ['nullable', 'string', 'max:100'],
+            'vehicle_number' => ['nullable', 'string', 'max:100'],
+            'remarks' => ['nullable', 'string'],
 
-            'lines'                         => ['required', 'array', 'min:1'],
-            'lines.*.purchase_order_item_id'=> ['nullable', 'integer', 'exists:purchase_order_items,id'],
-            'lines.*.item_id'               => ['required', 'integer', 'exists:items,id'],
-            'lines.*.brand'                => ['nullable', 'string', 'max:100'],
-            'lines.*.material_category'     => ['required', 'string', 'max:50'],
-            'lines.*.thickness_mm'          => ['nullable', 'numeric', 'min:0'],
-            'lines.*.width_mm'              => ['nullable', 'numeric', 'min:0'],
-            'lines.*.length_mm'             => ['nullable', 'numeric', 'min:0'],
-            'lines.*.section_profile'       => ['nullable', 'string', 'max:100'],
-            'lines.*.grade'                 => ['nullable', 'string', 'max:100'],
-            'lines.*.qty_pcs'               => ['required', 'integer', 'min:1'],
-            'lines.*.received_weight_kg'    => ['nullable', 'numeric', 'min:0'],
-            'lines.*.uom_id'                => ['required', 'integer', 'exists:uoms,id'],
-            'lines.*.remarks'               => ['nullable', 'string'],
+            'lines' => ['required', 'array', 'min:1'],
+            'lines.*.purchase_order_item_id' => ['nullable', 'integer', 'exists:purchase_order_items,id'],
+            'lines.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'lines.*.brand' => ['nullable', 'string', 'max:100'],
+            'lines.*.material_category' => ['required', 'string', 'max:50'],
+            'lines.*.thickness_mm' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.width_mm' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.length_mm' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.section_profile' => ['nullable', 'string', 'max:100'],
+            'lines.*.grade' => ['nullable', 'string', 'max:100'],
+            'lines.*.qty_pcs' => ['required', 'integer', 'min:1'],
+            'lines.*.received_weight_kg' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.uom_id' => ['required', 'integer', 'exists:uoms,id'],
+            'lines.*.remarks' => ['nullable', 'string'],
         ]);
 
         $isClientMaterial = (bool) ($data['is_client_material'] ?? false);
 
         $project = null;
-        if (! empty($data['project_id'])) {
+        if (!empty($data['project_id'])) {
             $project = Project::find($data['project_id']);
         }
 
@@ -316,11 +406,11 @@ class MaterialReceiptController extends Controller
 
         // Purchase Order linkage (only for own material)
         $purchaseOrder = null;
-        if (! empty($data['purchase_order_id'])) {
+        if (!empty($data['purchase_order_id'])) {
             $purchaseOrder = PurchaseOrder::with(['project', 'vendor'])
                 ->find($data['purchase_order_id']);
 
-            if (! $purchaseOrder) {
+            if (!$purchaseOrder) {
                 return back()
                     ->withInput()
                     ->withErrors(['purchase_order_id' => 'Selected purchase order not found.']);
@@ -351,7 +441,7 @@ class MaterialReceiptController extends Controller
 
         // Guard: do not allow GRN to receive more than the Purchase Order quantity per line
         // including optional tolerance % defined on the PO item (grn_tolerance_percent).
-        if (! empty($data['purchase_order_id']) && isset($purchaseOrder)) {
+        if (!empty($data['purchase_order_id']) && isset($purchaseOrder)) {
             // Map PO items by id
             $poItems = $purchaseOrder->items()->get()->keyBy('id');
 
@@ -362,7 +452,7 @@ class MaterialReceiptController extends Controller
                 ->unique()
                 ->all();
 
-            if (! empty($poItemIds)) {
+            if (!empty($poItemIds)) {
                 $receivedAgg = MaterialReceiptLine::query()
                     ->whereIn('purchase_order_item_id', $poItemIds)
                     ->select(
@@ -376,11 +466,11 @@ class MaterialReceiptController extends Controller
 
                 foreach ($data['lines'] as $index => $lineData) {
                     $poItemId = $lineData['purchase_order_item_id'] ?? null;
-                    if (! $poItemId) {
+                    if (!$poItemId) {
                         continue;
                     }
 
-                    if (! isset($poItems[$poItemId])) {
+                    if (!isset($poItems[$poItemId])) {
                         return back()
                             ->withInput()
                             ->withErrors([
@@ -389,20 +479,20 @@ class MaterialReceiptController extends Controller
                     }
 
                     $poItem = $poItems[$poItemId];
-                    $row    = $receivedAgg->get($poItemId);
+                    $row = $receivedAgg->get($poItemId);
 
                     $category = $lineData['material_category'] ?? $poItem->material_category ?? null;
 
                     if (in_array($category, ['steel_plate', 'steel_section'], true)) {
                         // Raw material: compare by pieces
-                        $poQty       = (float) ($poItem->qty_pcs ?? 0);
+                        $poQty = (float) ($poItem->qty_pcs ?? 0);
                         $alreadyRecv = $row ? (float) ($row->total_qty_pcs ?? 0) : 0.0;
-                        $thisRecv    = (float) ($lineData['qty_pcs'] ?? 0);
+                        $thisRecv = (float) ($lineData['qty_pcs'] ?? 0);
                     } else {
                         // Non-raw (consumables, bought-out, etc.): compare by GRN quantity field
-                        $poQty       = (float) ($poItem->quantity ?? 0);
+                        $poQty = (float) ($poItem->quantity ?? 0);
                         $alreadyRecv = $row ? (float) ($row->total_weight_kg ?? 0) : 0.0;
-                        $thisRecv    = (float) ($lineData['received_weight_kg'] ?? 0);
+                        $thisRecv = (float) ($lineData['received_weight_kg'] ?? 0);
                     }
 
                     if ($poQty <= 0) {
@@ -459,7 +549,7 @@ class MaterialReceiptController extends Controller
                 ->withErrors(['client_party_id' => 'Client is required for client material.']);
         }
 
-        if (! $isClientMaterial && empty($data['supplier_id'])) {
+        if (!$isClientMaterial && empty($data['supplier_id'])) {
             return back()
                 ->withInput()
                 ->withErrors(['supplier_id' => 'Supplier is required for own material.']);
@@ -469,26 +559,26 @@ class MaterialReceiptController extends Controller
 
         try {
             $receipt = new MaterialReceipt();
-            $receipt->receipt_date       = $data['receipt_date'];
+            $receipt->receipt_date = $data['receipt_date'];
             $receipt->is_client_material = $isClientMaterial;
-            $receipt->purchase_order_id  = $data['purchase_order_id'] ?? null;
-            $receipt->po_number          = $data['po_number'] ?? null;
-            $receipt->supplier_id        = $data['supplier_id'] ?? null;
-            $receipt->project_id         = $data['project_id'] ?? null;
-            $receipt->client_party_id    = $data['client_party_id'] ?? null;
-            $receipt->invoice_number     = $data['invoice_number'] ?? null;
-            $receipt->invoice_date       = $data['invoice_date'] ?? null;
-            $receipt->challan_number     = $data['challan_number'] ?? null;
-            $receipt->vehicle_number     = $data['vehicle_number'] ?? null;
-            $receipt->status             = 'qc_pending';
-            $receipt->created_by         = $request->user()?->id;
-            $receipt->remarks            = $data['remarks'] ?? null;
+            $receipt->purchase_order_id = $data['purchase_order_id'] ?? null;
+            $receipt->po_number = $data['po_number'] ?? null;
+            $receipt->supplier_id = $data['supplier_id'] ?? null;
+            $receipt->project_id = $data['project_id'] ?? null;
+            $receipt->client_party_id = $data['client_party_id'] ?? null;
+            $receipt->invoice_number = $data['invoice_number'] ?? null;
+            $receipt->invoice_date = $data['invoice_date'] ?? null;
+            $receipt->challan_number = $data['challan_number'] ?? null;
+            $receipt->vehicle_number = $data['vehicle_number'] ?? null;
+            $receipt->status = 'qc_pending';
+            $receipt->created_by = $request->user()?->id;
+            $receipt->remarks = $data['remarks'] ?? null;
             $receipt->save();
 
             // Generate receipt number via central service (same pattern GRN-YY-XXXX)
-    		$receipt->receipt_number = app(\App\Services\DocumentNumberService::class)
-    	    ->materialReceipt($receipt);
-   			 $receipt->save();
+            $receipt->receipt_number = app(\App\Services\DocumentNumberService::class)
+                ->materialReceipt($receipt);
+            $receipt->save();
             // Resolve brand fallback from PO/Indent/RFQ for lines where brand is not provided in request.
             // This keeps brand consistent across Indent → RFQ → PO → GRN → Store stock even if UI does not post brand.
             $brandByPoItemId = [];
@@ -499,17 +589,17 @@ class MaterialReceiptController extends Controller
                 ->values()
                 ->all();
 
-            if (! empty($poItemIdsForBrand)) {
+            if (!empty($poItemIdsForBrand)) {
                 $poRows = DB::table('purchase_order_items')
                     ->whereIn('id', $poItemIdsForBrand)
                     ->select('id', 'brand', 'purchase_indent_item_id', 'purchase_rfq_item_id')
                     ->get();
 
                 $indentIds = $poRows->pluck('purchase_indent_item_id')->filter()->unique()->values()->all();
-                $rfqIds    = $poRows->pluck('purchase_rfq_item_id')->filter()->unique()->values()->all();
+                $rfqIds = $poRows->pluck('purchase_rfq_item_id')->filter()->unique()->values()->all();
 
                 $indentBrandMap = [];
-                if (! empty($indentIds)) {
+                if (!empty($indentIds)) {
                     $indentBrandMap = DB::table('purchase_indent_items')
                         ->whereIn('id', $indentIds)
                         ->pluck('brand', 'id')
@@ -517,7 +607,7 @@ class MaterialReceiptController extends Controller
                 }
 
                 $rfqBrandMap = [];
-                if (! empty($rfqIds)) {
+                if (!empty($rfqIds)) {
                     $rfqBrandMap = DB::table('purchase_rfq_items')
                         ->whereIn('id', $rfqIds)
                         ->pluck('brand', 'id')
@@ -527,15 +617,15 @@ class MaterialReceiptController extends Controller
                 foreach ($poRows as $r) {
                     $b = $r->brand ?? null;
 
-                    if ((! $b || trim((string) $b) === '') && ! empty($r->purchase_indent_item_id)) {
+                    if ((!$b || trim((string) $b) === '') && !empty($r->purchase_indent_item_id)) {
                         $b = $indentBrandMap[$r->purchase_indent_item_id] ?? null;
                     }
 
-                    if ((! $b || trim((string) $b) === '') && ! empty($r->purchase_rfq_item_id)) {
+                    if ((!$b || trim((string) $b) === '') && !empty($r->purchase_rfq_item_id)) {
                         $b = $rfqBrandMap[$r->purchase_rfq_item_id] ?? null;
                     }
 
-                    if (! is_null($b)) {
+                    if (!is_null($b)) {
                         $b = trim((string) $b);
                         if ($b === '') {
                             $b = null;
@@ -555,7 +645,7 @@ class MaterialReceiptController extends Controller
                 $poItemId = $lineData['purchase_order_item_id'] ?? null;
 
                 $brandResolved = $lineData['brand'] ?? null;
-                if (! is_null($brandResolved)) {
+                if (!is_null($brandResolved)) {
                     $brandResolved = trim((string) $brandResolved);
                     if ($brandResolved === '') {
                         $brandResolved = null;
@@ -568,21 +658,32 @@ class MaterialReceiptController extends Controller
                     $brandResolved = $brandByPoItemId[(int) $poItemId] ?? null;
                 }
 
+                $item = Item::query()->find($lineData['item_id']);
+                $resolvedThickness = $lineData['thickness_mm'] ?? null;
+                if ($resolvedThickness === '' || $resolvedThickness === null) {
+                    $resolvedThickness = $item?->thickness;
+                }
+
+                $resolvedGrade = $lineData['grade'] ?? null;
+                if ($resolvedGrade === '' || $resolvedGrade === null) {
+                    $resolvedGrade = $item?->grade;
+                }
+
                 $line = $receipt->lines()->create([
-                    'item_id'               => $lineData['item_id'],
-                    'brand'                => $brandResolved,
-                    'material_category'     => $lineData['material_category'],
-                    'thickness_mm'          => $lineData['thickness_mm'] ?? null,
-                    'width_mm'              => $lineData['width_mm'] ?? null,
-                    'length_mm'             => $lineData['length_mm'] ?? null,
-                    'section_profile'       => $lineData['section_profile'] ?? null,
-                    'grade'                 => $lineData['grade'] ?? null,
-                    'qty_pcs'               => $lineData['qty_pcs'],
-                    'received_weight_kg'    => $lineData['received_weight_kg'] ?? null,
-                    'uom_id'                => $lineData['uom_id'],
-                    'status'                => 'pending',
-                    'remarks'               => $lineData['remarks'] ?? null,
-                    'purchase_order_item_id'=> $lineData['purchase_order_item_id'] ?? null,
+                    'item_id' => $lineData['item_id'],
+                    'brand' => $brandResolved,
+                    'material_category' => $lineData['material_category'],
+                    'thickness_mm' => $resolvedThickness,
+                    'width_mm' => $lineData['width_mm'] ?? null,
+                    'length_mm' => $lineData['length_mm'] ?? null,
+                    'section_profile' => $lineData['section_profile'] ?? null,
+                    'grade' => $resolvedGrade,
+                    'qty_pcs' => $lineData['qty_pcs'],
+                    'received_weight_kg' => $lineData['received_weight_kg'] ?? null,
+                    'uom_id' => $lineData['uom_id'],
+                    'status' => 'pending',
+                    'remarks' => $lineData['remarks'] ?? null,
+                    'purchase_order_item_id' => $lineData['purchase_order_item_id'] ?? null,
                 ]);
 
                 $qtyPcs = max(1, (int) $lineData['qty_pcs']);
@@ -591,60 +692,60 @@ class MaterialReceiptController extends Controller
                 if ($totalWeight === '') {
                     $totalWeight = null;
                 }
-                $totalWeight = ! is_null($totalWeight) ? (float) $totalWeight : null;
+                $totalWeight = !is_null($totalWeight) ? (float) $totalWeight : null;
 
                 // Steel Plate -> create one stock row per piece (for Plate No / Heat No traceability)
                 // Steel Section -> create ONE combined stock row (avoid huge record counts; TC can be linked once)
                 if ($line->material_category === 'steel_section') {
                     StoreStockItem::create([
                         'material_receipt_line_id' => $line->id,
-                        'item_id'                  => $line->item_id,
-                        'brand'                    => $line->brand,
-                        'project_id'               => $receipt->project_id,
-                        'client_party_id'          => $receipt->client_party_id,
-                        'is_client_material'       => $isClientMaterial,
-                        'material_category'        => $line->material_category,
-                        'thickness_mm'             => $line->thickness_mm,
-                        'width_mm'                 => $line->width_mm,
-                        'length_mm'                => $line->length_mm,
-                        'section_profile'          => $line->section_profile,
-                        'grade'                    => $line->grade,
-                        'qty_pcs_total'            => $qtyPcs,
-                        'qty_pcs_available'        => 0,
-                        'weight_kg_total'          => $totalWeight,
-                        'weight_kg_available'      => 0,
-                        'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
-                        'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                        'status'                   => 'blocked_qc',
+                        'item_id' => $line->item_id,
+                        'brand' => $line->brand,
+                        'project_id' => $receipt->project_id,
+                        'client_party_id' => $receipt->client_party_id,
+                        'is_client_material' => $isClientMaterial,
+                        'material_category' => $line->material_category,
+                        'thickness_mm' => $line->thickness_mm,
+                        'width_mm' => $line->width_mm,
+                        'length_mm' => $line->length_mm,
+                        'section_profile' => $line->section_profile,
+                        'grade' => $line->grade,
+                        'qty_pcs_total' => $qtyPcs,
+                        'qty_pcs_available' => 0,
+                        'weight_kg_total' => $totalWeight,
+                        'weight_kg_available' => 0,
+                        'source_type' => $isClientMaterial ? 'client_grn' : 'purchase_grn',
+                        'source_reference' => $receipt->receipt_number . '-L' . ($index + 1),
+                        'status' => 'blocked_qc',
                     ]);
                 } else {
                     $perPieceWeight = null;
 
-                    if (! is_null($totalWeight) && $qtyPcs > 0) {
+                    if (!is_null($totalWeight) && $qtyPcs > 0) {
                         $perPieceWeight = (float) $totalWeight / $qtyPcs;
                     }
 
                     for ($i = 0; $i < $qtyPcs; $i++) {
                         StoreStockItem::create([
                             'material_receipt_line_id' => $line->id,
-                            'item_id'                  => $line->item_id,
-                            'brand'                    => $line->brand,
-                            'project_id'               => $receipt->project_id,
-                            'client_party_id'          => $receipt->client_party_id,
-                            'is_client_material'       => $isClientMaterial,
-                            'material_category'        => $line->material_category,
-                            'thickness_mm'             => $line->thickness_mm,
-                            'width_mm'                 => $line->width_mm,
-                            'length_mm'                => $line->length_mm,
-                            'section_profile'          => $line->section_profile,
-                            'grade'                    => $line->grade,
-                            'qty_pcs_total'            => 1,
-                            'qty_pcs_available'        => 0,
-                            'weight_kg_total'          => $perPieceWeight,
-                            'weight_kg_available'      => 0,
-                            'source_type'              => $isClientMaterial ? 'client_grn' : 'purchase_grn',
-                            'source_reference'         => $receipt->receipt_number . '-L' . ($index + 1),
-                            'status'                   => 'blocked_qc',
+                            'item_id' => $line->item_id,
+                            'brand' => $line->brand,
+                            'project_id' => $receipt->project_id,
+                            'client_party_id' => $receipt->client_party_id,
+                            'is_client_material' => $isClientMaterial,
+                            'material_category' => $line->material_category,
+                            'thickness_mm' => $line->thickness_mm,
+                            'width_mm' => $line->width_mm,
+                            'length_mm' => $line->length_mm,
+                            'section_profile' => $line->section_profile,
+                            'grade' => $line->grade,
+                            'qty_pcs_total' => 1,
+                            'qty_pcs_available' => 0,
+                            'weight_kg_total' => $perPieceWeight,
+                            'weight_kg_available' => 0,
+                            'source_type' => $isClientMaterial ? 'client_grn' : 'purchase_grn',
+                            'source_reference' => $receipt->receipt_number . '-L' . ($index + 1),
+                            'status' => 'blocked_qc',
                         ]);
                     }
                 }
@@ -688,7 +789,7 @@ class MaterialReceiptController extends Controller
     public function uploadHeaderAttachment(Request $request, MaterialReceipt $materialReceipt): RedirectResponse
     {
         $data = $request->validate([
-            'file'     => ['required', 'file', 'max:10240'], // 10 MB
+            'file' => ['required', 'file', 'max:10240'], // 10 MB
             'category' => ['nullable', 'string', 'max:50'],
         ]);
 
@@ -696,12 +797,12 @@ class MaterialReceiptController extends Controller
         $path = $file->store('attachments', 'public');
 
         $materialReceipt->attachments()->create([
-            'category'      => $data['category'] ?? null,
-            'path'          => $path,
+            'category' => $data['category'] ?? null,
+            'path' => $path,
             'original_name' => $file->getClientOriginalName(),
-            'mime_type'     => $file->getClientMimeType(),
-            'size'          => $file->getSize(),
-            'uploaded_by'   => $request->user()?->id,
+            'mime_type' => $file->getClientMimeType(),
+            'size' => $file->getSize(),
+            'uploaded_by' => $request->user()?->id,
         ]);
 
         return back()->with('success', 'Document uploaded successfully.');
@@ -710,7 +811,7 @@ class MaterialReceiptController extends Controller
     public function uploadLineAttachment(Request $request, MaterialReceiptLine $materialReceiptLine): RedirectResponse
     {
         $data = $request->validate([
-            'file'     => ['required', 'file', 'max:10240'],
+            'file' => ['required', 'file', 'max:10240'],
             'category' => ['nullable', 'string', 'max:50'],
         ]);
 
@@ -718,12 +819,12 @@ class MaterialReceiptController extends Controller
         $path = $file->store('attachments', 'public');
 
         $materialReceiptLine->attachments()->create([
-            'category'      => $data['category'] ?? null,
-            'path'          => $path,
+            'category' => $data['category'] ?? null,
+            'path' => $path,
             'original_name' => $file->getClientOriginalName(),
-            'mime_type'     => $file->getClientMimeType(),
-            'size'          => $file->getSize(),
-            'uploaded_by'   => $request->user()?->id,
+            'mime_type' => $file->getClientMimeType(),
+            'size' => $file->getSize(),
+            'uploaded_by' => $request->user()?->id,
         ]);
 
         return back()->with('success', 'Line document uploaded successfully.');
@@ -733,7 +834,7 @@ class MaterialReceiptController extends Controller
     {
         $disk = 'public';
 
-        if (! Storage::disk($disk)->exists($attachment->path)) {
+        if (!Storage::disk($disk)->exists($attachment->path)) {
             abort(404, 'File not found.');
         }
 
@@ -844,41 +945,41 @@ class MaterialReceiptController extends Controller
         if ($stocks->isEmpty()) {
             return;
         }// Guard: do not allow reverting QC PASSED if any stock has already moved out (issue/consume/reserve/etc.)
-if ($oldStatus === 'qc_passed' && $newStatus !== 'qc_passed') {
-    $stockIds = $stocks->pluck('id')->all();
+        if ($oldStatus === 'qc_passed' && $newStatus !== 'qc_passed') {
+            $stockIds = $stocks->pluck('id')->all();
 
-    // Extra safety: if any Store Issue lines exist against these stock rows, do not allow revert.
-    $hasIssueLines = false;
-    if (! empty($stockIds)) {
-        $hasIssueLines = DB::table('store_issue_lines')
-            ->whereIn('store_stock_item_id', $stockIds)
-            ->exists();
-    }
+            // Extra safety: if any Store Issue lines exist against these stock rows, do not allow revert.
+            $hasIssueLines = false;
+            if (!empty($stockIds)) {
+                $hasIssueLines = DB::table('store_issue_lines')
+                    ->whereIn('store_stock_item_id', $stockIds)
+                    ->exists();
+            }
 
-    foreach ($stocks as $s) {
-        $pcsTotal  = (float) ($s->qty_pcs_total ?? 0);
-        $pcsAvail  = (float) ($s->qty_pcs_available ?? 0);
-        $wtTotal   = (float) ($s->weight_kg_total ?? 0);
-        $wtAvail   = (float) ($s->weight_kg_available ?? 0);
+            foreach ($stocks as $s) {
+                $pcsTotal = (float) ($s->qty_pcs_total ?? 0);
+                $pcsAvail = (float) ($s->qty_pcs_available ?? 0);
+                $wtTotal = (float) ($s->weight_kg_total ?? 0);
+                $wtAvail = (float) ($s->weight_kg_available ?? 0);
 
-        $pcsIssued = $pcsTotal > 0 ? ($pcsTotal - $pcsAvail) : 0.0;
-        $wtIssued  = $wtTotal > 0 ? ($wtTotal - $wtAvail) : 0.0;
+                $pcsIssued = $pcsTotal > 0 ? ($pcsTotal - $pcsAvail) : 0.0;
+                $wtIssued = $wtTotal > 0 ? ($wtTotal - $wtAvail) : 0.0;
 
-        // If status indicates the stock has moved, or quantities indicate it has moved, block revert.
-        $movedByStatus = in_array((string) $s->status, ['reserved', 'issued', 'consumed', 'scrap'], true);
-        $movedByQty    = ($pcsIssued > 0.0001) || ($wtIssued > 0.0001);
+                // If status indicates the stock has moved, or quantities indicate it has moved, block revert.
+                $movedByStatus = in_array((string) $s->status, ['reserved', 'issued', 'consumed', 'scrap'], true);
+                $movedByQty = ($pcsIssued > 0.0001) || ($wtIssued > 0.0001);
 
-        if ($hasIssueLines || $movedByStatus || $movedByQty) {
-            throw new \RuntimeException('Cannot change GRN status from QC PASSED because stock has already been issued/consumed/reserved.');
+                if ($hasIssueLines || $movedByStatus || $movedByQty) {
+                    throw new \RuntimeException('Cannot change GRN status from QC PASSED because stock has already been issued/consumed/reserved.');
+                }
+            }
         }
-    }
-}
 
-$makeAvailable = ($newStatus === 'qc_passed');
+        $makeAvailable = ($newStatus === 'qc_passed');
 
         foreach ($stocks as $s) {
             $pcsTotal = (float) ($s->qty_pcs_total ?? 0);
-            $wtTotal  = (float) ($s->weight_kg_total ?? 0);
+            $wtTotal = (float) ($s->weight_kg_total ?? 0);
 
             if ($makeAvailable) {
                 // Do not reactivate stock that has been vendor-returned / scrapped / already moved.
@@ -887,28 +988,28 @@ $makeAvailable = ($newStatus === 'qc_passed');
                 } else {
                     // Only unlock if it is currently QC-blocked (or effectively zero available).
                     $pcsAvail = (float) ($s->qty_pcs_available ?? 0);
-                    $wtAvail  = (float) ($s->weight_kg_available ?? 0);
+                    $wtAvail = (float) ($s->weight_kg_available ?? 0);
                     $isQcBlocked = (($s->status ?? null) === 'blocked_qc') || (($pcsAvail <= 0.0001) && ($wtAvail <= 0.0001));
 
                     if ($isQcBlocked) {
-                        $s->qty_pcs_available   = $pcsTotal;
+                        $s->qty_pcs_available = $pcsTotal;
                         $s->weight_kg_available = $wtTotal;
                     }
                 }
             } else {
-                $s->qty_pcs_available   = 0;
+                $s->qty_pcs_available = 0;
                 $s->weight_kg_available = 0;
             }
 
             // Explicitly manage status so QC-hold stock cannot leak into operational screens.
             if ($makeAvailable) {
                 // When QC is passed, stock becomes operationally available.
-                if (! $s->status || ($s->status === 'blocked_qc')) {
+                if (!$s->status || ($s->status === 'blocked_qc')) {
                     $s->status = 'available';
                 }
             } else {
                 // When QC is not passed, block stock (unless it is already in a terminal/moved state).
-                if (! $s->status || ($s->status === 'available')) {
+                if (!$s->status || ($s->status === 'available')) {
                     $s->status = 'blocked_qc';
                 }
             }
@@ -929,7 +1030,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
     protected function inferGrnCategoryFromTaxonomy(?string $materialTypeCode, ?string $materialCategoryCode): string
     {
         $type = strtoupper(trim((string) $materialTypeCode));
-        $cat  = strtoupper(trim((string) $materialCategoryCode));
+        $cat = strtoupper(trim((string) $materialCategoryCode));
 
         if ($type === 'CONSUMABLE') {
             return 'consumable';
@@ -952,7 +1053,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
     }
 
 
-		 /**
+    /**
      * Recalculate PO item running totals for all QC-passed GRNs of a purchase order.
      *
      * It sets:
@@ -992,7 +1093,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
         foreach ($poItems as $itemId => $poItem) {
             $row = $totals->get($itemId);
 
-            $poItem->qty_pcs_received  = $row ? (float) $row->total_qty_pcs : 0.0;
+            $poItem->qty_pcs_received = $row ? (float) $row->total_qty_pcs : 0.0;
             $poItem->quantity_received = $row ? (float) $row->total_quantity : 0.0;
             $poItem->save();
         }
@@ -1050,7 +1151,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
             $agg = $rows->get($indentItem->id);
 
             $totalWeight = $agg ? (float) $agg->total_weight : 0.0;
-            $totalPcs    = $agg ? (float) $agg->total_pcs : 0.0;
+            $totalPcs = $agg ? (float) $agg->total_pcs : 0.0;
 
             $received = $totalWeight > 0.000001 ? $totalWeight : $totalPcs;
 
@@ -1110,7 +1211,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
                 continue;
             }
 
-            $allClosed   = $items->every(function ($it) {
+            $allClosed = $items->every(function ($it) {
                 return (int) ($it->is_closed ?? 0) === 1;
             });
 
@@ -1139,127 +1240,127 @@ $makeAvailable = ($newStatus === 'qc_passed');
      */
     public function destroy(MaterialReceipt $materialReceipt): RedirectResponse
     {
-    // QC PASSED GRNs cannot be deleted.
-    if ($materialReceipt->status === 'qc_passed') {
-        return back()->with('error', 'QC PASSED GRN cannot be deleted. Use vendor return process instead.');
-    }
+        // QC PASSED GRNs cannot be deleted.
+        if ($materialReceipt->status === 'qc_passed') {
+            return back()->with('error', 'QC PASSED GRN cannot be deleted. Use vendor return process instead.');
+        }
 
-    DB::beginTransaction();
+        DB::beginTransaction();
 
-    try {
-        $materialReceipt->load(['lines.attachments', 'attachments']);
+        try {
+            $materialReceipt->load(['lines.attachments', 'attachments']);
 
-        $lineIds = $materialReceipt->lines->pluck('id')->all();
+            $lineIds = $materialReceipt->lines->pluck('id')->all();
 
-        // Guard: do not allow delete if any linked stock has actually moved/been used
-        if (! empty($lineIds)) {
-            $stocks = StoreStockItem::query()
-                ->whereIn('material_receipt_line_id', $lineIds)
-                ->lockForUpdate()
-                ->get();
+            // Guard: do not allow delete if any linked stock has actually moved/been used
+            if (!empty($lineIds)) {
+                $stocks = StoreStockItem::query()
+                    ->whereIn('material_receipt_line_id', $lineIds)
+                    ->lockForUpdate()
+                    ->get();
 
-            if ($stocks->isNotEmpty()) {
-                $stockIds = $stocks->pluck('id')->all();
+                if ($stocks->isNotEmpty()) {
+                    $stockIds = $stocks->pluck('id')->all();
 
-                // ------------------------------------------------------------------
-                // IMPORTANT FIX:
-                // Do NOT use (total - available) as "moved" here because for QC-hold
-                // GRNs you intentionally set available = 0 even when nothing moved.
-                // ------------------------------------------------------------------
+                    // ------------------------------------------------------------------
+                    // IMPORTANT FIX:
+                    // Do NOT use (total - available) as "moved" here because for QC-hold
+                    // GRNs you intentionally set available = 0 even when nothing moved.
+                    // ------------------------------------------------------------------
 
-                // 1) If stock status itself shows movement/usage, block delete
-                $movedByStatus = $stocks->contains(function ($s) {
-                    return in_array((string) $s->status, [
-                        'reserved',
-                        'issued',
-                        'consumed',
-                        'scrap',
-                        'returned_vendor',
-                    ], true);
-                });
+                    // 1) If stock status itself shows movement/usage, block delete
+                    $movedByStatus = $stocks->contains(function ($s) {
+                        return in_array((string) $s->status, [
+                            'reserved',
+                            'issued',
+                            'consumed',
+                            'scrap',
+                            'returned_vendor',
+                        ], true);
+                    });
 
-                // 2) If any movement/reference tables link to this stock, block delete
-                $hasIssueLines = DB::table('store_issue_lines')
-                    ->whereIn('store_stock_item_id', $stockIds)
-                    ->exists();
+                    // 2) If any movement/reference tables link to this stock, block delete
+                    $hasIssueLines = DB::table('store_issue_lines')
+                        ->whereIn('store_stock_item_id', $stockIds)
+                        ->exists();
 
-                $hasReturnLines = DB::table('store_return_lines')
-                    ->where(function ($q) use ($stockIds) {
-                        $q->whereIn('store_stock_item_id', $stockIds)
-                          ->orWhereIn('scrap_stock_item_id', $stockIds);
-                    })
-                    ->exists();
+                    $hasReturnLines = DB::table('store_return_lines')
+                        ->where(function ($q) use ($stockIds) {
+                            $q->whereIn('store_stock_item_id', $stockIds)
+                                ->orWhereIn('scrap_stock_item_id', $stockIds);
+                        })
+                        ->exists();
 
-                $hasGatePassLines = DB::table('gate_pass_lines')
-                    ->whereIn('store_stock_item_id', $stockIds)
-                    ->exists();
+                    $hasGatePassLines = DB::table('gate_pass_lines')
+                        ->whereIn('store_stock_item_id', $stockIds)
+                        ->exists();
 
-                $hasStockAdjustments = DB::table('store_stock_adjustment_lines')
-                    ->whereIn('store_stock_item_id', $stockIds)
-                    ->exists();
+                    $hasStockAdjustments = DB::table('store_stock_adjustment_lines')
+                        ->whereIn('store_stock_item_id', $stockIds)
+                        ->exists();
 
-                // Production traceability consumes mother stock without store_issue_lines
-                $hasProductionPieces = DB::table('production_pieces')
-                    ->whereIn('mother_stock_item_id', $stockIds)
-                    ->exists();
+                    // Production traceability consumes mother stock without store_issue_lines
+                    $hasProductionPieces = DB::table('production_pieces')
+                        ->whereIn('mother_stock_item_id', $stockIds)
+                        ->exists();
 
-                $hasProductionRemnants = DB::table('production_remnants')
-                    ->where(function ($q) use ($stockIds) {
-                        $q->whereIn('mother_stock_item_id', $stockIds)
-                          ->orWhereIn('remnant_stock_item_id', $stockIds);
-                    })
-                    ->exists();
+                    $hasProductionRemnants = DB::table('production_remnants')
+                        ->where(function ($q) use ($stockIds) {
+                            $q->whereIn('mother_stock_item_id', $stockIds)
+                                ->orWhereIn('remnant_stock_item_id', $stockIds);
+                        })
+                        ->exists();
 
-                if (
-                    $movedByStatus ||
-                    $hasIssueLines ||
-                    $hasReturnLines ||
-                    $hasGatePassLines ||
-                    $hasStockAdjustments ||
-                    $hasProductionPieces ||
-                    $hasProductionRemnants
-                ) {
-                    throw new \RuntimeException('Cannot delete GRN because linked stock has already moved/issued.');
+                    if (
+                        $movedByStatus ||
+                        $hasIssueLines ||
+                        $hasReturnLines ||
+                        $hasGatePassLines ||
+                        $hasStockAdjustments ||
+                        $hasProductionPieces ||
+                        $hasProductionRemnants
+                    ) {
+                        throw new \RuntimeException('Cannot delete GRN because linked stock has already moved/issued.');
+                    }
+
+                    // Delete stock rows (safe because nothing moved and GRN is not QC passed)
+                    StoreStockItem::whereIn('id', $stockIds)->delete();
                 }
-
-                // Delete stock rows (safe because nothing moved and GRN is not QC passed)
-                StoreStockItem::whereIn('id', $stockIds)->delete();
             }
-        }
 
-        // Delete attachments (files + db) - KEEP AS IS
-        $disk = 'public';
+            // Delete attachments (files + db) - KEEP AS IS
+            $disk = 'public';
 
-        foreach ($materialReceipt->attachments as $att) {
-            if ($att->path && Storage::disk($disk)->exists($att->path)) {
-                Storage::disk($disk)->delete($att->path);
-            }
-            $att->delete();
-        }
-
-        foreach ($materialReceipt->lines as $line) {
-            foreach ($line->attachments as $att) {
+            foreach ($materialReceipt->attachments as $att) {
                 if ($att->path && Storage::disk($disk)->exists($att->path)) {
                     Storage::disk($disk)->delete($att->path);
                 }
                 $att->delete();
             }
+
+            foreach ($materialReceipt->lines as $line) {
+                foreach ($line->attachments as $att) {
+                    if ($att->path && Storage::disk($disk)->exists($att->path)) {
+                        Storage::disk($disk)->delete($att->path);
+                    }
+                    $att->delete();
+                }
+            }
+
+            // Delete lines + receipt - KEEP AS IS
+            MaterialReceiptLine::where('material_receipt_id', $materialReceipt->id)->delete();
+            $materialReceipt->delete();
+
+            DB::commit();
+
+            return redirect()
+                ->route('material-receipts.index')
+                ->with('success', 'GRN deleted successfully.');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->with('error', 'Failed to delete GRN: ' . $e->getMessage());
         }
-
-        // Delete lines + receipt - KEEP AS IS
-        MaterialReceiptLine::where('material_receipt_id', $materialReceipt->id)->delete();
-        $materialReceipt->delete();
-
-        DB::commit();
-
-        return redirect()
-            ->route('material-receipts.index')
-            ->with('success', 'GRN deleted successfully.');
-    } catch (\Throwable $e) {
-        DB::rollBack();
-        return back()->with('error', 'Failed to delete GRN: ' . $e->getMessage());
     }
-	}
 
 
     /**
@@ -1279,7 +1380,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
         $lineIds = $materialReceipt->lines->pluck('id')->all();
 
         $stocksByLine = collect();
-        if (! empty($lineIds)) {
+        if (!empty($lineIds)) {
             $stocksByLine = StoreStockItem::query()
                 ->whereIn('material_receipt_line_id', $lineIds)
                 ->orderBy('id')
@@ -1462,7 +1563,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
                 }
 
                 // Plates / other categories - piece-wise returns
-                $selectedStockIds = collect($row['stock_ids'] ?? [])->map(fn ($id) => (int) $id)->filter()->unique()->values();
+                $selectedStockIds = collect($row['stock_ids'] ?? [])->map(fn($id) => (int) $id)->filter()->unique()->values();
 
                 if ($selectedStockIds->isNotEmpty()) {
                     $stocksToReturn = $availableStocks->whereIn('id', $selectedStockIds)->values();
@@ -1551,7 +1652,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
              * - Only if purchase bills are POSTED.
              * - Prevent over-reversal across multiple vendor returns.
              */
-            if (! $materialReceipt->is_client_material && !empty($returnMetrics)) {
+            if (!$materialReceipt->is_client_material && !empty($returnMetrics)) {
                 $companyId = (int) (auth()->user()?->company_id ?: Config::get('accounting.default_company_id', 1));
                 $supplierId = (int) ($materialReceipt->supplier_id ?? 0);
 
@@ -1648,7 +1749,7 @@ $makeAvailable = ($newStatus === 'qc_passed');
                     if ($totalReturnBasic > 0.0001) {
                         $supplier = Party::findOrFail($supplierId);
                         $supplierAccount = app(PartyAccountService::class)->syncAccountForParty($supplier, $companyId);
-                        if (! $supplierAccount) {
+                        if (!$supplierAccount) {
                             throw new \RuntimeException('Unable to resolve supplier ledger for vendor return posting.');
                         }
 
@@ -1665,11 +1766,11 @@ $makeAvailable = ($newStatus === 'qc_passed');
                             ->where('code', $inventoryConsumablesCode)
                             ->first();
 
-                        if ($returnBasicByBucket['raw'] > 0.0001 && ! $inventoryRawAccount) {
+                        if ($returnBasicByBucket['raw'] > 0.0001 && !$inventoryRawAccount) {
                             throw new \RuntimeException('Raw material inventory account not found for code: ' . $inventoryRawCode);
                         }
 
-                        if ($returnBasicByBucket['consumables'] > 0.0001 && ! $inventoryConsumablesAccount) {
+                        if ($returnBasicByBucket['consumables'] > 0.0001 && !$inventoryConsumablesAccount) {
                             throw new \RuntimeException('Consumables inventory account not found for code: ' . $inventoryConsumablesCode);
                         }
 

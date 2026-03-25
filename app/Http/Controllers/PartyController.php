@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePartyRequest;
 use App\Http\Requests\UpdatePartyRequest;
 use App\Models\Party;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 class PartyController extends Controller
 {
@@ -27,23 +28,67 @@ class PartyController extends Controller
 
         $this->middleware('permission:core.party.delete')
             ->only(['destroy']);
+
+        $this->middleware('permission:core.party.create|core.party.update')
+            ->only(['searchGST', 'checkGSTIN']);
     }
 
-public function searchGST(Request $request)
-{
-    $gstin = $request->gstin;
-    $token = DB::table('api_tokens')->value('access_token');
+    public function checkGSTIN(Request $request)
+    {
+        $validated = $request->validate([
+            'gstin' => ['nullable', 'string', 'max:20'],
+        ]);
 
-    $response = Http::withOptions([
-        'verify' => false
-    ])->withHeaders([
-        'accept' => 'application/json',
-        'Authorization' => 'Bearer ' . $token
-    ])->get("https://www.fynamics.co.in/api/gst/search-taxpayer/TP/".$gstin);
+        $gstin = strtoupper(preg_replace('/\s+/', '', (string) ($validated['gstin'] ?? '')));
 
+        if (empty($gstin)) {
+            return response()->json(['exists' => false]);
+        }
 
-    return response()->json($response->json());
-}
+        $existsInParty = Party::where('gstin', $gstin)->exists();
+        $existsInBranch = DB::table('party_branches')->where('gstin', $gstin)->exists();
+
+        return response()->json([
+            'exists' => $existsInParty || $existsInBranch,
+        ]);
+    }
+
+    public function searchGST(Request $request)
+    {
+        $validated = $request->validate([
+            'gstin' => ['required', 'string', 'max:20'],
+        ]);
+
+        $gstin = strtoupper(preg_replace('/\s+/', '', (string) $validated['gstin']));
+        $token = DB::table('api_tokens')->value('access_token');
+
+        if (! $token) {
+            return response()->json([
+                'message' => 'GST service token is not configured.',
+                'error_cd' => 'GST_TOKEN_MISSING',
+            ], 503);
+        }
+
+        try {
+            $response = Http::acceptJson()
+                ->withToken($token)
+                ->timeout(15)
+                ->get("https://www.fynamics.co.in/api/gst/search-taxpayer/TP/{$gstin}")
+                ->throw();
+        } catch (RequestException $e) {
+            $upstream = $e->response;
+
+            return response()->json([
+                'message' => $upstream?->json('message')
+                    ?? $upstream?->body()
+                    ?? 'Unable to fetch GST details right now.',
+                'error_cd' => $upstream?->json('error_cd') ?? 'GST_LOOKUP_FAILED',
+            ], $upstream?->status() ?? 502);
+        }
+
+        return response()->json($response->json());
+    }
+
     /**
      * Display a listing of the parties.
      */
@@ -69,24 +114,24 @@ public function searchGST(Request $request)
         $search = $request->query('q');
         if ($search) {
             $query->where(function ($q) use ($search) {
-                $q->where('code', 'like', '%' . $search . '%')
-                  ->orWhere('name', 'like', '%' . $search . '%')
-                  ->orWhere('legal_name', 'like', '%' . $search . '%')
-                  ->orWhere('gstin', 'like', '%' . $search . '%')
-                  ->orWhereHas('branches', function ($b) use ($search) {
-                      $b->where('gstin', 'like', '%' . $search . '%')
-                        ->orWhere('branch_name', 'like', '%' . $search . '%')
-                        ->orWhere('state', 'like', '%' . $search . '%')
-                        ->orWhere('city', 'like', '%' . $search . '%');
-                  });
+                $q->where('code', 'like', '%'.$search.'%')
+                    ->orWhere('name', 'like', '%'.$search.'%')
+                    ->orWhere('legal_name', 'like', '%'.$search.'%')
+                    ->orWhere('gstin', 'like', '%'.$search.'%')
+                    ->orWhereHas('branches', function ($b) use ($search) {
+                        $b->where('gstin', 'like', '%'.$search.'%')
+                            ->orWhere('branch_name', 'like', '%'.$search.'%')
+                            ->orWhere('state', 'like', '%'.$search.'%')
+                            ->orWhere('city', 'like', '%'.$search.'%');
+                    });
             });
         }
 
-        $parties = $query->orderBy('code')->paginate(25)->withQueryString();
+        $parties = $query->orderBy('code', 'desc')->paginate(25)->withQueryString();
 
         return view('parties.index', [
             'parties' => $parties,
-            'search'  => $search,
+            'search' => $search,
         ]);
     }
 
@@ -95,7 +140,7 @@ public function searchGST(Request $request)
      */
     public function create()
     {
-        $party = new Party();
+        $party = new Party;
 
         return view('parties.create', compact('party'));
     }
@@ -103,42 +148,43 @@ public function searchGST(Request $request)
     /**
      * Store a newly created party in storage.
      */
-   public function store(StorePartyRequest $request)
-{
-    $data = $request->validated();
+    public function store(StorePartyRequest $request)
+    {
+        $data = $request->validated();
 
-    // Party Types
-    $data['is_supplier']   = $request->boolean('is_supplier');
-    $data['is_contractor'] = $request->boolean('is_contractor');
-    $data['is_client']     = $request->boolean('is_client');
+        // Party Types
+        $data['is_supplier'] = $request->boolean('is_supplier');
+        $data['is_contractor'] = $request->boolean('is_contractor');
+        $data['is_client'] = $request->boolean('is_client');
 
-    // Active Status
-    $data['is_active'] = $request->has('is_active')
-        ? $request->boolean('is_active')
-        : true;
+        // Active Status
+        $data['is_active'] = $request->has('is_active')
+            ? $request->boolean('is_active')
+            : true;
 
-    // GSTIN Yes / No
-    $data['has_gstin'] = $request->has('has_gstin')
-        ? $request->boolean('has_gstin')
-        : null;
+        // GSTIN Yes / No
+        $data['has_gstin'] = $request->has('has_gstin')
+            ? $request->boolean('has_gstin')
+            : null;
 
-    // If GSTIN = No then remove gstin value
-    if (!$data['has_gstin']) {
-        $data['gstin'] = null;
+        // If GSTIN = No then remove gstin value
+        if (! $data['has_gstin']) {
+            $data['gstin'] = null;
+        }
+
+        // Auto Generate Code
+        if (empty($data['code'])) {
+            $data['code'] = $this->generatePartyCode($data);
+        }
+
+        // Create Party
+        $party = Party::create($data);
+
+        return redirect()
+            ->route('parties.show', $party)
+            ->with('success', 'Party created successfully.');
     }
 
-    // Auto Generate Code
-    if (empty($data['code'])) {
-        $data['code'] = $this->generatePartyCode($data);
-    }
-
-    // Create Party
-    $party = Party::create($data);
-
-    return redirect()
-        ->route('parties.show', $party)
-        ->with('success', 'Party created successfully.');
-}
     /**
      * Display the specified party.
      */
@@ -164,10 +210,10 @@ public function searchGST(Request $request)
     {
         $data = $request->validated();
 
-        $data['is_supplier']   = $request->boolean('is_supplier');
+        $data['is_supplier'] = $request->boolean('is_supplier');
         $data['is_contractor'] = $request->boolean('is_contractor');
-        $data['is_client']     = $request->boolean('is_client');
-        $data['is_active']     = $request->has('is_active')
+        $data['is_client'] = $request->boolean('is_client');
+        $data['is_active'] = $request->has('is_active')
             ? $request->boolean('is_active')
             : false;
 
@@ -185,7 +231,13 @@ public function searchGST(Request $request)
      */
     public function destroy(Party $party)
     {
-        $party->delete();
+        try {
+            $party->delete();
+        } catch (QueryException $e) {
+            return redirect()
+                ->route('parties.show', $party)
+                ->with('error', 'This party is already linked to other records and cannot be deleted.');
+        }
 
         return redirect()
             ->route('parties.index')
@@ -202,22 +254,22 @@ public function searchGST(Request $request)
         // Decide prefix by type
         $prefix = 'PTY';
 
-        $isSupplier   = !empty($data['is_supplier']);
-        $isContractor = !empty($data['is_contractor']);
-        $isClient     = !empty($data['is_client']);
+        $isSupplier = ! empty($data['is_supplier']);
+        $isContractor = ! empty($data['is_contractor']);
+        $isClient = ! empty($data['is_client']);
 
-        if ($isSupplier && !$isContractor && !$isClient) {
+        if ($isSupplier && ! $isContractor && ! $isClient) {
             $prefix = 'SUP';
-        } elseif ($isContractor && !$isSupplier && !$isClient) {
+        } elseif ($isContractor && ! $isSupplier && ! $isClient) {
             $prefix = 'CON';
-        } elseif ($isClient && !$isSupplier && !$isContractor) {
+        } elseif ($isClient && ! $isSupplier && ! $isContractor) {
             $prefix = 'CLI';
         }
 
         $year = now()->format('Y');
 
         // Look for last code with same prefix + year
-        $like = $prefix . '-' . $year . '-%';
+        $like = $prefix.'-'.$year.'-%';
 
         $lastCode = Party::where('code', 'like', $like)
             ->orderByDesc('id')
@@ -236,6 +288,3 @@ public function searchGST(Request $request)
         return sprintf('%s-%s-%04d', $prefix, $year, $nextSeq);
     }
 }
-
-
-

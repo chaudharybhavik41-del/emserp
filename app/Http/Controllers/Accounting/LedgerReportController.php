@@ -88,7 +88,7 @@ class LedgerReportController extends Controller
         }
 
         // Fetch ledger entries (posted vouchers only)
-        $ledgerEntriesQuery = VoucherLine::with(['voucher', 'costCenter'])
+        $ledgerEntriesQuery = VoucherLine::with(['voucher', 'voucher.lines.account', 'costCenter'])
             ->where('account_id', $account->id)
             ->whereHas('voucher', function ($q) use ($companyId, $fromDate, $toDate, $projectId) {
                 $q->where('company_id', $companyId)
@@ -110,6 +110,12 @@ class LedgerReportController extends Controller
             ->orderBy('line_no');
 
         $ledgerEntries = $ledgerEntriesQuery->get();
+        
+        // Filter by selected entry IDs if provided
+        $entryIds = $request->get('entry_ids');
+        if (is_array($entryIds) && !empty($entryIds)) {
+            $ledgerEntries = $ledgerEntries->whereIn('id', array_map('intval', $entryIds));
+        }
 
         // Optional: load full voucher break-up (all voucher lines) for each entry.
         // Useful for party statements (shows TDS/GST/Retention lines along with net payable).
@@ -178,6 +184,12 @@ class LedgerReportController extends Controller
         $analyticalRows = collect();
         if ($viewMode === 'analytical') {
             $analyticalRows = $this->buildAnalyticalPartyRows($account, $ledgerEntries, $openingBalance);
+            
+            // Filter by selected row indices if provided
+            $rowIdxs = $request->get('row_idxs');
+            if (is_array($rowIdxs) && !empty($rowIdxs)) {
+                $analyticalRows = $analyticalRows->filter(fn($_, $idx) => in_array((string) $idx, array_map('strval', $rowIdxs)));
+            }
         }
 
         if ($export === 'csv') {
@@ -707,6 +719,7 @@ class LedgerReportController extends Controller
         $rows = collect([
             [
                 'date' => '',
+                'party_name' => '',
                 'particulars' => 'OPENING BALANCE',
                 'voucher_type' => '',
                 'voucher_no' => '',
@@ -717,15 +730,35 @@ class LedgerReportController extends Controller
 
         foreach ($ledgerEntries as $e) {
             $date = $e->voucher?->voucher_date ? optional($e->voucher->voucher_date)->format('d-m-Y') : '';
+            
+            $isDebit = $e->debit > 0;
+            $oppLines = $e->voucher->lines->where('id', '!=', $e->id)
+                                          ->filter(fn($l) => $isDebit ? $l->credit > 0 : $l->debit > 0);
+            if ($oppLines->isEmpty()) {
+                $oppLines = $e->voucher->lines->where('id', '!=', $e->id);
+            }
+            
+            $oppLabels = [];
+            $oppAccountNames = [];
+            foreach($oppLines as $opp) {
+                $desc = $opp->description ?: $opp->account?->name;
+                if ($desc) $oppLabels[] = trim($desc);
+                if ($opp->account?->name) $oppAccountNames[] = trim($opp->account->name);
+            }
+            $descText = count($oppLabels) > 0 ? implode(' | ', $oppLabels) : ($e->description ?: ($e->voucher?->narration ?: ''));
+            $partyName = count($oppAccountNames) > 0 ? implode(', ', array_unique($oppAccountNames)) : '';
+
             $particulars = trim(implode(' | ', array_filter([
-                $e->description ?: ($e->voucher?->narration ?: ''),
+                $descText,
                 $e->voucher?->reference ? ('Ref: ' . $e->voucher->reference) : null,
                 $e->costCenter?->name ? ('Cost Center: ' . $e->costCenter->name) : null,
             ])));
 
             $rows->push([
                 'date' => $date,
+                'party_name' => $partyName,
                 'particulars' => $particulars,
+                'reference' => $e->voucher?->reference ?? '',
                 'voucher_type' => strtoupper((string) ($e->voucher?->voucher_type ?? '')),
                 'voucher_no' => (string) ($e->voucher?->voucher_no ?? ''),
                 'debit' => number_format((float) $e->debit, 2, '.', ''),
@@ -748,6 +781,7 @@ class LedgerReportController extends Controller
 
                 $rows->push([
                     'date' => $date,
+                    'party_name' => $accLabel,
                     'particulars' => trim('DETAIL: ' . ($accLabel ?: 'Voucher Line') . ' | ' . ($vl->description ?? '')),
                     'voucher_type' => strtoupper((string) ($e->voucher?->voucher_type ?? '')),
                     'voucher_no' => (string) ($e->voucher?->voucher_no ?? ''),
@@ -757,8 +791,22 @@ class LedgerReportController extends Controller
             }
         }
 
+        $totalPeriodDebit = (float) $ledgerEntries->sum('debit');
+        $totalPeriodCredit = (float) $ledgerEntries->sum('credit');
+
         $rows->push([
             'date' => '',
+            'party_name' => '',
+            'particulars' => 'TOTAL (FOR PERIOD)',
+            'voucher_type' => '',
+            'voucher_no' => '',
+            'debit' => $totalPeriodDebit > 0 ? number_format($totalPeriodDebit, 2, '.', '') : '',
+            'credit' => $totalPeriodCredit > 0 ? number_format($totalPeriodCredit, 2, '.', '') : '',
+        ]);
+
+        $rows->push([
+            'date' => '',
+            'party_name' => '',
             'particulars' => 'CLOSING BALANCE',
             'voucher_type' => '',
             'voucher_no' => '',
@@ -774,6 +822,7 @@ class LedgerReportController extends Controller
         $rows = collect([
             [
                 'date' => '',
+                'party_name' => '',
                 'particulars' => 'OPENING BALANCE',
                 'voucher_type' => '',
                 'voucher_no' => '',
@@ -790,7 +839,9 @@ class LedgerReportController extends Controller
 
             $rows->push([
                 'date' => (string) ($row['date'] ?? ''),
+                'party_name' => '',
                 'particulars' => $particulars,
+                'reference' => (string) ($row['document_no'] ?? ''),
                 'voucher_type' => strtoupper((string) ($row['entry_type'] ?? '')),
                 'voucher_no' => (string) ($row['voucher_no'] ?? ''),
                 'debit' => (float) ($row['debit_amount'] ?? 0) > 0 ? number_format((float) $row['debit_amount'], 2, '.', '') : '',
@@ -798,8 +849,22 @@ class LedgerReportController extends Controller
             ]);
         }
 
+        $totalPeriodDebit = (float) $analyticalRows->sum('debit_amount');
+        $totalPeriodCredit = (float) $analyticalRows->sum('credit_amount');
+
         $rows->push([
             'date' => '',
+            'party_name' => '',
+            'particulars' => 'TOTAL (FOR PERIOD)',
+            'voucher_type' => '',
+            'voucher_no' => '',
+            'debit' => $totalPeriodDebit > 0 ? number_format($totalPeriodDebit, 2, '.', '') : '',
+            'credit' => $totalPeriodCredit > 0 ? number_format($totalPeriodCredit, 2, '.', '') : '',
+        ]);
+
+        $rows->push([
+            'date' => '',
+            'party_name' => '',
             'particulars' => 'CLOSING BALANCE',
             'voucher_type' => '',
             'voucher_no' => '',
@@ -848,6 +913,7 @@ class LedgerReportController extends Controller
         $columns = [
             'Date',
             'Particulars',
+            'Party Name',
             'Vch Type',
             'Vch No.',
             'Debit (INR)',
@@ -884,6 +950,7 @@ class LedgerReportController extends Controller
                 fputcsv($handle, [
                     $row['date'],
                     $row['particulars'],
+                    $row['party_name'] ?? '',
                     $row['voucher_type'],
                     $row['voucher_no'],
                     $row['debit'],
@@ -971,6 +1038,7 @@ class LedgerReportController extends Controller
         $columns = [
             'Date',
             'Particulars',
+            'Party Name',
             'Vch Type',
             'Vch No.',
             'Debit (INR)',
@@ -992,6 +1060,7 @@ class LedgerReportController extends Controller
                 fputcsv($handle, [
                     $row['date'],
                     $row['particulars'],
+                    $row['party_name'] ?? '',
                     $row['voucher_type'],
                     $row['voucher_no'],
                     $row['debit'],

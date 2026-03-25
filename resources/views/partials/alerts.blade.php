@@ -32,7 +32,7 @@
 @endif
 
 {{-- Validation Errors --}}
-@if($errors->any())
+@if(isset($errors) && $errors->any())
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
         <i class="bi bi-exclamation-triangle me-2"></i>
         <strong>Please fix the following errors:</strong>

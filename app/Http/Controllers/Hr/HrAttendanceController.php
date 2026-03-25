@@ -10,7 +10,9 @@ use App\Models\Hr\HrAttendanceRegularization;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrHoliday;
 use App\Models\Hr\HrLeaveApplication;
+use App\Models\Hr\HrOvertimeRecord;
 use App\Models\Hr\HrShift;
+use App\Services\Hr\PayrollPeriodStalenessService;
 use App\Enums\Hr\AttendanceStatus;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -46,6 +48,14 @@ class HrAttendanceController extends Controller
             ->whereDate('attendance_date', $date->toDateString())
             ->orderBy('hr_employee_id');
 
+        if ($search = $request->get('q')) {
+            $query->whereHas('employee', function ($employeeQuery) use ($search) {
+                $employeeQuery->where('employee_code', 'like', "%{$search}%")
+                    ->orWhere('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%");
+            });
+        }
+
         if ($department = $request->get('department_id')) {
             $query->whereHas('employee', fn($q) => $q->where('department_id', $department));
         }
@@ -58,7 +68,7 @@ class HrAttendanceController extends Controller
 
         // Summary for the day
         $summary = [
-            'total' => HrEmployee::active()->count(),
+            'total' => $this->employeesVisibleForAttendanceWindow($date->copy()->startOfDay(), $date->copy()->startOfDay())->count(),
             'present' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->whereIn('status', self::PRESENT_DAY_STATUSES)->count(),
             'absent' => HrAttendance::whereDate('attendance_date', $date->toDateString())
@@ -70,7 +80,7 @@ class HrAttendanceController extends Controller
             'late' => HrAttendance::whereDate('attendance_date', $date->toDateString())
                 ->where('late_minutes', '>', 0)->count(),
             'ot_hours' => HrAttendance::whereDate('attendance_date', $date->toDateString())
-                ->sum('ot_hours'),
+                ->sum('ot_hours_approved'),
         ];
 
         $departments = Department::where('is_active', true)->orderBy('name')->get();
@@ -90,7 +100,7 @@ class HrAttendanceController extends Controller
         $endDate = $startDate->copy()->endOfMonth();
         $daysInMonth = $startDate->daysInMonth;
 
-        $query = HrEmployee::active()
+        $query = $this->employeesVisibleForAttendanceWindow($startDate, $endDate)
             ->with(['department', 'designation'])
             ->orderBy('employee_code');
 
@@ -114,6 +124,7 @@ class HrAttendanceController extends Controller
         // Build calendar data
         $calendarData = [];
         foreach ($employees as $employee) {
+            [$serviceStart, $serviceEnd] = $this->employeeEmploymentWindowWithinRange($employee, $startDate, $endDate);
             $empData = [
                 'employee' => $employee,
                 'days' => [],
@@ -133,6 +144,10 @@ class HrAttendanceController extends Controller
             for ($day = 1; $day <= $daysInMonth; $day++) {
                 $dayKey = str_pad($day, 2, '0', STR_PAD_LEFT);
                 $attendance = $attendanceRecords[$employee->id][$dayKey][0] ?? null;
+                $cellDate = Carbon::createFromDate($year, $month, $day)->startOfDay();
+                $withinServiceWindow = $serviceStart && $serviceEnd
+                    ? $cellDate->betweenIncluded($serviceStart, $serviceEnd)
+                    : false;
                 
                 if ($attendance) {
                     $empData['days'][$day] = [
@@ -141,12 +156,12 @@ class HrAttendanceController extends Controller
                         'color' => $attendance->status->color(),
                         'in' => $attendance->formatted_in_time,
                         'out' => $attendance->formatted_out_time,
-                        'ot' => $attendance->ot_hours,
+                        'ot' => $attendance->ot_hours_approved,
                     ];
 
                     // Update summary
                     $empData['summary']['paid_days'] += $attendance->paid_days;
-                    $empData['summary']['ot_hours'] += $attendance->ot_hours;
+                    $empData['summary']['ot_hours'] += $attendance->ot_hours_approved;
                     
                     match ($attendance->status) {
                         AttendanceStatus::PRESENT,
@@ -161,6 +176,13 @@ class HrAttendanceController extends Controller
                         AttendanceStatus::LATE, AttendanceStatus::LATE_AND_EARLY => $empData['summary']['late']++,
                         default => null,
                     };
+                } elseif (! $withinServiceWindow) {
+                    $empData['days'][$day] = [
+                        'status' => null,
+                        'code' => 'NA',
+                        'color' => 'muted',
+                        'title' => 'Not employed on this date',
+                    ];
                 } else {
                     $empData['days'][$day] = [
                         'status' => null,
@@ -231,16 +253,22 @@ class HrAttendanceController extends Controller
 
         if ($attendance->first_in && $attendance->last_out && $attendance->shift) {
             $attendance->recalculate();
+            $this->applyOvertimeWorkflowState($attendance, $employee);
             $attendance->save();
+            $this->syncOvertimeRecord($attendance);
         }
+
+        app(PayrollPeriodStalenessService::class)
+            ->markPeriodsOverlappingRange($attendance->attendance_date, $attendance->attendance_date, "Attendance updated for {$employee->employee_code}.");
 
         return redirect()
             ->route('hr.attendance.index', ['date' => $date->toDateString()])
             ->with('success', 'Attendance entry saved successfully.');
     }
 
-    // Load all active employees
-    $employees = HrEmployee::active()->orderBy('first_name')->get();
+    // Load employees visible for the selected date, including resigned employees with service/attendance on that date.
+    $manualDate = $request->query('date') ? Carbon::parse($request->query('date'))->startOfDay() : now()->startOfDay();
+    $employees = $this->employeesVisibleForAttendanceWindow($manualDate, $manualDate)->orderBy('first_name')->get();
 
     // Get selected employee from query param or localStorage
     $selectedEmployeeId = $request->query('employee_id') ?? null;
@@ -266,13 +294,16 @@ class HrAttendanceController extends Controller
         
         DB::beginTransaction();
         try {
-            $employees = HrEmployee::active()->get();
+            $employees = $this->employeesVisibleForAttendanceWindow($date, $date)->get();
             $processed = 0;
 
             foreach ($employees as $employee) {
                 $this->processEmployeeAttendance($employee, $date);
                 $processed++;
             }
+
+            app(PayrollPeriodStalenessService::class)
+                ->markPeriodsOverlappingRange($date, $date, 'Attendance processed and recalculated.');
 
             DB::commit();
 
@@ -291,6 +322,9 @@ class HrAttendanceController extends Controller
         ]);
 
         $attendance->approve_overtime(auth()->user(), $validated['approved_hours']);
+        $this->syncOvertimeRecord($attendance);
+        app(PayrollPeriodStalenessService::class)
+            ->markPeriodsOverlappingRange($attendance->attendance_date, $attendance->attendance_date, 'Overtime approval updated.');
 
         return back()->with('success', 'Overtime approved successfully.');
     }
@@ -298,45 +332,90 @@ class HrAttendanceController extends Controller
     public function rejectOt(HrAttendance $attendance): RedirectResponse
     {
         $attendance->reject_overtime(auth()->user());
+        $this->syncOvertimeRecord($attendance);
+        app(PayrollPeriodStalenessService::class)
+            ->markPeriodsOverlappingRange($attendance->attendance_date, $attendance->attendance_date, 'Overtime approval updated.');
         return back()->with('success', 'Overtime rejected.');
     }
 
     public function bulkOtApproval(Request $request): View|RedirectResponse
-    {
-        if ($request->isMethod('post')) {
-            $validated = $request->validate([
-                'attendance_ids' => 'required|array',
-                'attendance_ids.*' => 'exists:hr_attendances,id',
-                'action' => 'required|in:approve,reject',
-            ]);
+{
+    if ($request->isMethod('post')) {
+        $validated = $request->validate([
+            'attendance_ids' => 'required|array',
+            'attendance_ids.*' => 'exists:hr_attendances,id',
+            'action' => 'required|in:approve,reject',
+        ]);
 
-            $count = 0;
-            foreach ($validated['attendance_ids'] as $id) {
-                $attendance = HrAttendance::find($id);
-                if ($attendance && $attendance->ot_status === 'pending') {
-                    if ($validated['action'] === 'approve') {
-                        $attendance->approve_overtime(auth()->user());
-                    } else {
-                        $attendance->reject_overtime(auth()->user());
-                    }
-                    $count++;
+        $count = 0;
+
+        foreach ($validated['attendance_ids'] as $id) {
+            $attendance = HrAttendance::find($id);
+
+            if ($attendance && in_array($attendance->ot_status, ['pending', 'none'])) {
+                if ($validated['action'] === 'approve') {
+                    $attendance->approve_overtime(auth()->user());
+                } else {
+                    $attendance->reject_overtime(auth()->user());
                 }
-            }
 
-            return back()->with('success', "{$count} overtime records {$validated['action']}ed.");
+                $this->syncOvertimeRecord($attendance);
+
+                $count++;
+            }
         }
 
-        $pendingOt = HrAttendance::with(['employee', 'shift'])
-            ->where('ot_status', 'pending')
-            ->where('ot_hours', '>', 0)
-            ->orderByDesc('attendance_date')
-            ->paginate(50);
-
-        return view('hr.attendance.ot-approval', [
-            'pendingOt' => $pendingOt,
-            'records' => $pendingOt,
-        ]);
+        return back()->with('success', "{$count} overtime records {$validated['action']}d.");
     }
+
+    $query = HrAttendance::with(['employee', 'shift', 'otApprover'])
+        ->where('ot_hours', '>', 0)
+        ->orderByDesc('attendance_date')
+        ->orderByDesc('id');
+
+    if ($status = $request->string('status')->toString()) {
+        if ($status !== 'all') {
+            $query->where('ot_status', $status);
+        }
+    } else {
+        $query->whereIn('ot_status', ['pending', 'none']);
+    }
+
+    if ($search = trim((string) $request->string('q'))) {
+        $query->whereHas('employee', function ($employeeQuery) use ($search) {
+            $employeeQuery->where('employee_code', 'like', "%{$search}%")
+                ->orWhere('first_name', 'like', "%{$search}%")
+                ->orWhere('last_name', 'like', "%{$search}%");
+        });
+    }
+
+    if ($fromDate = $request->date('from_date')) {
+        $query->whereDate('attendance_date', '>=', $fromDate->toDateString());
+    }
+
+    if ($toDate = $request->date('to_date')) {
+        $query->whereDate('attendance_date', '<=', $toDate->toDateString());
+    }
+
+    $records = $query->paginate(50)->withQueryString();
+
+    return view('hr.attendance.ot-approval', [
+        'records' => $records,
+        'statusOptions' => [
+            'pending' => 'Pending',
+            'approved' => 'Approved',
+            'rejected' => 'Rejected',
+            'none' => 'Unreviewed',
+            'all' => 'All',
+        ],
+        'otSummary' => [
+            'pending' => HrAttendance::query()->where('ot_hours', '>', 0)->whereIn('ot_status', ['pending', 'none'])->count(),
+            'approved' => HrAttendance::query()->where('ot_hours', '>', 0)->where('ot_status', 'approved')->count(),
+            'rejected' => HrAttendance::query()->where('ot_hours', '>', 0)->where('ot_status', 'rejected')->count(),
+            'approved_hours' => HrAttendance::query()->where('ot_status', 'approved')->sum('ot_hours_approved'),
+        ],
+    ]);
+}
 
     public function regularization(Request $request): View|RedirectResponse
     {
@@ -590,7 +669,7 @@ class HrAttendanceController extends Controller
         $startDate = $request->get('start_date') ? Carbon::parse($request->get('start_date')) : now()->startOfMonth();
         $endDate = $request->get('end_date') ? Carbon::parse($request->get('end_date')) : now();
 
-        $query = HrEmployee::active()
+        $query = $this->employeesVisibleForAttendanceWindow($startDate, $endDate)
             ->with(['department', 'designation']);
 
         if ($department = $request->get('department_id')) {
@@ -604,10 +683,14 @@ class HrAttendanceController extends Controller
             $attendances = $employee->attendances()
                 ->whereBetween('attendance_date', [$startDate, $endDate])
                 ->get();
+            [$serviceStart, $serviceEnd] = $this->employeeEmploymentWindowWithinRange($employee, $startDate, $endDate);
+            $serviceDays = ($serviceStart && $serviceEnd)
+                ? ($serviceStart->diffInDays($serviceEnd) + 1)
+                : 0;
 
             $reportData[] = [
                 'employee' => $employee,
-                'total_days' => $startDate->diffInDays($endDate) + 1,
+                'total_days' => $serviceDays,
                 'present' => $attendances->whereIn('status', self::PRESENT_DAY_STATUSES)->count(),
                 'absent' => $attendances->where('status', 'absent')->count(),
                 'half_day' => $attendances->where('status', 'half_day')->count(),
@@ -617,7 +700,7 @@ class HrAttendanceController extends Controller
                 'late_count' => $attendances->where('late_minutes', '>', 0)->count(),
                 'late_minutes' => $attendances->sum('late_minutes'),
                 'early_minutes' => $attendances->sum('early_leaving_minutes'),
-                'ot_hours' => $attendances->sum('ot_hours'),
+                'ot_hours' => $attendances->sum('ot_hours_approved'),
                 'ot_approved' => $attendances->sum('ot_hours_approved'),
                 'paid_days' => $attendances->sum('paid_days'),
             ];
@@ -637,6 +720,46 @@ class HrAttendanceController extends Controller
         $header = strtolower(trim($header));
         $header = preg_replace('/[^a-z0-9]+/', '_', $header) ?? '';
         return trim($header, '_');
+    }
+
+    private function employeesVisibleForAttendanceWindow(Carbon $startDate, Carbon $endDate)
+    {
+        return HrEmployee::query()
+            ->where(function ($query) use ($startDate, $endDate) {
+                $query->where(function ($employeeQuery) use ($startDate, $endDate) {
+                    $employeeQuery->whereDate('date_of_joining', '<=', $endDate->toDateString())
+                        ->where(function ($employmentQuery) use ($startDate) {
+                            $employmentQuery->whereNull('date_of_leaving')
+                                ->orWhereDate('date_of_leaving', '>=', $startDate->toDateString());
+                        });
+                })->orWhereHas('attendances', function ($attendanceQuery) use ($startDate, $endDate) {
+                    $attendanceQuery->whereDate('attendance_date', '>=', $startDate->toDateString())
+                        ->whereDate('attendance_date', '<=', $endDate->toDateString());
+                });
+            });
+    }
+
+    private function employeeEmploymentWindowWithinRange(HrEmployee $employee, Carbon $startDate, Carbon $endDate): array
+    {
+        if (! $employee->date_of_joining) {
+            return [null, null];
+        }
+
+        $serviceStart = $employee->date_of_joining->copy()->startOfDay()->greaterThan($startDate)
+            ? $employee->date_of_joining->copy()->startOfDay()
+            : $startDate->copy()->startOfDay();
+
+        $serviceEnd = $employee->date_of_leaving
+            ? ($employee->date_of_leaving->copy()->startOfDay()->lessThan($endDate)
+                ? $employee->date_of_leaving->copy()->startOfDay()
+                : $endDate->copy()->startOfDay())
+            : $endDate->copy()->startOfDay();
+
+        if ($serviceEnd->lessThan($serviceStart)) {
+            return [null, null];
+        }
+
+        return [$serviceStart, $serviceEnd];
     }
 
     private function isImportRowEmpty(array $row): bool
@@ -815,9 +938,8 @@ class HrAttendanceController extends Controller
             $holidayId = $holiday->id;
         }
 
-        // Check for weekly off (simplified - check if Sunday or Saturday based on pattern)
-        // This would normally check the weekly off pattern assigned to employee
-        if ($date->isSunday()) {
+        // Check employee-specific weekly off pattern / daily override.
+        if ($employee->isWeeklyOffOn($date)) {
             $dayType = 'weekly_off';
             $isWeekOff = true;
         }
@@ -855,29 +977,28 @@ class HrAttendanceController extends Controller
             $attendance->last_out = $lastOut;
 
             if ($shift) {
-                $result = $shift->determineAttendanceStatus($firstIn, $lastOut, $date);
-                $attendance->status = AttendanceStatus::from($result['status']);
-                $attendance->late_minutes = $result['late_minutes'];
-                $attendance->early_leaving_minutes = $result['early_minutes'];
-                $attendance->working_hours = $result['working_hours'];
-                $attendance->ot_hours = round($result['ot_minutes'] / 60, 2);
-                
-                if ($attendance->ot_hours > 0) {
-                    $attendance->ot_status = 'pending';
-                }
+                $attendance->recalculate();
+                $this->applyOvertimeWorkflowState($attendance, $employee);
             }
 
             if ($firstIn && $lastOut) {
-                $attendance->total_hours = round($lastOut->diffInMinutes($firstIn) / 60, 2);
+                $attendance->total_hours = round($firstIn->diffInMinutes($lastOut) / 60, 2);
             }
         } else {
             // No punches
+            $policy = $employee->getApplicableAttendancePolicy($attendance->attendance_date);
             if ($leaveApplication) {
                 $attendance->status = AttendanceStatus::LEAVE;
             } elseif ($isWeekOff) {
                 $attendance->status = AttendanceStatus::WEEKLY_OFF;
             } elseif ($isHoliday) {
                 $attendance->status = AttendanceStatus::HOLIDAY;
+            } elseif ($policy && ! $policy->mark_absent_on_no_punch) {
+                $attendance->status = AttendanceStatus::HALF_DAY;
+                $attendance->working_hours = 0;
+                $attendance->ot_hours = 0;
+                $attendance->ot_hours_approved = 0;
+                $attendance->ot_status = 'none';
             } else {
                 $attendance->status = AttendanceStatus::ABSENT;
             }
@@ -885,8 +1006,85 @@ class HrAttendanceController extends Controller
 
         $attendance->is_processed = true;
         $attendance->save();
+        $this->syncOvertimeRecord($attendance);
 
         // Mark punches as processed
         $punches->each(fn($p) => $p->update(['is_processed' => true]));
+    }
+
+    private function applyOvertimeWorkflowState(HrAttendance $attendance, ?HrEmployee $employee = null): void
+    {
+        $employee ??= $attendance->employee ?: ($attendance->hr_employee_id ? HrEmployee::find($attendance->hr_employee_id) : null);
+        $policy = $employee?->getApplicableAttendancePolicy($attendance->attendance_date);
+        $otNeedsApproval = $policy ? (bool) $policy->ot_needs_approval : (bool) setting('hr.enable_ot_approval', true);
+
+        if ((float) $attendance->ot_hours <= 0) {
+            $attendance->ot_hours_approved = 0;
+            $attendance->ot_status = 'none';
+            $attendance->ot_approved_by = null;
+            $attendance->ot_approved_at = null;
+
+            return;
+        }
+
+        if ($otNeedsApproval) {
+            $attendance->ot_hours_approved = 0;
+            $attendance->ot_status = 'pending';
+            $attendance->ot_approved_by = null;
+            $attendance->ot_approved_at = null;
+
+            return;
+        }
+
+        $attendance->ot_hours_approved = $attendance->ot_hours;
+        $attendance->ot_status = 'approved';
+        $attendance->ot_approved_by = auth()->id();
+        $attendance->ot_approved_at = now();
+    }
+
+    private function syncOvertimeRecord(HrAttendance $attendance, ?int $payrollId = null, ?float $hourlyRate = null, ?float $rateMultiplier = null, ?float $otAmount = null): void
+    {
+        if ((float) $attendance->ot_hours <= 0) {
+            $attendance->overtimeRecord()?->delete();
+
+            return;
+        }
+
+        $shift = $attendance->shift ?: ($attendance->hr_shift_id ? HrShift::find($attendance->hr_shift_id) : null);
+        $employee = $attendance->employee ?: ($attendance->hr_employee_id ? HrEmployee::find($attendance->hr_employee_id) : null);
+        $policy = $employee?->getApplicableAttendancePolicy($attendance->attendance_date);
+        $otNeedsApproval = $policy ? (bool) $policy->ot_needs_approval : (bool) setting('hr.enable_ot_approval', true);
+        $multiplier = $rateMultiplier
+            ?? ($attendance->is_holiday
+                ? ($policy?->holiday_ot_multiplier ?: $shift?->ot_rate_holiday_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5)
+                : ($attendance->is_week_off
+                    ? ($policy?->week_off_ot_multiplier ?: $shift?->ot_rate_holiday_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5)
+                    : ($policy?->ot_rate_multiplier ?: $shift?->ot_rate_multiplier ?: 1.5)));
+
+        HrOvertimeRecord::updateOrCreate(
+            ['hr_attendance_id' => $attendance->id],
+            [
+                'ot_number' => sprintf('OT-%s-%d', optional($attendance->attendance_date)->format('Ymd') ?: now()->format('Ymd'), $attendance->id),
+                'hr_employee_id' => $attendance->hr_employee_id,
+                'ot_date' => optional($attendance->attendance_date)->toDateString() ?: now()->toDateString(),
+                'ot_start_time' => optional($attendance->last_out)->format('H:i:s') ?: '00:00:00',
+                'ot_end_time' => optional($attendance->last_out)->format('H:i:s') ?: '00:00:00',
+                'ot_hours' => (float) $attendance->ot_hours,
+                'approved_hours' => (float) $attendance->ot_hours_approved,
+                'ot_type' => $attendance->is_holiday ? 'holiday' : ($attendance->is_week_off ? 'weekly_off' : 'normal'),
+                'rate_multiplier' => $multiplier,
+                'hourly_rate' => $hourlyRate ?? 0,
+                'ot_amount' => $otAmount ?? 0,
+                'status' => (string) ($attendance->ot_status ?: 'pending'),
+                'requested_by' => $attendance->created_by,
+                'requested_at' => $attendance->created_at,
+                'approved_by' => $attendance->ot_approved_by,
+                'approved_at' => $attendance->ot_approved_at,
+                'approval_remarks' => $attendance->ot_status === 'approved' && ! $otNeedsApproval ? 'Auto-approved by OT policy/settings.' : null,
+                'rejection_reason' => $attendance->ot_status === 'rejected' ? 'Rejected from attendance OT approval' : null,
+                'hr_payroll_id' => $payrollId,
+                'is_paid' => $payrollId !== null,
+            ]
+        );
     }
 }

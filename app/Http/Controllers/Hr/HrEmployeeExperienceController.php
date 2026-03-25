@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeExperience;
@@ -13,13 +14,18 @@ use Illuminate\View\View;
 
 class HrEmployeeExperienceController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'edit', 'update', 'destroy']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $experiences = $employee->experiences()->orderByDesc('from_date')->paginate(20)->withQueryString();
 
         $editing = null;
@@ -32,11 +38,15 @@ class HrEmployeeExperienceController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.experiences.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $this->validateData($request);
         $validated['hr_employee_id'] = $employee->id;
 
@@ -62,6 +72,8 @@ class HrEmployeeExperienceController extends Controller
 
     public function edit(HrEmployee $employee, HrEmployeeExperience $experience): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $experience);
 
         return redirect()->route('hr.employees.experiences.index', ['employee' => $employee->id, 'edit' => $experience->id]);
@@ -69,6 +81,8 @@ class HrEmployeeExperienceController extends Controller
 
     public function update(Request $request, HrEmployee $employee, HrEmployeeExperience $experience): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $experience);
 
         $validated = $this->validateData($request);
@@ -101,6 +115,8 @@ class HrEmployeeExperienceController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeExperience $experience): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $experience);
 
         if ($experience->experience_letter_path) {

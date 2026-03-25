@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\ProductionV2;
 
 use App\Http\Controllers\Controller;
+use App\Models\Item;
 use App\Models\Project;
 use App\Models\ProductionV2\ProductionCuttingPlan;
 use App\Models\ProductionV2\ProductionCuttingPlanAllocation;
+use App\Models\ProductionV2\ProductionCuttingPlanPlate;
 use App\Models\ProductionV2\ProductionPartDefinition;
 use App\Support\ProductionV2\RevisionImpactAnalyzer;
 use App\Support\ProductionV2\RevisionDraftBuilder;
@@ -31,6 +33,7 @@ class ProductionV2CuttingPlanController extends Controller
     {
         $baseQuery = ProductionCuttingPlan::query()
             ->where('project_id', $project->id)
+            ->with('materialItem:id,code,name,grade,thickness')
             ->withCount('allocations');
 
         $plans = (clone $baseQuery)
@@ -43,7 +46,9 @@ class ProductionV2CuttingPlanController extends Controller
             'summary' => [
                 'total' => (clone $baseQuery)->count(),
                 'released' => (clone $baseQuery)->where('status', 'released')->count(),
-                'mixed' => (clone $baseQuery)->where('source_mode', 'mixed')->count(),
+                'plates' => ProductionCuttingPlanPlate::query()
+                    ->whereHas('cuttingPlan', fn ($query) => $query->where('project_id', $project->id))
+                    ->count(),
                 'allocations' => ProductionCuttingPlanAllocation::query()
                     ->whereHas('cuttingPlan', fn ($query) => $query->where('project_id', $project->id))
                     ->count(),
@@ -54,7 +59,7 @@ class ProductionV2CuttingPlanController extends Controller
     public function create(Project $project)
     {
         return view('production_v2.cutting_plans.form', $this->formData($project, new ProductionCuttingPlan([
-            'source_mode' => 'mixed',
+            'source_mode' => 'fresh_plate',
             'status' => 'draft',
             'revision_no' => 1,
         ])));
@@ -64,67 +69,64 @@ class ProductionV2CuttingPlanController extends Controller
     {
         $data = $this->validatedData($request, $project);
 
-        $partMap = ProductionPartDefinition::query()
-            ->where('project_id', $project->id)
-            ->whereIn('id', collect($data['allocations'])->pluck('part_definition_id')->map(fn ($id) => (int) $id)->unique()->values())
-            ->with(['materialItem:id,code,name,grade,thickness,density,weight_per_meter'])
-            ->get()
-            ->keyBy('id');
+        $partMap = $this->partMapForPlannedPlates($project, $data);
 
-        $normalized = $this->normalizeAndValidateAllocations($project, $data, $partMap);
+        $normalized = $this->normalizeAndValidatePlannedPlates($project, $data, $partMap);
+        $materialItem = $this->selectedMaterialItem($data);
         $data['grade'] = $normalized['grade'];
         $data['thickness_mm'] = $normalized['thickness_mm'];
-        $data['allocations'] = $normalized['allocations'];
+        $data['planned_plates'] = $normalized['planned_plates'];
 
-        $plan = DB::transaction(function () use ($project, $data) {
-            $plan = ProductionCuttingPlan::query()->create([
-                'project_id' => $project->id,
-                'plan_number' => $data['plan_number'],
-                'plan_date' => $data['plan_date'] ?? null,
-                'grade' => $data['grade'] ?? null,
-                'thickness_mm' => $data['thickness_mm'] ?? null,
-                'source_mode' => $data['source_mode'],
-                'status' => $data['status'],
-                'revision_no' => (int) ($data['revision_no'] ?? 1),
-                'revision_root_id' => null,
-                'remarks' => $data['remarks'] ?? null,
-                'created_by' => auth()->id(),
-                'approved_by' => null,
-                'approved_at' => null,
-            ]);
+        $plans = DB::transaction(function () use ($project, $data, $materialItem) {
+            $createdPlans = collect();
 
-            $plan->forceFill(['revision_root_id' => $plan->id])->save();
+            foreach ($data['planned_plates'] as $plateRow) {
+                $planNumber = $this->nextPlanNumber($project, $materialItem);
+                $plateRows = $this->assignPlateRefs($planNumber, [$plateRow]);
 
-            foreach ($data['allocations'] as $row) {
-                ProductionCuttingPlanAllocation::query()->create([
-                    'cutting_plan_id' => $plan->id,
-                    'part_definition_id' => (int) $row['part_definition_id'],
-                    'planned_qty' => $row['planned_qty'],
-                    'planned_blank_ref' => $row['planned_blank_ref'] ?: null,
-                    'planned_blank_width_mm' => $row['planned_blank_width_mm'] ?: null,
-                    'planned_blank_length_mm' => $row['planned_blank_length_mm'] ?: null,
-                    'mother_stock_item_id' => null,
-                    'cut_size_text' => $row['cut_size_text'] ?? null,
-                    'cut_width_mm' => $row['cut_width_mm'] ?: null,
-                    'cut_length_mm' => $row['cut_length_mm'] ?: null,
-                    'thickness_mm' => $row['thickness_mm'] ?: null,
-                    'allocation_group' => $row['allocation_group'] ?? null,
-                    'remarks' => $row['remarks'] ?? null,
+                $plan = ProductionCuttingPlan::query()->create([
+                    'project_id' => $project->id,
+                    'plan_number' => $planNumber,
+                    'plan_date' => $data['plan_date'] ?? null,
+                    'material_item_id' => $data['material_item_id'],
+                    'grade' => $data['grade'] ?? null,
+                    'thickness_mm' => $data['thickness_mm'] ?? null,
+                    'source_mode' => $data['source_mode'],
+                    'status' => $data['status'],
+                    'revision_no' => (int) ($data['revision_no'] ?? 1),
+                    'revision_root_id' => null,
+                    'remarks' => $data['remarks'] ?? null,
+                    'created_by' => auth()->id(),
+                    'approved_by' => null,
+                    'approved_at' => null,
                 ]);
+
+                $plan->forceFill(['revision_root_id' => $plan->id])->save();
+
+                $this->syncPlannedPlates($plan, $plateRows);
+                $createdPlans->push($plan);
             }
 
-            return $plan;
+            return $createdPlans;
         });
 
+        if ($plans->count() === 1) {
+            $plan = $plans->first();
+
+            return redirect()
+                ->route('projects.production-v2.cutting-plans.show', ['project' => $project->id, 'cuttingPlan' => $plan->id])
+                ->with('success', 'Production V2 cutting plan created.');
+        }
+
         return redirect()
-            ->route('projects.production-v2.cutting-plans.show', ['project' => $project->id, 'cuttingPlan' => $plan->id])
-            ->with('success', 'Production V2 cutting plan created.');
+            ->route('projects.production-v2.cutting-plans.index', ['project' => $project->id])
+            ->with('success', $plans->count() . ' cutting plans created, one per planned plate.');
     }
 
     public function show(Project $project, ProductionCuttingPlan $cuttingPlan)
     {
         abort_unless((int) $cuttingPlan->project_id === (int) $project->id, 404);
-        $cuttingPlan->load(['allocations.partDefinition', 'allocations.motherStock', 'designRelease', 'releasedBy', 'previousRevision', 'supersededByRevision']);
+        $cuttingPlan->load(['materialItem', 'plannedPlates.allocations.partDefinition', 'designRelease', 'releasedBy', 'previousRevision', 'supersededByRevision']);
 
         $revisionHistory = ProductionCuttingPlan::query()
             ->where('project_id', $project->id)
@@ -146,7 +148,7 @@ class ProductionV2CuttingPlanController extends Controller
         abort_unless((int) $cuttingPlan->project_id === (int) $project->id, 404);
         abort_if($cuttingPlan->status === 'released', 403, 'Released cutting plans cannot be edited directly. Create a revision instead.');
 
-        $cuttingPlan->load('allocations');
+        $cuttingPlan->load('plannedPlates.allocations');
 
         return view('production_v2.cutting_plans.form', $this->formData($project, $cuttingPlan));
     }
@@ -158,22 +160,22 @@ class ProductionV2CuttingPlanController extends Controller
 
         $data = $this->validatedData($request, $project, $cuttingPlan->id);
 
-        $partMap = ProductionPartDefinition::query()
-            ->where('project_id', $project->id)
-            ->whereIn('id', collect($data['allocations'])->pluck('part_definition_id')->map(fn ($id) => (int) $id)->unique()->values())
-            ->with(['materialItem:id,code,name,grade,thickness,density,weight_per_meter'])
-            ->get()
-            ->keyBy('id');
+        $partMap = $this->partMapForPlannedPlates($project, $data);
 
-        $normalized = $this->normalizeAndValidateAllocations($project, $data, $partMap);
+        $normalized = $this->normalizeAndValidatePlannedPlates($project, $data, $partMap);
+        if (count($normalized['planned_plates']) !== 1) {
+            throw ValidationException::withMessages([
+                'planned_plates' => 'One cutting plan can contain only one planned plate. Create separate plans for additional plates.',
+            ]);
+        }
         $data['grade'] = $normalized['grade'];
         $data['thickness_mm'] = $normalized['thickness_mm'];
-        $data['allocations'] = $normalized['allocations'];
+        $data['planned_plates'] = $this->assignPlateRefs($cuttingPlan->plan_number, $normalized['planned_plates']);
 
         DB::transaction(function () use ($cuttingPlan, $data) {
             $cuttingPlan->update([
-                'plan_number' => $data['plan_number'],
                 'plan_date' => $data['plan_date'] ?? null,
+                'material_item_id' => $data['material_item_id'],
                 'grade' => $data['grade'] ?? null,
                 'thickness_mm' => $data['thickness_mm'] ?? null,
                 'source_mode' => $data['source_mode'],
@@ -181,27 +183,7 @@ class ProductionV2CuttingPlanController extends Controller
                 'remarks' => $data['remarks'] ?? null,
             ]);
 
-            ProductionCuttingPlanAllocation::query()
-                ->where('cutting_plan_id', $cuttingPlan->id)
-                ->delete();
-
-            foreach ($data['allocations'] as $row) {
-                ProductionCuttingPlanAllocation::query()->create([
-                    'cutting_plan_id' => $cuttingPlan->id,
-                    'part_definition_id' => (int) $row['part_definition_id'],
-                    'planned_qty' => $row['planned_qty'],
-                    'planned_blank_ref' => $row['planned_blank_ref'] ?: null,
-                    'planned_blank_width_mm' => $row['planned_blank_width_mm'] ?: null,
-                    'planned_blank_length_mm' => $row['planned_blank_length_mm'] ?: null,
-                    'mother_stock_item_id' => null,
-                    'cut_size_text' => $row['cut_size_text'] ?? null,
-                    'cut_width_mm' => $row['cut_width_mm'] ?: null,
-                    'cut_length_mm' => $row['cut_length_mm'] ?: null,
-                    'thickness_mm' => $row['thickness_mm'] ?: null,
-                    'allocation_group' => $row['allocation_group'] ?? null,
-                    'remarks' => $row['remarks'] ?? null,
-                ]);
-            }
+            $this->syncPlannedPlates($cuttingPlan, $data['planned_plates']);
         });
 
         return redirect()
@@ -226,62 +208,72 @@ class ProductionV2CuttingPlanController extends Controller
 
     protected function formData(Project $project, ProductionCuttingPlan $cuttingPlan): array
     {
+        $allocatedByPart = ProductionCuttingPlanAllocation::query()
+            ->select('part_definition_id', DB::raw('SUM(planned_qty) as planned_qty_total'))
+            ->whereHas('cuttingPlan', function ($query) use ($project, $cuttingPlan) {
+                $query->where('project_id', $project->id)
+                    ->whereNotIn('status', ['cancelled', 'superseded']);
+
+                if ($cuttingPlan->exists) {
+                    $query->where('id', '!=', $cuttingPlan->id);
+                }
+            })
+            ->groupBy('part_definition_id')
+            ->pluck('planned_qty_total', 'part_definition_id');
+
         return [
             'project' => $project,
             'plan' => $cuttingPlan,
+            'materialItems' => $this->cuttingPlanMaterialItems(),
             'partDefinitions' => ProductionPartDefinition::query()
                 ->where('project_id', $project->id)
                 ->whereIn('status', ['approved', 'released'])
+                ->where('is_cuttable', true)
+                ->where(function ($query) {
+                    $query->where('material_category', 'steel_plate')
+                        ->orWhere('part_type', 'cuttable_plate');
+                })
                 ->with(['materialItem:id,code,name,grade,thickness,density,weight_per_meter'])
                 ->orderBy('part_code')
-                ->get(),
+                ->get()
+                ->map(function (ProductionPartDefinition $part) use ($allocatedByPart) {
+                    $requiredQty = (float) ($part->required_qty ?? 0);
+                    $alreadyAllocated = (float) ($allocatedByPart[$part->id] ?? 0);
+                    $part->setAttribute('remaining_qty_base', round(max($requiredQty - $alreadyAllocated, 0), 3));
+
+                    return $part;
+                }),
         ];
     }
 
     protected function validatedData(Request $request, Project $project, ?int $ignoreId = null): array
     {
         $data = $request->validate([
-            'plan_number' => ['required', 'string', 'max:80'],
             'plan_date' => ['nullable', 'date'],
-            'grade' => ['nullable', 'string', 'max:120'],
-            'thickness_mm' => ['nullable', 'numeric', 'min:0'],
-            'source_mode' => ['required', Rule::in(['fresh_plate', 'remnant', 'mixed'])],
+            'material_item_id' => ['required', 'integer', 'exists:items,id'],
+            'source_mode' => ['nullable', Rule::in(['fresh_plate', 'remnant', 'mixed'])],
             'status' => ['required', Rule::in(['draft', 'reviewed', 'approved', 'released', 'superseded', 'cancelled'])],
             'revision_no' => ['nullable', 'integer', 'min:1'],
             'remarks' => ['nullable', 'string'],
-            'allocations' => ['required', 'array', 'min:1'],
-            'allocations.*.part_definition_id' => [
+            'planned_plates' => ['required', 'array', 'min:1'],
+            'planned_plates.*.plate_ref' => ['nullable', 'string', 'max:120'],
+            'planned_plates.*.planned_width_mm' => ['required', 'numeric', 'min:0.001'],
+            'planned_plates.*.planned_length_mm' => ['required', 'numeric', 'min:0.001'],
+            'planned_plates.*.remarks' => ['nullable', 'string'],
+            'planned_plates.*.allocations' => ['required', 'array', 'min:1'],
+            'planned_plates.*.allocations.*.part_definition_id' => [
                 'required',
                 'integer',
                 Rule::exists('production_v2_part_definitions', 'id')->where('project_id', $project->id),
             ],
-            'allocations.*.planned_qty' => ['required', 'numeric', 'min:0.001'],
-            'allocations.*.planned_blank_ref' => ['nullable', 'string', 'max:120'],
-            'allocations.*.planned_blank_width_mm' => ['nullable', 'numeric', 'min:0'],
-            'allocations.*.planned_blank_length_mm' => ['nullable', 'numeric', 'min:0'],
-            'allocations.*.cut_size_text' => ['nullable', 'string', 'max:200'],
-            'allocations.*.cut_width_mm' => ['nullable', 'numeric', 'min:0'],
-            'allocations.*.cut_length_mm' => ['nullable', 'numeric', 'min:0'],
-            'allocations.*.thickness_mm' => ['nullable', 'numeric', 'min:0'],
-            'allocations.*.allocation_group' => ['nullable', 'string', 'max:80'],
-            'allocations.*.remarks' => ['nullable', 'string'],
+            'planned_plates.*.allocations.*.planned_qty' => ['required', 'numeric', 'min:0.001'],
+            'planned_plates.*.allocations.*.remarks' => ['nullable', 'string'],
         ]);
 
         $revisionNo = (int) $request->input('revision_no', 1);
         $data['revision_no'] = $revisionNo;
 
-        $planNumberRule = Rule::unique('production_v2_cutting_plans', 'plan_number')
-            ->where('project_id', $project->id)
-            ->where('revision_no', $revisionNo);
-
-        if ($ignoreId) {
-            $planNumberRule = $planNumberRule->ignore($ignoreId);
-        }
-
-        validator(
-            ['plan_number' => $data['plan_number']],
-            ['plan_number' => [$planNumberRule]]
-        )->validate();
+        $data['source_mode'] = $data['source_mode'] ?? 'fresh_plate';
 
         return $data;
     }
@@ -296,70 +288,126 @@ class ProductionV2CuttingPlanController extends Controller
         return 'Revision draft created from released ' . $label . '. Auto-updated part references: ' . $autoReplaced->implode(', ') . '.';
     }
 
-    protected function normalizeAndValidateAllocations(Project $project, array $data, $partMap): array
+    protected function normalizeAndValidatePlannedPlates(Project $project, array $data, $partMap): array
     {
         $errors = [];
-        $normalizedAllocations = [];
+        $normalizedPlates = [];
         $rawProfiles = [];
+        $materialItem = $this->selectedMaterialItem($data);
 
-        foreach ($data['allocations'] as $index => $row) {
-            $partId = (int) $row['part_definition_id'];
-            /** @var \App\Models\ProductionV2\ProductionPartDefinition|null $part */
-            $part = $partMap->get($partId);
-            if (! $part) {
-                $errors["allocations.$index.part_definition_id"] = 'Selected part was not found.';
-                continue;
-            }
+        foreach ($data['planned_plates'] as $plateIndex => $plateRow) {
+            $plateWidth = $this->floatOrNull($plateRow['planned_width_mm'] ?? null);
+            $plateLength = $this->floatOrNull($plateRow['planned_length_mm'] ?? null);
+            $plateQty = 1.0;
+            $plateArea = ($plateWidth && $plateLength && $plateQty) ? ($plateWidth * $plateLength * $plateQty) : 0.0;
+            $allocatedArea = 0.0;
+            $normalizedAllocations = [];
 
-            if (! $part->is_cuttable) {
-                $errors["allocations.$index.part_definition_id"] = 'Only cuttable parts can be used in a cutting plan.';
-                continue;
-            }
-
-            $profile = $this->partMaterialProfile($part, $row);
-            if (! $profile['is_raw']) {
-                $errors["allocations.$index.part_definition_id"] = 'Cutting plans are only allowed for raw cuttable parts like plates and sections.';
-                continue;
-            }
-
-            if ($profile['material_category'] === 'steel_plate') {
-                $cutWidth = $this->floatOrNull($row['cut_width_mm'] ?? null) ?? $profile['width_mm'];
-                $cutLength = $this->floatOrNull($row['cut_length_mm'] ?? null) ?? $profile['length_mm'];
-                if (! $cutWidth || ! $cutLength) {
-                    $errors["allocations.$index.cut_width_mm"] = 'Plate allocations need cut width and cut length.';
+            foreach ($plateRow['allocations'] as $allocationIndex => $row) {
+                $partId = (int) $row['part_definition_id'];
+                /** @var \App\Models\ProductionV2\ProductionPartDefinition|null $part */
+                $part = $partMap->get($partId);
+                if (! $part) {
+                    $errors["planned_plates.$plateIndex.allocations.$allocationIndex.part_definition_id"] = 'Selected part was not found.';
+                    continue;
                 }
-                $row['cut_width_mm'] = $cutWidth;
-                $row['cut_length_mm'] = $cutLength;
+
+                $profile = $this->partMaterialProfile($part, $row);
+
+                if (! $part->is_cuttable || $profile['material_category'] !== 'steel_plate') {
+                    $errors["planned_plates.$plateIndex.allocations.$allocationIndex.part_definition_id"] = 'Only cuttable steel plate parts can be used in this cutting plan.';
+                    continue;
+                }
+                if (! $this->partMatchesMaterialItem($part, $profile, $materialItem)) {
+                    $errors["planned_plates.$plateIndex.allocations.$allocationIndex.part_definition_id"] = 'Selected part does not match the selected material item profile.';
+                    continue;
+                }
+
+                $cutWidth = $profile['width_mm'];
+                $cutLength = $profile['length_mm'];
+                if (! $cutWidth || ! $cutLength) {
+                    $errors["planned_plates.$plateIndex.allocations.$allocationIndex.part_definition_id"] = 'Selected part must have width and length defined.';
+                    continue;
+                }
+
+                $allocationQty = $this->floatOrNull($row['planned_qty'] ?? null) ?? 0.0;
+                $allocatedArea += ($cutWidth * $cutLength * $allocationQty);
+
+                $rawProfiles[] = $profile;
+                $normalizedAllocations[] = [
+                    'part_definition_id' => $partId,
+                    'planned_qty' => $allocationQty,
+                    'planned_blank_ref' => $plateRow['plate_ref'] ?? null,
+                    'planned_blank_width_mm' => $plateWidth,
+                    'planned_blank_length_mm' => $plateLength,
+                    'cut_size_text' => $this->buildCutSizeText($profile, [
+                        'cut_width_mm' => $cutWidth,
+                        'cut_length_mm' => $cutLength,
+                    ]),
+                    'cut_width_mm' => $cutWidth,
+                    'cut_length_mm' => $cutLength,
+                    'thickness_mm' => $profile['thickness_mm'],
+                    'allocation_group' => $plateRow['plate_ref'] ?? null,
+                    'remarks' => $row['remarks'] ?? null,
+                ];
             }
 
-            $row['thickness_mm'] = $profile['thickness_mm'];
-            if (blank($row['cut_size_text'] ?? null)) {
-                $row['cut_size_text'] = $this->buildCutSizeText($profile, $row);
+            if ($allocatedArea > ($plateArea + 0.0001)) {
+                $errors["planned_plates.$plateIndex.allocations"] = 'Allocated part area exceeds planned plate area.';
             }
 
-            $rawProfiles[] = $profile;
-            $normalizedAllocations[] = $row;
+            $normalizedPlates[] = [
+                'plate_ref' => trim((string) ($plateRow['plate_ref'] ?? '')),
+                'planned_width_mm' => $plateWidth,
+                'planned_length_mm' => $plateLength,
+                'planned_qty' => $plateQty,
+                'remarks' => $plateRow['remarks'] ?? null,
+                'allocations' => $normalizedAllocations,
+            ];
         }
 
         if (! empty($errors)) {
             throw ValidationException::withMessages($errors);
         }
 
-        $planProfile = $this->resolvePlanProfile($rawProfiles, $data);
+        $planProfile = $this->resolvePlanProfile($rawProfiles, $data, $materialItem);
 
         return [
+            'material_item_id' => $materialItem->id,
             'grade' => $planProfile['grade'],
             'thickness_mm' => $planProfile['thickness_mm'],
-            'allocations' => $normalizedAllocations,
+            'planned_plates' => $normalizedPlates,
         ];
     }
 
-    protected function resolvePlanProfile(array $rawProfiles, array $data): array
+    protected function nextPlanNumber(Project $project, Item $materialItem): string
+    {
+        $thickness = $this->floatOrNull($materialItem->thickness);
+        $thicknessLabel = $thickness !== null
+            ? str_replace('.', '', rtrim(rtrim(number_format($thickness, 3, '.', ''), '0'), '.'))
+            : (string) $materialItem->id;
+        $prefix = 'P' . $thicknessLabel . '-';
+
+        $last = ProductionCuttingPlan::query()
+            ->where('project_id', $project->id)
+            ->where('plan_number', 'like', $prefix . '%')
+            ->orderByDesc('id')
+            ->value('plan_number');
+
+        $seq = 1;
+        if ($last && preg_match('/(\d+)$/', (string) $last, $matches)) {
+            $seq = ((int) $matches[1]) + 1;
+        }
+
+        return $prefix . str_pad((string) $seq, 3, '0', STR_PAD_LEFT);
+    }
+
+    protected function resolvePlanProfile(array $rawProfiles, array $data, Item $materialItem): array
     {
         if (empty($rawProfiles)) {
             return [
-                'grade' => $data['grade'] ?? null,
-                'thickness_mm' => $data['thickness_mm'] ?? null,
+                'grade' => $materialItem->grade ?: null,
+                'thickness_mm' => $this->floatOrNull($materialItem->thickness),
             ];
         }
 
@@ -384,8 +432,8 @@ class ProductionV2CuttingPlanController extends Controller
             }
         }
 
-        $grade = $data['grade'] ?? $first['grade'];
-        $thickness = $data['thickness_mm'] ?? $first['thickness_mm'];
+        $grade = $materialItem->grade ?: $first['grade'];
+        $thickness = $this->floatOrNull($materialItem->thickness) ?? $first['thickness_mm'];
 
         if ($this->normalizedString($grade) !== $this->normalizedString($first['grade'])) {
             throw ValidationException::withMessages([
@@ -403,6 +451,65 @@ class ProductionV2CuttingPlanController extends Controller
             'grade' => $first['grade'],
             'thickness_mm' => $first['thickness_mm'],
         ];
+    }
+
+    protected function cuttingPlanMaterialItems()
+    {
+        return Item::query()
+            ->with(['type:id,code,name', 'category:id,code,name'])
+            ->where('is_active', true)
+            ->whereNotNull('thickness')
+            ->whereHas('type', fn ($query) => $query->where('code', 'RAW'))
+            ->orderBy('thickness')
+            ->orderBy('name')
+            ->get([
+                'id',
+                'code',
+                'name',
+                'grade',
+                'thickness',
+                'material_type_id',
+                'material_category_id',
+            ]);
+    }
+
+    protected function selectedMaterialItem(array $data): Item
+    {
+        /** @var \App\Models\Item|null $materialItem */
+        $materialItem = Item::query()
+            ->with(['type:id,code,name', 'category:id,code,name'])
+            ->find((int) $data['material_item_id']);
+
+        if (! $materialItem || ! $materialItem->is_active) {
+            throw ValidationException::withMessages([
+                'material_item_id' => 'Selected material item is invalid.',
+            ]);
+        }
+
+        if ($this->normalizedString($materialItem->type?->code) !== 'RAW' || $this->floatOrNull($materialItem->thickness) === null) {
+            throw ValidationException::withMessages([
+                'material_item_id' => 'Selected material item must be a raw material plate item with thickness.',
+            ]);
+        }
+
+        return $materialItem;
+    }
+
+    protected function partMatchesMaterialItem(ProductionPartDefinition $part, array $profile, Item $materialItem): bool
+    {
+        if (! $this->sameDecimal($profile['thickness_mm'], $materialItem->thickness)) {
+            return false;
+        }
+
+        if ((int) ($part->material_item_id ?? 0) > 0) {
+            return (int) $part->material_item_id === (int) $materialItem->id;
+        }
+
+        if ($this->normalizedString($part->material_grade) !== '' && $this->normalizedString($materialItem->grade) !== '') {
+            return $this->normalizedString($part->material_grade) === $this->normalizedString($materialItem->grade);
+        }
+
+        return true;
     }
 
     protected function partMaterialProfile(ProductionPartDefinition $part, array $row): array
@@ -475,5 +582,79 @@ class ProductionV2CuttingPlanController extends Controller
         }
 
         return is_numeric($value) ? (float) $value : null;
+    }
+
+    protected function partMapForPlannedPlates(Project $project, array $data)
+    {
+        $partIds = collect($data['planned_plates'] ?? [])
+            ->pluck('allocations')
+            ->flatten(1)
+            ->pluck('part_definition_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        return ProductionPartDefinition::query()
+            ->where('project_id', $project->id)
+            ->whereIn('id', $partIds)
+            ->with(['materialItem:id,code,name,grade,thickness,density,weight_per_meter'])
+            ->get()
+            ->keyBy('id');
+    }
+
+    protected function assignPlateRefs(string $planNumber, array $plates): array
+    {
+        return collect($plates)->values()->map(function (array $plate, int $index) use ($planNumber) {
+            $ref = trim((string) ($plate['plate_ref'] ?? ''));
+            $plate['plate_ref'] = $ref !== '' ? $ref : sprintf('%s-P%02d', $planNumber, $index + 1);
+
+            foreach ($plate['allocations'] as $allocationIndex => $allocation) {
+                $plate['allocations'][$allocationIndex]['planned_blank_ref'] = $plate['plate_ref'];
+                $plate['allocations'][$allocationIndex]['allocation_group'] = $plate['plate_ref'];
+            }
+
+            return $plate;
+        })->all();
+    }
+
+    protected function syncPlannedPlates(ProductionCuttingPlan $plan, array $plannedPlates): void
+    {
+        ProductionCuttingPlanAllocation::query()
+            ->where('cutting_plan_id', $plan->id)
+            ->delete();
+
+        ProductionCuttingPlanPlate::query()
+            ->where('cutting_plan_id', $plan->id)
+            ->delete();
+
+        foreach ($plannedPlates as $plateRow) {
+            $plate = ProductionCuttingPlanPlate::query()->create([
+                'cutting_plan_id' => $plan->id,
+                'plate_ref' => $plateRow['plate_ref'],
+                'planned_width_mm' => $plateRow['planned_width_mm'],
+                'planned_length_mm' => $plateRow['planned_length_mm'],
+                'planned_qty' => $plateRow['planned_qty'],
+                'remarks' => $plateRow['remarks'] ?? null,
+            ]);
+
+            foreach ($plateRow['allocations'] as $row) {
+                ProductionCuttingPlanAllocation::query()->create([
+                    'cutting_plan_id' => $plan->id,
+                    'cutting_plan_plate_id' => $plate->id,
+                    'part_definition_id' => (int) $row['part_definition_id'],
+                    'planned_qty' => $row['planned_qty'],
+                    'planned_blank_ref' => $row['planned_blank_ref'] ?: null,
+                    'planned_blank_width_mm' => $row['planned_blank_width_mm'] ?: null,
+                    'planned_blank_length_mm' => $row['planned_blank_length_mm'] ?: null,
+                    'mother_stock_item_id' => null,
+                    'cut_size_text' => $row['cut_size_text'] ?? null,
+                    'cut_width_mm' => $row['cut_width_mm'] ?: null,
+                    'cut_length_mm' => $row['cut_length_mm'] ?: null,
+                    'thickness_mm' => $row['thickness_mm'] ?: null,
+                    'allocation_group' => $row['allocation_group'] ?? null,
+                    'remarks' => $row['remarks'] ?? null,
+                ]);
+            }
+        }
     }
 }

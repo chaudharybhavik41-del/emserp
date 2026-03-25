@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Client RA Bill - {{ $clientRa->ra_number }}</title>
+    <title>Client Billing - {{ $clientRa->ra_number }}</title>
     <style>
         body { font-family: Arial, sans-serif; font-size: 12px; color: #111; }
         .no-print { margin-bottom: 10px; }
@@ -32,10 +32,10 @@
     <div class="header">
         <div>
             <div class="title">{{ config('app.name', 'EMS Infra') }}</div>
-            <div class="muted">Client RA Bill / Sales Invoice</div>
+            <div class="muted">Client Billing / Sales Invoice</div>
         </div>
         <div class="text-end">
-            <div><strong>RA No:</strong> {{ $clientRa->ra_number }}</div>
+            <div><strong>Bill No:</strong> {{ $clientRa->ra_number }}</div>
             <div><strong>Date:</strong> {{ $clientRa->bill_date?->format('d-m-Y') }}</div>
             <div><strong>Project:</strong> {{ $clientRa->project?->name }}</div>
         </div>
@@ -112,6 +112,10 @@
         <tr>
             <td class="label">Add: GST</td>
             <td class="value">{{ number_format((float) $clientRa->total_gst, 2) }}</td>
+        </tr>
+        <tr>
+            <td class="label">Round Off</td>
+            <td class="value">{{ number_format((float) $clientRa->round_off, 2) }}</td>
         </tr>
         <tr>
             <td class="label">Invoice Total</td>

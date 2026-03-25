@@ -2,18 +2,32 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
+use App\Models\Hr\HrLeaveBalance;
 use App\Models\Hr\HrLeaveApplication;
+use App\Models\Hr\HrLeaveTransaction;
 use App\Models\Hr\HrLeaveType;
 use App\Models\Hr\HrEmployee;
+use App\Enums\Hr\LeaveStatus;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class HrLeaveApplicationController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.leave.view')->only(['index']);
+        $this->middleware('permission:hr.leave.create')->only(['create', 'store']);
+        $this->middleware('permission:hr.leave.update')->only(['edit', 'update', 'destroy']);
+        $this->middleware('permission:hr.leave.approve')->only(['approve']);
+        $this->middleware('permission:hr.leave.reject')->only(['reject']);
+        $this->middleware('permission:hr.leave.cancel')->only(['cancel']);
     }
 
     public function index(Request $request)
@@ -119,6 +133,10 @@ class HrLeaveApplicationController extends Controller
 
     public function show(HrLeaveApplication $leaveApplication)
     {
+        $employee = HrEmployee::find($leaveApplication->hr_employee_id);
+        $this->authorizeEmployeeRead($employee, ['hr.leave.view', 'hr.employee.view']);
+        $leaveApplication->setRelation('employee', $employee);
+
         $leaveApplication->load(['employee', 'leaveType', 'approvedBy', 'createdByUser', 'handoverEmployee']);
         return view('hr.leave-applications.show', ['leaveApplication' => $leaveApplication]);
     }
@@ -207,16 +225,56 @@ class HrLeaveApplicationController extends Controller
 
     public function approve(Request $request, HrLeaveApplication $leaveApplication)
     {
-        if ($leaveApplication->status !== 'pending') {
+        if ($leaveApplication->status !== LeaveStatus::PENDING) {
             return back()->with('error', 'Application has already been processed.');
         }
 
-        $leaveApplication->update([
-            'status' => 'approved',
-            'approved_by' => Auth::id(),
-            'approved_at' => now(),
-            'approval_remarks' => $request->get('remarks', $request->get('approver_remarks')),
+        $request->validate([
+            'remarks' => 'nullable|string|max:500',
+            'approver_remarks' => 'nullable|string|max:500',
         ]);
+
+        DB::transaction(function () use ($leaveApplication, $request) {
+            $leaveApplication->update([
+                'status' => 'approved',
+                'approved_by' => Auth::id(),
+                'approved_at' => now(),
+                'approval_remarks' => $request->get('remarks', $request->get('approver_remarks')),
+            ]);
+
+            $year = Carbon::parse($leaveApplication->from_date)->year;
+            $balance = HrLeaveBalance::firstOrCreate(
+                [
+                    'hr_employee_id' => $leaveApplication->hr_employee_id,
+                    'hr_leave_type_id' => $leaveApplication->hr_leave_type_id,
+                    'year' => $year,
+                ],
+                [
+                    'opening_balance' => 0,
+                    'credited' => 0,
+                    'used' => 0,
+                    'pending' => 0,
+                    'adjusted' => 0,
+                ]
+            );
+
+            $balance->increment('used', $leaveApplication->total_days);
+            $balance->refresh();
+
+            HrLeaveTransaction::create([
+                'hr_employee_id' => $leaveApplication->hr_employee_id,
+                'hr_leave_type_id' => $leaveApplication->hr_leave_type_id,
+                'hr_leave_balance_id' => $balance->id,
+                'reference_type' => 'hr_leave_applications',
+                'reference_id' => $leaveApplication->id,
+                'transaction_type' => 'debit',
+                'days' => -$leaveApplication->total_days,
+                'balance_after' => $balance->available_balance,
+                'remarks' => "Leave approved: {$leaveApplication->application_number}",
+                'transaction_date' => now(),
+                'created_by' => Auth::id(),
+            ]);
+        });
 
         return back()->with('success', 'Leave application approved successfully.');
     }
@@ -242,15 +300,57 @@ class HrLeaveApplicationController extends Controller
         return back()->with('success', 'Leave application rejected.');
     }
 
-    public function cancel(HrLeaveApplication $leaveApplication)
+    public function cancel(Request $request, HrLeaveApplication $leaveApplication)
     {
-        if (!in_array($leaveApplication->status, ['pending', 'approved'])) {
+        if (! $leaveApplication->status->canCancel()) {
             return back()->with('error', 'Cannot cancel this application.');
         }
 
-        $leaveApplication->update([
-            'status' => 'cancelled',
+        $request->validate([
+            'cancellation_reason' => 'nullable|string|max:500',
         ]);
+
+        DB::transaction(function () use ($leaveApplication, $request) {
+            $wasApproved = $leaveApplication->status->value === 'approved';
+
+            $leaveApplication->update([
+                'status' => 'cancelled',
+                'cancellation_reason' => $request->input('cancellation_reason'),
+                'cancelled_at' => now(),
+                'cancelled_by' => Auth::id(),
+            ]);
+
+            if (! $wasApproved) {
+                return;
+            }
+
+            $year = Carbon::parse($leaveApplication->from_date)->year;
+            $balance = HrLeaveBalance::where('hr_employee_id', $leaveApplication->hr_employee_id)
+                ->where('hr_leave_type_id', $leaveApplication->hr_leave_type_id)
+                ->where('year', $year)
+                ->first();
+
+            if (! $balance) {
+                return;
+            }
+
+            $balance->decrement('used', $leaveApplication->total_days);
+            $balance->refresh();
+
+            HrLeaveTransaction::create([
+                'hr_employee_id' => $leaveApplication->hr_employee_id,
+                'hr_leave_type_id' => $leaveApplication->hr_leave_type_id,
+                'hr_leave_balance_id' => $balance->id,
+                'reference_type' => 'hr_leave_applications',
+                'reference_id' => $leaveApplication->id,
+                'transaction_type' => 'reversal',
+                'days' => $leaveApplication->total_days,
+                'balance_after' => $balance->available_balance,
+                'remarks' => "Leave cancelled: {$leaveApplication->application_number}",
+                'transaction_date' => now(),
+                'created_by' => Auth::id(),
+            ]);
+        });
 
         return back()->with('success', 'Leave application cancelled.');
     }

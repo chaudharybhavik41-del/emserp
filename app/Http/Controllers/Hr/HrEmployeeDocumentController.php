@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeDocument;
@@ -12,13 +13,18 @@ use Illuminate\View\View;
 
 class HrEmployeeDocumentController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'destroy', 'verify']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $documents = $employee->documents()->latest()->paginate(20)->withQueryString();
 
         return view('hr.employees.documents.index', compact('employee', 'documents'));
@@ -26,11 +32,15 @@ class HrEmployeeDocumentController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.documents.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $request->validate([
             'document_type' => 'required|in:photo,aadhar,pan,passport,driving_license,voter_id,birth_certificate,education_certificate,experience_letter,relieving_letter,offer_letter,appointment_letter,salary_slip,bank_statement,address_proof,police_verification,medical_certificate,other',
             'document_name' => 'required|string|max:150',
@@ -68,6 +78,8 @@ class HrEmployeeDocumentController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeDocument $document): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $document);
 
         if ($document->file_path) {
@@ -82,6 +94,8 @@ class HrEmployeeDocumentController extends Controller
 
     public function verify(HrEmployee $employee, HrEmployeeDocument $document): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $document);
 
         if ($document->is_verified) {

@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductionV2;
 
+use App\Models\Item;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ class ProductionCuttingPlan extends Model
         'project_id',
         'plan_number',
         'plan_date',
+        'material_item_id',
         'grade',
         'thickness_mm',
         'source_mode',
@@ -49,9 +51,20 @@ class ProductionCuttingPlan extends Model
         return $this->belongsTo(Project::class);
     }
 
+    public function materialItem()
+    {
+        return $this->belongsTo(Item::class, 'material_item_id');
+    }
+
     public function allocations()
     {
         return $this->hasMany(ProductionCuttingPlanAllocation::class, 'cutting_plan_id');
+    }
+
+    public function plannedPlates()
+    {
+        return $this->hasMany(ProductionCuttingPlanPlate::class, 'cutting_plan_id')
+            ->orderBy('id');
     }
 
     public function designRelease()

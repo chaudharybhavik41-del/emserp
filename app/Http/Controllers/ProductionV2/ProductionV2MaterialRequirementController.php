@@ -254,60 +254,107 @@ class ProductionV2MaterialRequirementController extends Controller
 
     protected function seedRows(Project $project): Collection
     {
-        $plannedCuts = ProductionCuttingPlanAllocation::query()
-            ->select('part_definition_id', DB::raw('SUM(planned_qty) as planned_cut_qty'))
-            ->whereHas('cuttingPlan', fn ($query) => $query->where('project_id', $project->id)->whereIn('status', ['approved', 'released']))
-            ->groupBy('part_definition_id')
-            ->pluck('planned_cut_qty', 'part_definition_id');
-
-        $parts = ProductionPartDefinition::query()
+        $plans = \App\Models\ProductionV2\ProductionCuttingPlan::query()
             ->where('project_id', $project->id)
-            ->whereIn('status', ['approved', 'released'])
-            ->orderBy('part_code')
+            ->whereNotIn('status', ['cancelled', 'superseded'])
+            ->with([
+                'materialItem:id,code,name,grade,thickness,density',
+                'plannedPlates.allocations.partDefinition:id,revision_root_id',
+            ])
+            ->orderBy('plan_number')
             ->get();
 
-        return $parts
-            ->groupBy(function (ProductionPartDefinition $part) {
+        return $plans
+            ->flatMap(function ($plan) {
+                return $plan->plannedPlates->map(function ($plate) use ($plan) {
+                    $materialItem = $plan->materialItem;
+                    $thickness = $this->floatValue($plan->thickness_mm ?: ($materialItem?->thickness));
+                    $width = $this->floatValue($plate->planned_width_mm);
+                    $length = $this->floatValue($plate->planned_length_mm);
+                    $plateQty = max($this->floatValue($plate->planned_qty), 1);
+                    $density = $this->floatValue($materialItem?->density) ?: 7850.0;
+                    $requiredWeight = ($thickness > 0 && $width > 0 && $length > 0)
+                        ? (($thickness * $width * $length * $plateQty) / 1_000_000_000.0) * $density
+                        : 0.0;
+
+                    return [
+                        'material_item_id' => $plan->material_item_id,
+                        'material_item_label' => $materialItem?->code
+                            ? ($materialItem->code . ' - ' . $materialItem->name)
+                            : ($materialItem?->name ?: '-'),
+                        'material_category' => 'steel_plate',
+                        'material_grade' => $plan->grade ?: ($materialItem?->grade ?: null),
+                        'thickness_mm' => $thickness ?: null,
+                        'width_mm' => $width ?: null,
+                        'length_mm' => $length ?: null,
+                        'profile_text' => ($width > 0 && $length > 0)
+                            ? ('Planned Plate ' . $this->trimDecimal($width) . ' x ' . $this->trimDecimal($length) . ' mm')
+                            : ($plate->plate_ref ?: null),
+                        'part_revision_root_ids_json' => json_encode(
+                            $plate->allocations
+                                ->map(fn ($allocation) => (int) optional($allocation->partDefinition)->revision_root_id ?: (int) $allocation->part_definition_id)
+                                ->filter()
+                                ->unique()
+                                ->values()
+                                ->all()
+                        ),
+                        'required_qty' => round($plateQty, 3),
+                        'required_weight_kg' => round($requiredWeight, 3),
+                        'planned_cut_qty_snapshot' => round($plateQty, 3),
+                        'remarks' => $plan->plan_number . ($plate->plate_ref ? (' / ' . $plate->plate_ref) : null),
+                    ];
+                });
+            })
+            ->groupBy(function (array $row) {
                 return implode('|', [
-                    (int) ($part->material_item_id ?? 0),
-                    strtolower((string) ($part->material_category ?? '')),
-                    strtolower((string) ($part->material_grade ?? '')),
-                    (string) ($part->thickness_mm ?? ''),
-                    (string) ($part->width_mm ?? ''),
-                    (string) ($part->length_mm ?? ''),
+                    (int) ($row['material_item_id'] ?? 0),
+                    strtolower((string) ($row['material_grade'] ?? '')),
+                    (string) ($row['thickness_mm'] ?? ''),
+                    (string) ($row['width_mm'] ?? ''),
+                    (string) ($row['length_mm'] ?? ''),
                 ]);
             })
-            ->map(function (Collection $group) use ($plannedCuts) {
-                /** @var ProductionPartDefinition $sample */
+            ->map(function (Collection $group) {
                 $sample = $group->first();
-                $requiredQty = (float) $group->sum(fn (ProductionPartDefinition $part) => (float) $part->required_qty);
-                $requiredWeight = (float) $group->sum(fn (ProductionPartDefinition $part) => (float) (($part->unit_weight_kg ?? 0) * ($part->required_qty ?? 0)));
-                $plannedCutQty = (float) $group->sum(fn (ProductionPartDefinition $part) => (float) ($plannedCuts[$part->id] ?? 0));
 
                 return [
-                    'material_item_id' => $sample->material_item_id,
-                    'material_item_label' => $sample->materialItem?->code
-                        ? ($sample->materialItem->code . ' - ' . $sample->materialItem->name)
-                        : ($sample->materialItem?->name ?: '-'),
-                    'material_category' => $sample->material_category,
-                    'material_grade' => $sample->material_grade,
-                    'thickness_mm' => $sample->thickness_mm,
-                    'width_mm' => $sample->width_mm,
-                    'length_mm' => $sample->length_mm,
-                    'profile_text' => $this->profileText($sample),
+                    'material_item_id' => $sample['material_item_id'],
+                    'material_item_label' => $sample['material_item_label'],
+                    'material_category' => $sample['material_category'],
+                    'material_grade' => $sample['material_grade'],
+                    'thickness_mm' => $sample['thickness_mm'],
+                    'width_mm' => $sample['width_mm'],
+                    'length_mm' => $sample['length_mm'],
+                    'profile_text' => $sample['profile_text'],
                     'part_revision_root_ids_json' => json_encode(
-                        $group->map(fn (ProductionPartDefinition $part) => (int) ($part->revision_root_id ?: $part->id))
+                        $group->pluck('part_revision_root_ids_json')
+                            ->map(fn ($json) => json_decode((string) $json, true) ?: [])
+                            ->flatten()
+                            ->filter()
+                            ->map(fn ($id) => (int) $id)
                             ->unique()
                             ->values()
                             ->all()
                     ),
-                    'required_qty' => round($requiredQty, 3),
-                    'required_weight_kg' => round($requiredWeight, 3),
-                    'planned_cut_qty_snapshot' => round($plannedCutQty, 3),
-                    'remarks' => null,
+                    'required_qty' => round((float) $group->sum('required_qty'), 3),
+                    'required_weight_kg' => round((float) $group->sum('required_weight_kg'), 3),
+                    'planned_cut_qty_snapshot' => round((float) $group->sum('planned_cut_qty_snapshot'), 3),
+                    'remarks' => $group->pluck('remarks')->filter()->implode(', '),
                 ];
             })
             ->values();
+    }
+
+    protected function floatValue(mixed $value): float
+    {
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    protected function trimDecimal(mixed $value): string
+    {
+        $number = $this->floatValue($value);
+
+        return rtrim(rtrim(number_format($number, 3, '.', ''), '0'), '.');
     }
 
     protected function nextRequirementNumber(Project $project): string

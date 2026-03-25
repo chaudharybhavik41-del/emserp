@@ -2,22 +2,41 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeLoan;
 use App\Models\Hr\HrLoanRepayment;
 use App\Models\Hr\HrLoanType;
+use App\Services\Accounting\HrEmployeeFinancePostingService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 use Illuminate\View\View;
 
 class HrEmployeeLoanController extends Controller
 {
-    public function __construct()
+    use AuthorizesEmployeeWorkspace;
+
+    public function __construct(
+        protected HrEmployeeFinancePostingService $financePostingService
+    )
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.view')->only(['index']);
+        $this->middleware('permission:hr.employee.update')->only([
+            'create',
+            'store',
+            'edit',
+            'update',
+            'destroy',
+            'approve',
+            'reject',
+            'disburse',
+            'cancel',
+        ]);
     }
 
     public function index(Request $request): View
@@ -82,6 +101,10 @@ class HrEmployeeLoanController extends Controller
 
     public function show(HrEmployeeLoan $loan): View
     {
+        $employee = HrEmployee::find($loan->hr_employee_id);
+        $this->authorizeEmployeeRead($employee);
+        $loan->setRelation('employee', $employee);
+
         $loan->load(['employee', 'loanType', 'repayments']);
 
         return view('hr.loans.employee-loans.show', compact('loan'));
@@ -89,6 +112,10 @@ class HrEmployeeLoanController extends Controller
 
     public function edit(HrEmployeeLoan $loan): View
     {
+        if (! $this->canEditLoan($loan)) {
+            abort(403, 'This loan can no longer be edited. Use cancellation/reversal instead.');
+        }
+
         $employees = HrEmployee::active()->orderBy('employee_code')->get();
         $loanTypes = HrLoanType::where('is_active', true)->orderBy('name')->get();
 
@@ -97,6 +124,12 @@ class HrEmployeeLoanController extends Controller
 
     public function update(Request $request, HrEmployeeLoan $loan): RedirectResponse
     {
+        if (! $this->canEditLoan($loan)) {
+            return redirect()
+                ->route('hr.loans.employee-loans.show', $loan)
+                ->with('error', 'This loan can no longer be edited. Use cancellation/reversal instead.');
+        }
+
         $validated = $this->validateData($request);
 
         $emi = $this->calculateEmi($validated['applied_amount'], $validated['tenure_months'], $validated['interest_rate'] ?? 0);
@@ -118,6 +151,12 @@ class HrEmployeeLoanController extends Controller
 
     public function destroy(HrEmployeeLoan $loan): RedirectResponse
     {
+        $loan->loadMissing('disbursementVoucher');
+
+        if ($loan->disbursementVoucher && ! $loan->disbursementVoucher->isReversed()) {
+            return back()->with('error', 'Cannot delete a disbursed loan. Cancel it first so accounting can be reversed safely.');
+        }
+
         if ($loan->repayments()->where('status', 'paid')->exists()) {
             return back()->with('error', 'Cannot delete loan with paid installments.');
         }
@@ -173,8 +212,15 @@ class HrEmployeeLoanController extends Controller
             return back()->with('error', 'Only approved loans can be disbursed.');
         }
 
+        $loan->loadMissing('disbursementVoucher');
+
+        if ($loan->disbursementVoucher && ! $loan->disbursementVoucher->isReversed()) {
+            return back()->with('error', 'This employee loan has already been disbursed and posted to accounts. Cancel it first before disbursing again.');
+        }
+
         $validated = $request->validate([
             'disbursed_amount' => 'nullable|numeric|min:0',
+            'disbursement_date' => 'nullable|date',
             'emi_start_date' => 'nullable|date',
         ]);
 
@@ -183,30 +229,94 @@ class HrEmployeeLoanController extends Controller
             ? Carbon::parse($validated['emi_start_date'])
             : now()->startOfMonth()->addMonth();
 
-        DB::transaction(function () use ($loan, $amount, $emiStart) {
-            $loan->update([
-                'disbursed_amount' => $amount,
-                'disbursement_date' => now()->toDateString(),
-                'emi_start_date' => $emiStart->toDateString(),
-                'emi_end_date' => $emiStart->copy()->addMonths(max(1, (int) $loan->tenure_months) - 1)->endOfMonth()->toDateString(),
-                'principal_outstanding' => $amount,
-                'interest_outstanding' => 0,
-                'total_outstanding' => $amount,
-                'emis_paid' => 0,
-                'emis_pending' => $loan->tenure_months,
-                'status' => 'active',
-            ]);
+        try {
+            DB::transaction(function () use ($loan, $amount, $emiStart, $validated) {
+                $loan->update([
+                    'company_id' => $loan->company_id ?: $loan->employee?->company_id,
+                    'disbursed_amount' => $amount,
+                    'disbursement_date' => isset($validated['disbursement_date'])
+                        ? Carbon::parse($validated['disbursement_date'])->toDateString()
+                        : now()->toDateString(),
+                    'emi_start_date' => $emiStart->toDateString(),
+                    'emi_end_date' => $emiStart->copy()->addMonths(max(1, (int) $loan->tenure_months) - 1)->endOfMonth()->toDateString(),
+                    'principal_outstanding' => $amount,
+                    'interest_outstanding' => 0,
+                    'total_outstanding' => $amount,
+                    'emis_paid' => 0,
+                    'emis_pending' => $loan->tenure_months,
+                    'status' => 'active',
+                ]);
 
-            if (!$loan->repayments()->exists()) {
-                $this->createSchedule($loan, $emiStart);
-            }
-        });
+                if (! $loan->repayments()->exists()) {
+                    $this->createSchedule($loan, $emiStart);
+                }
+
+                $this->financePostingService->postLoanDisbursement($loan->fresh(['employee']));
+            });
+        } catch (Throwable $e) {
+            return back()->with('error', 'Loan disbursement failed because accounts posting could not be completed: ' . $e->getMessage());
+        }
 
         return back()->with('success', 'Loan disbursed and repayment schedule created.');
     }
 
+    public function cancel(Request $request, HrEmployeeLoan $loan): RedirectResponse
+    {
+        $validated = $request->validate([
+            'cancellation_reason' => 'required|string|max:1000',
+            'reversal_date' => 'required|date',
+        ]);
+
+        if (in_array((string) $loan->status, ['cancelled', 'closed', 'written_off'], true)) {
+            return back()->with('error', 'This loan cannot be cancelled in its current state.');
+        }
+
+        try {
+            DB::transaction(function () use ($loan, $validated): void {
+                $lockedLoan = HrEmployeeLoan::query()
+                    ->with(['employee', 'repayments'])
+                    ->lockForUpdate()
+                    ->findOrFail($loan->id);
+
+                if ($lockedLoan->repayments()->where('status', 'paid')->exists()) {
+                    throw new \RuntimeException('Cannot cancel a loan with paid installments.');
+                }
+
+                if ($lockedLoan->repayments()->whereNotNull('hr_payroll_id')->exists()) {
+                    throw new \RuntimeException('Cannot cancel a loan already linked to payroll. Undo payroll first.');
+                }
+
+                if (! empty($lockedLoan->disbursement_voucher_id)) {
+                    $this->financePostingService->reverseLoanDisbursement(
+                        $lockedLoan,
+                        $validated['reversal_date'],
+                        $validated['cancellation_reason']
+                    );
+                }
+
+                $lockedLoan->repayments()->delete();
+
+                $lockedLoan->update([
+                    'principal_outstanding' => 0,
+                    'interest_outstanding' => 0,
+                    'total_outstanding' => 0,
+                    'emis_pending' => 0,
+                    'status' => 'cancelled',
+                ]);
+            });
+        } catch (Throwable $e) {
+            return back()->with('error', 'Failed to cancel loan: ' . $e->getMessage());
+        }
+
+        return back()->with('success', 'Loan cancelled and accounting reversed successfully.');
+    }
+
     public function schedule(HrEmployeeLoan $loan): View
     {
+        $employee = HrEmployee::find($loan->hr_employee_id);
+        $this->authorizeEmployeeRead($employee);
+        $loan->setRelation('employee', $employee);
+
         $loan->load(['employee', 'loanType', 'repayments']);
 
         return view('hr.loans.employee-loans.schedule', compact('loan'));
@@ -274,5 +384,12 @@ class HrEmployeeLoanController extends Controller
 
             $opening = $closing;
         }
+    }
+
+    private function canEditLoan(HrEmployeeLoan $loan): bool
+    {
+        return in_array((string) $loan->status, ['applied', 'pending_approval', 'rejected'], true)
+            && empty($loan->disbursement_voucher_id)
+            && ! $loan->repayments()->exists();
     }
 }

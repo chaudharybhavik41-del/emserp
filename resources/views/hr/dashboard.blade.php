@@ -287,34 +287,38 @@
     <div class="row g-4">
         <div class="col-md-8 erp-stack">
             @if($currentPayroll)
-                <div class="erp-surface hr-panel p-3 p-lg-4">
-                    <div class="hr-section-head">
-                        <div>
-                            <div class="hr-section-kicker">Payroll</div>
-                            <div class="hr-section-title">Current Payroll Period</div>
-                        </div>
-                        <span class="badge bg-{{ $currentPayroll->status->color() }}">{{ $currentPayroll->status->label() }}</span>
-                    </div>
-                    <div class="row text-center g-3">
-                        <div class="col-md-3">
-                            <div class="small text-muted mb-1">Period</div>
-                            <div class="fw-semibold">{{ $currentPayroll->period_name }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="small text-muted mb-1">Employees</div>
-                            <div class="fw-semibold">{{ $currentPayroll->payrolls_count ?? 0 }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="small text-muted mb-1">Total Amount</div>
-                            <div class="fw-semibold">₹{{ number_format($currentPayroll->total_amount ?? 0, 0) }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <a href="{{ route('hr.payroll.period', $currentPayroll) }}" class="btn btn-primary btn-sm">
-                                <i class="bi bi-eye me-1"></i> View Details
-                            </a>
-                        </div>
-                    </div>
-                </div>
+                            <div class="erp-surface hr-panel p-3 p-lg-4">
+                                <div class="hr-section-head">
+                                    <div>
+                                        <div class="hr-section-kicker">Payroll</div>
+                                        <div class="hr-section-title">Current Payroll Period</div>
+                                    </div>
+
+                                    
+                            <span class="badge bg-{{ $currentPayroll->status_color }}">
+                                {{ $currentPayroll->status_label }}
+                            </span>
+                                </div>
+                                <div class="row text-center g-3">
+                                    <div class="col-md-3">
+                                        <div class="small text-muted mb-1">Period</div>
+                                        <div class="fw-semibold">{{ $currentPayroll->period_name }}</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="small text-muted mb-1">Employees</div>
+                                        <div class="fw-semibold">{{ $currentPayroll->payrolls_count ?? 0 }}</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="small text-muted mb-1">Total Amount</div>
+                                        <div class="fw-semibold">₹{{ number_format($currentPayroll->total_amount ?? 0, 0) }}</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <a href="{{ route('hr.payroll.period', $currentPayroll) }}" class="btn btn-primary btn-sm">
+                                            <i class="bi bi-eye me-1"></i> View Details
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
             @endif
 
             <div class="erp-surface hr-panel p-3 p-lg-4">

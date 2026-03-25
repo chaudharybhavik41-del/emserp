@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Hr;
 
+use App\Http\Controllers\Hr\Concerns\AuthorizesEmployeeWorkspace;
 use App\Http\Controllers\Controller;
 use App\Models\Hr\HrEmployee;
 use App\Models\Hr\HrEmployeeDependent;
@@ -11,13 +12,18 @@ use Illuminate\View\View;
 
 class HrEmployeeDependentController extends Controller
 {
+    use AuthorizesEmployeeWorkspace;
+
     public function __construct()
     {
         $this->middleware('auth');
+        $this->middleware('permission:hr.employee.update')->only(['create', 'store', 'edit', 'update', 'destroy']);
     }
 
     public function index(HrEmployee $employee, Request $request): View
     {
+        $this->authorizeEmployeeRead($employee);
+
         $dependents = $employee->dependents()->latest()->paginate(20)->withQueryString();
 
         $editing = null;
@@ -30,11 +36,15 @@ class HrEmployeeDependentController extends Controller
 
     public function create(HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         return redirect()->route('hr.employees.dependents.index', $employee)->with('show_form', true);
     }
 
     public function store(Request $request, HrEmployee $employee): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $validated = $this->validateData($request);
         $validated['hr_employee_id'] = $employee->id;
 
@@ -46,6 +56,8 @@ class HrEmployeeDependentController extends Controller
 
     public function edit(HrEmployee $employee, HrEmployeeDependent $dependent): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $dependent);
 
         return redirect()->route('hr.employees.dependents.index', ['employee' => $employee->id, 'edit' => $dependent->id]);
@@ -53,6 +65,8 @@ class HrEmployeeDependentController extends Controller
 
     public function update(Request $request, HrEmployee $employee, HrEmployeeDependent $dependent): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $dependent);
 
         $dependent->update($this->validateData($request));
@@ -63,6 +77,8 @@ class HrEmployeeDependentController extends Controller
 
     public function destroy(HrEmployee $employee, HrEmployeeDependent $dependent): RedirectResponse
     {
+        $this->authorizeEmployeeWrite($employee);
+
         $this->guardOwnership($employee, $dependent);
 
         $dependent->delete();

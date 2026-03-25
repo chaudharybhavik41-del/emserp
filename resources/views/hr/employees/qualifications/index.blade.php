@@ -4,6 +4,8 @@
 
 @section('content')
 <div class="container-fluid py-3">
+    @include('hr.employees.partials.hub-nav', ['employee' => $employee, 'activeSection' => 'overview'])
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h4 class="mb-1">Qualifications</h4>

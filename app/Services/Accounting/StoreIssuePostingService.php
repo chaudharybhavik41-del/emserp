@@ -22,7 +22,8 @@ use RuntimeException;
 class StoreIssuePostingService
 {
     public function __construct(
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected ItemAccountingResolver $itemAccountingResolver
     ) {
     }
 
@@ -76,7 +77,7 @@ class StoreIssuePostingService
             return null;
         }
 
-        $issue->loadMissing('lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.item');
+        $issue->loadMissing('lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.stockItem.item.type', 'lines.item', 'lines.item.type');
 
         if ($issue->lines->isEmpty()) {
             throw new RuntimeException('Cannot post a store issue without lines.');
@@ -89,6 +90,7 @@ class StoreIssuePostingService
 
         // Resolve configured accounts
         $wipCode        = Config::get('accounting.store.project_wip_material_account_code');
+        $wipConsCode    = Config::get('accounting.store.project_wip_consumable_account_code', 'WIP-CONSUMABLES');
         $factoryExpCode = Config::get('accounting.store.factory_consumable_expense_account_code');
         $machineSpareExpCode = Config::get('accounting.store.machine_maintenance_spare_expense_account_code', 'WIP-MACHINE');
 
@@ -103,13 +105,17 @@ class StoreIssuePostingService
         }
 
         $wipAccount           = Account::where('company_id', $companyId)->where('code', $wipCode)->first();
+        $wipConsAccount       = Account::where('company_id', $companyId)->where('code', $wipConsCode)->first();
         $factoryExpenseAccount = Account::where('company_id', $companyId)->where('code', $factoryExpCode)->first();
         $machineSpareExpenseAccount = $isMachineSpareIssue
             ? Account::where('company_id', $companyId)->where('code', $machineSpareExpCode)->first()
             : null;
 
         if (! $wipAccount) {
-            throw new RuntimeException('Project WIP account not found for code: ' . $wipCode);
+            throw new RuntimeException('Project WIP (Material) account not found for code: ' . $wipCode);
+        }
+        if (! $wipConsAccount) {
+            throw new RuntimeException('Project WIP (Consumables) account not found for code: ' . $wipConsCode);
         }
         if (! $factoryExpenseAccount) {
             throw new RuntimeException('Factory consumable expense account not found for code: ' . $factoryExpCode);
@@ -124,6 +130,7 @@ class StoreIssuePostingService
             $projectId,
             $isMachineSpareIssue,
             $wipAccount,
+            $wipConsAccount,
             $factoryExpenseAccount,
             $machineSpareExpenseAccount
         ) {
@@ -144,7 +151,7 @@ class StoreIssuePostingService
                 return null;
             }
 
-            $issue->loadMissing('lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.item');
+            $issue->loadMissing('lines', 'lines.stockItem', 'lines.stockItem.item', 'lines.stockItem.item.type', 'lines.item', 'lines.item.type');
 
             // Group amounts by debit/credit account
             $debits  = []; // [account_id => amount]
@@ -170,19 +177,15 @@ class StoreIssuePostingService
 
                 // Determine credit account (inventory)
                 $item             = $stockItem->item ?? $line->item;
-                $inventoryAccount = null;
+                $inventoryAccount = $this->itemAccountingResolver->resolveInventoryHoldingAccount($item, (int) $companyId);
 
-                if ($item && $item->inventory_account_id) {
-                    $inventoryAccount = Account::find($item->inventory_account_id);
-                }
-
-                // Optional fallback: a generic inventory account code can be configured if needed.
                 if (! $inventoryAccount) {
-                    $invCode = Config::get('accounting.store.inventory_consumables_account_code');
+                    $invCode = Config::get('accounting.store.inventory_consumables_account_code')
+                        ?: (Config::get('accounting.default_accounts.inventory_raw_material_code') ?: 'INV-RM');
                     if (! $invCode) {
                         throw new RuntimeException(
                             'Inventory account not found for store issue line ID ' . $line->id .
-                            '; please configure accounting.store.inventory_consumables_account_code or set inventory_account_id on item.'
+                            '; please configure inventory defaults or set inventory_account_id on item/subcategory.'
                         );
                     }
                     $inventoryAccount = Account::where('company_id', $companyId)->where('code', $invCode)->first();
@@ -204,7 +207,7 @@ class StoreIssuePostingService
                 // Determine debit account based on project or factory usage
                 $debitAccount = $isMachineSpareIssue
                     ? $machineSpareExpenseAccount
-                    : ($projectId ? $wipAccount : $factoryExpenseAccount);
+                    : ($projectId ? $this->resolveWipAccount($item, $wipAccount, $wipConsAccount) : $factoryExpenseAccount);
 
                 // Grouped debits/credits
                 $debits[$debitAccount->id]        = ($debits[$debitAccount->id] ?? 0) + $amount;
@@ -240,7 +243,7 @@ class StoreIssuePostingService
             // Centralised voucher numbering (Phase 5a)
             $voucher->voucher_no    = $this->voucherNumberService->next('store_issue', (int) $companyId, $businessDate);
             $voucher->voucher_type  = 'store_issue';
-            $voucher->voucher_date  = $businessDate->toDateString();
+            $voucher->voucher_date  = $businessDate;
             $voucher->reference     = $issue->issue_number ?: ('STORE_ISSUE#' . $issue->id);
             $voucher->narration     = trim('Store Issue ' . $issue->issue_number . ' - ' . (string) $issue->remarks);
             $voucher->project_id    = $projectId;
@@ -264,7 +267,7 @@ class StoreIssuePostingService
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
-                    'cost_center_id' => $costCenterId,
+                    'cost_center_id' => $costcenterId ?? $costCenterId, // fixed typo if any
                     'description'    => 'Store Issue - Debit',
                     'debit'          => round($amount, 2),
                     'credit'         => 0,
@@ -285,7 +288,7 @@ class StoreIssuePostingService
                     'voucher_id'     => $voucher->id,
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
-                    'cost_center_id' => $costCenterId,
+                    'cost_center_id' => $costcenterId ?? $costCenterId,
                     'description'    => 'Store Issue - Credit',
                     'debit'          => 0,
                     'credit'         => round($amount, 2),
@@ -369,7 +372,7 @@ class StoreIssuePostingService
             return 0.0;
         }
 
-        $totalBasic = PurchaseBillLine::where('material_receipt_line_id', $mrLineId)->sum('basic_amount');
+        $totalBasic = PurchaseBillLine::postedBasicForMaterialReceiptLine((int) $mrLineId);
         if ($totalBasic <= 0) {
             return 0.0;
         }
@@ -435,5 +438,22 @@ class StoreIssuePostingService
         }
 
         return (int) $machineIds->first();
+    }
+
+    /**
+     * Resolve whether to use WIP-MATERIAL or WIP-CONSUMABLES based on item type.
+     */
+    protected function resolveWipAccount($item, $wipMaterial, $wipConsumable): Account
+    {
+        if (! $item) {
+            return $wipMaterial;
+        }
+
+        $typeCode = strtoupper((string) ($item->type?->code ?? ''));
+        if (in_array($typeCode, ['CONSUMABLE', 'SPARE'], true)) {
+            return $wipConsumable;
+        }
+
+        return $wipMaterial;
     }
 }

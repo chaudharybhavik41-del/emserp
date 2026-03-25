@@ -248,6 +248,7 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
     */
     Route::prefix('client-ra')->name('client-ra.')->group(function () {
         Route::get('/', [ClientRaBillController::class, 'index'])->name('index');
+        Route::get('/dispatch-balance', [ClientRaBillController::class, 'dispatchBalance'])->name('dispatch-balance');
         Route::get('/create', [ClientRaBillController::class, 'create'])->name('create');
         Route::post('/', [ClientRaBillController::class, 'store'])->name('store');
         Route::get('/{clientRa}', [ClientRaBillController::class, 'show'])->name('show');
@@ -263,6 +264,23 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
         Route::post('/{clientRa}/reverse', [ClientRaBillController::class, 'reverse'])->name('reverse');
 
         // Print/Export
+        Route::get('/{clientRa}/print', [ClientRaBillController::class, 'print'])->name('print');
+    });
+
+    Route::prefix('client-billing')->name('client-billing.')->group(function () {
+        Route::get('/', [ClientRaBillController::class, 'index'])->name('index');
+        Route::get('/dispatch-balance', [ClientRaBillController::class, 'dispatchBalance'])->name('dispatch-balance');
+        Route::get('/create', [ClientRaBillController::class, 'create'])->name('create');
+        Route::post('/', [ClientRaBillController::class, 'store'])->name('store');
+        Route::get('/{clientRa}', [ClientRaBillController::class, 'show'])->name('show');
+        Route::get('/{clientRa}/edit', [ClientRaBillController::class, 'edit'])->name('edit');
+        Route::put('/{clientRa}', [ClientRaBillController::class, 'update'])->name('update');
+        Route::delete('/{clientRa}', [ClientRaBillController::class, 'destroy'])->name('destroy');
+        Route::post('/{clientRa}/submit', [ClientRaBillController::class, 'submit'])->name('submit');
+        Route::post('/{clientRa}/approve', [ClientRaBillController::class, 'approve'])->name('approve');
+        Route::post('/{clientRa}/reject', [ClientRaBillController::class, 'reject'])->name('reject');
+        Route::post('/{clientRa}/post', [ClientRaBillController::class, 'post'])->name('post');
+        Route::post('/{clientRa}/reverse', [ClientRaBillController::class, 'reverse'])->name('reverse');
         Route::get('/{clientRa}/print', [ClientRaBillController::class, 'print'])->name('print');
     });
 

@@ -20,19 +20,22 @@ class HrRolesAndPermissionsSeeder extends Seeder
          */
         $entitiesWithActions = [
             // Dashboard: only view
-            'hr.dashboard'  => ['view'],
+            'hr.dashboard' => ['view'],
 
             // Employees module
-            'hr.employee'   => ['view', 'create', 'update', 'delete'],
+            'hr.employee' => ['view', 'create', 'update', 'delete'],
+
+            // Candidate database / recruitment pipeline
+            'hr.candidate' => ['view', 'create', 'update', 'delete'],
 
             // Attendance module
             'hr.attendance' => ['view', 'create', 'update', 'delete'],
 
             // Leave module
-            'hr.leave'      => ['view', 'create', 'update', 'delete'],
+            'hr.leave' => ['view', 'create', 'update', 'delete'],
 
             // Payroll module
-            'hr.payroll'    => ['view', 'create', 'update', 'delete'],
+            'hr.payroll' => ['view', 'create', 'update', 'delete'],
         ];
 
         $allPermissions = [];
@@ -43,7 +46,7 @@ class HrRolesAndPermissionsSeeder extends Seeder
 
                 $perm = Permission::firstOrCreate(
                     [
-                        'name'       => $name,
+                        'name' => $name,
                         'guard_name' => 'web',
                     ]
                 );
@@ -104,7 +107,7 @@ class HrRolesAndPermissionsSeeder extends Seeder
 
         foreach ($specialPermissions as $permName) {
             $perm = Permission::firstOrCreate([
-                'name'       => $permName,
+                'name' => $permName,
                 'guard_name' => 'web',
             ]);
 
@@ -134,10 +137,19 @@ class HrRolesAndPermissionsSeeder extends Seeder
 
         // Manager: view/create/update + any permission containing ".approve"
         $managerPerms = array_filter($allPermissions, function (string $perm) {
-            if (str_ends_with($perm, '.view')) return true;
-            if (str_ends_with($perm, '.create')) return true;
-            if (str_ends_with($perm, '.update')) return true;
-            if (str_contains($perm, '.approve')) return true;
+            if (str_ends_with($perm, '.view')) {
+                return true;
+            }
+            if (str_ends_with($perm, '.create')) {
+                return true;
+            }
+            if (str_ends_with($perm, '.update')) {
+                return true;
+            }
+            if (str_contains($perm, '.approve')) {
+                return true;
+            }
+
             // No delete / destructive perms
             return false;
         });

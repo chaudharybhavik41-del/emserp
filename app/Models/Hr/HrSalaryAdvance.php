@@ -2,6 +2,7 @@
 
 namespace App\Models\Hr;
 
+use App\Models\Accounting\Voucher;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,12 +12,14 @@ class HrSalaryAdvance extends Model
     protected $table = 'hr_salary_advances';
 
     protected $fillable = [
+        'company_id',
         'advance_number',
         'hr_employee_id',
         'application_date',
         'requested_amount',
         'approved_amount',
         'disbursed_amount',
+        'disbursement_date',
         'purpose',
         'recovery_months',
         'monthly_deduction',
@@ -28,12 +31,21 @@ class HrSalaryAdvance extends Model
         'approved_at',
         'rejection_reason',
         'created_by',
+        'disbursement_voucher_id',
+        'disbursement_reversal_voucher_id',
+        'disbursement_accounting_status',
+        'disbursement_posted_at',
+        'disbursement_reversed_at',
+        'disbursement_reversal_reason',
     ];
 
     protected $casts = [
         'application_date' => 'date',
+        'disbursement_date' => 'date',
         'recovery_start_date' => 'date',
         'approved_at' => 'datetime',
+        'disbursement_posted_at' => 'datetime',
+        'disbursement_reversed_at' => 'datetime',
         'requested_amount' => 'decimal:2',
         'approved_amount' => 'decimal:2',
         'disbursed_amount' => 'decimal:2',
@@ -55,6 +67,16 @@ class HrSalaryAdvance extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function disbursementVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'disbursement_voucher_id');
+    }
+
+    public function disbursementReversalVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'disbursement_reversal_voucher_id');
     }
 
     public static function generateNumber(): string

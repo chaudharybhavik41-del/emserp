@@ -30,6 +30,9 @@ use RuntimeException;
  */
 class SalesPostingService
 {
+    protected const PROFILE_SERVICE = 'service';
+    protected const PROFILE_MATERIAL = 'material';
+
     public function __construct(
         protected PartyAccountService $partyAccountService,
         protected VoucherNumberService $voucherNumberService,
@@ -83,10 +86,19 @@ class SalesPostingService
             throw new RuntimeException('Unable to resolve client debtor ledger account.');
         }
 
+        $postingProfile = $this->resolvePostingProfile($raBill);
+
+        if ($postingProfile === self::PROFILE_MATERIAL && ! $this->materialSalesRevenueOnlyModeEnabled()) {
+            throw new RuntimeException(
+                'Material/scrap client billing cannot be posted with inventory/COGS yet. '
+                . 'Enable accounting.sales.material_sales_revenue_only_mode until dispatch cost basis is implemented.'
+            );
+        }
+
         // Resolve revenue accounts based on lines or default
-        $revenueAccounts = $this->resolveRevenueAccounts($raBill);
+        $revenueAccounts = $this->resolveRevenueAccounts($raBill, $postingProfile);
         if (empty($revenueAccounts)) {
-            throw new RuntimeException('No revenue accounts found. Please configure accounting.sales.revenue_account_codes or assign revenue accounts to line items.');
+            throw new RuntimeException('No revenue accounts found. Please configure the client billing revenue ledgers or assign revenue accounts to line items.');
         }
 
         // Resolve Output GST accounts
@@ -106,6 +118,7 @@ class SalesPostingService
         // - TDS Receivable (asset) to be claimed via Form 26AS / 16A
         $tdsAmount = (float) ($raBill->tds_amount ?? 0);
         $receivableAmount = (float) ($raBill->receivable_amount ?? 0);
+        $roundOff = round((float) ($raBill->round_off ?? 0), 2);
 
         if ($receivableAmount <= 0 && $totalAmount > 0) {
             $receivableAmount = $totalAmount - $tdsAmount;
@@ -116,6 +129,16 @@ class SalesPostingService
             $tdsReceivableAccount = $this->resolveTdsReceivableAccount();
             if (! $tdsReceivableAccount) {
                 throw new RuntimeException('TDS Receivable account not found. Please configure accounting.tds.tds_receivable_account_code and create that ledger.');
+            }
+        }
+
+        $roundOffAccount = null;
+        if (abs($roundOff) > 0.0001) {
+            $roundOffCode = (string) Config::get('accounting.round_off.round_off_account_code', 'ROUND-OFF');
+            $roundOffAccount = Account::query()->where('code', $roundOffCode)->first();
+
+            if (! $roundOffAccount) {
+                throw new RuntimeException('Round Off account not found for code: ' . $roundOffCode);
             }
         }
 
@@ -133,8 +156,11 @@ class SalesPostingService
             $tdsAmount,
             $receivableAmount,
             $tdsReceivableAccount,
+            $roundOff,
+            $roundOffAccount,
             $totalAmount,
-            $project
+            $project,
+            $postingProfile
         ) {
             $companyId = $raBill->company_id ?: Config::get('accounting.default_company_id', 1);
             $voucherDate = $raBill->bill_date;
@@ -156,8 +182,9 @@ class SalesPostingService
             $voucher->voucher_date = $voucherDate;
             $voucher->reference = $raBill->invoice_number ?: $raBill->ra_number;
             $voucher->narration = trim(
-                'Client RA Bill ' . $raBill->ra_number .
+                'Client Billing ' . $raBill->ra_number .
                 ($raBill->invoice_number ? ' / Inv: ' . $raBill->invoice_number : '') .
+                ' / ' . ($raBill->bill_kind_label ?? 'Billing') .
                 ' - ' . ($raBill->client->name ?? '') .
                 ' - ' . ($raBill->remarks ?? '')
             );
@@ -171,7 +198,7 @@ class SalesPostingService
             $voucher->created_by = $raBill->created_by;
 
             // Total voucher amount (provisional; will be normalized from voucher lines when posted)
-            $voucher->amount_base = round($totalAmount, 2);
+            $voucher->amount_base = round($totalAmount + max(0, -$roundOff), 2);
             $voucher->save();
 
             $lineNo = 1;
@@ -182,7 +209,7 @@ class SalesPostingService
                 'line_no'        => $lineNo++,
                 'account_id'     => $debtorAccount->id,
                 'cost_center_id' => $costCenterId,
-                'description'    => 'Debtor - ' . ($raBill->invoice_number ?: $raBill->ra_number),
+                    'description'    => 'Debtor - ' . ($raBill->invoice_number ?: $raBill->ra_number),
                 'debit'          => round($receivableAmount, 2),
                 'credit'         => 0,
                 'reference_type' => ClientRaBill::class,
@@ -215,7 +242,8 @@ class SalesPostingService
                     'line_no'        => $lineNo++,
                     'account_id'     => $accountId,
                     'cost_center_id' => $costCenterId,
-                    'description'    => 'Revenue - ' . ($raBill->invoice_number ?: $raBill->ra_number),
+                    'description'    => ($postingProfile === self::PROFILE_MATERIAL ? 'Material Revenue - ' : 'Service Revenue - ')
+                        . ($raBill->invoice_number ?: $raBill->ra_number),
                     'debit'          => 0,
                     'credit'         => round($amount, 2),
                     'reference_type' => ClientRaBill::class,
@@ -257,6 +285,18 @@ class SalesPostingService
                     'description'    => 'Output IGST - ' . ($raBill->invoice_number ?: $raBill->ra_number),
                     'debit'          => 0,
                     'credit'         => round($igstAmount, 2),
+                ]);
+            }
+
+            if (abs($roundOff) > 0.0001 && $roundOffAccount) {
+                VoucherLine::create([
+                    'voucher_id'     => $voucher->id,
+                    'line_no'        => $lineNo++,
+                    'account_id'     => $roundOffAccount->id,
+                    'cost_center_id' => $costCenterId,
+                    'description'    => 'Round Off - ' . ($raBill->invoice_number ?: $raBill->ra_number),
+                    'debit'          => $roundOff < 0 ? round(abs($roundOff), 2) : 0,
+                    'credit'         => $roundOff > 0 ? round($roundOff, 2) : 0,
                 ]);
             }
 
@@ -308,16 +348,22 @@ class SalesPostingService
             // Audit log
             ActivityLog::logCustom(
                 'posted_to_accounts',
-                'Client RA Bill ' . $raBill->ra_number . ' posted to accounts as voucher ' . $voucher->voucher_no,
+                'Client Billing ' . $raBill->ra_number . ' posted to accounts as voucher ' . $voucher->voucher_no,
                 $raBill,
                 [
                     'voucher_id'     => $voucher->id,
                     'voucher_no'     => $voucher->voucher_no,
                     'invoice_number' => $raBill->invoice_number,
                     'project_id'     => $project->id,
+                    'posting_profile'=> $postingProfile,
+                    'bill_kind'      => $raBill->bill_kind,
+                    'source_basis'   => $raBill->source_basis,
+                    'material_scope' => $raBill->material_scope,
                     'net_amount'     => $netAmount,
                     'total_gst'      => $cgstAmount + $sgstAmount + $igstAmount,
+                    'round_off'      => $roundOff,
                     'total_amount'   => $totalAmount,
+                    'material_sales_revenue_only' => $postingProfile === self::PROFILE_MATERIAL,
                 ]
             );
 
@@ -331,7 +377,7 @@ class SalesPostingService
     public function reverse(ClientRaBill $raBill, Carbon|string $reversalDate, string $reason = ''): Voucher
     {
         if ($raBill->status !== 'posted' || !$raBill->voucher_id) {
-            throw new RuntimeException('Only posted RA Bills can be reversed.');
+            throw new RuntimeException('Only posted client billing vouchers can be reversed.');
         }
 
         $originalVoucher = $raBill->voucher;
@@ -409,12 +455,13 @@ class SalesPostingService
             // Audit log
             ActivityLog::logCustom(
                 'posting_reversed',
-                'Client RA Bill ' . $raBill->ra_number . ' posting reversed. Reversal voucher: ' . $reversalVoucher->voucher_no,
+                'Client Billing ' . $raBill->ra_number . ' posting reversed. Reversal voucher: ' . $reversalVoucher->voucher_no,
                 $raBill,
                 [
                     'original_voucher_id' => $originalVoucher->id,
                     'reversal_voucher_id' => $reversalVoucher->id,
                     'reason'              => $reason,
+                    'bill_kind'           => $raBill->bill_kind,
                 ]
             );
 
@@ -427,7 +474,7 @@ class SalesPostingService
      * 
      * @return array<int, float> [account_id => amount]
      */
-    protected function resolveRevenueAccounts(ClientRaBill $raBill): array
+    protected function resolveRevenueAccounts(ClientRaBill $raBill, string $postingProfile): array
     {
         $raBill->loadMissing('lines');
         $revenueByAccount = [];
@@ -445,7 +492,7 @@ class SalesPostingService
 
         // If no line-level accounts, use default based on revenue type
         if (empty($revenueByAccount)) {
-            $defaultAccount = $this->getDefaultRevenueAccount($raBill->revenue_type);
+            $defaultAccount = $this->getDefaultRevenueAccount($raBill);
             if ($defaultAccount) {
                 // Apply deductions to get net amount for revenue
                 $revenueByAccount[$defaultAccount->id] = (float) $raBill->net_amount;
@@ -458,7 +505,7 @@ class SalesPostingService
     /**
      * Get default revenue account based on revenue type
      */
-    protected function getDefaultRevenueAccount(string $revenueType): ?Account
+    protected function getDefaultRevenueAccount(ClientRaBill $raBill): ?Account
     {
         $codeMap = [
             'fabrication' => Config::get('accounting.sales.fabrication_revenue_code', 'REV-FABRICATION'),
@@ -468,7 +515,12 @@ class SalesPostingService
             'other'       => Config::get('accounting.sales.other_revenue_code', 'REV-OTHER'),
         ];
 
-        $code = $codeMap[$revenueType] ?? $codeMap['fabrication'];
+        $code = match ($raBill->bill_kind) {
+            ClientRaBill::BILL_KIND_MATERIAL_SALES => Config::get('accounting.sales.supply_revenue_code', 'REV-SUPPLY'),
+            ClientRaBill::BILL_KIND_SCRAP_SALES => Config::get('accounting.sales.scrap_revenue_code', 'REV-SCRAP'),
+            ClientRaBill::BILL_KIND_PROJECT_LABOUR_SERVICE => Config::get('accounting.sales.service_revenue_code', 'REV-SERVICE'),
+            default => $codeMap[$raBill->revenue_type] ?? $codeMap['fabrication'],
+        };
 
         $account = Account::where('code', $code)->first();
 
@@ -479,6 +531,18 @@ class SalesPostingService
         }
 
         return $account;
+    }
+
+    protected function resolvePostingProfile(ClientRaBill $raBill): string
+    {
+        return $raBill->isMaterialBilling()
+            ? self::PROFILE_MATERIAL
+            : self::PROFILE_SERVICE;
+    }
+
+    protected function materialSalesRevenueOnlyModeEnabled(): bool
+    {
+        return (bool) Config::get('accounting.sales.material_sales_revenue_only_mode', true);
     }
 
     /**

@@ -85,7 +85,10 @@ class StoreIssue extends Model
      | Store Issue is treated as posted from creation (status = posted).
      | We lock the header fields that must not change once the issue exists.
      */
-
+public function accountingPostedBy()
+{
+    return $this->belongsTo(\App\Models\User::class, 'accounting_posted_by');
+}
     public function getPostingLockedAttributes(): array
     {
         return [

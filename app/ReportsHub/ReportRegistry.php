@@ -25,6 +25,7 @@ class ReportRegistry
         \App\ReportsHub\Reports\StoreStockOnHandReport::class,
         \App\ReportsHub\Reports\StoreRequisitionRegisterReport::class,
         \App\ReportsHub\Reports\StoreIssueRegisterReport::class,
+        \App\ReportsHub\Reports\StoreIssueAccountingReport::class,
         \App\ReportsHub\Reports\StoreReturnRegisterReport::class,
         \App\ReportsHub\Reports\StoreStockAdjustmentRegisterReport::class,
         \App\ReportsHub\Reports\StoreReorderLevelReport::class,
@@ -92,4 +93,3 @@ class ReportRegistry
         return $this->all()[$key] ?? null;
     }
 }
-

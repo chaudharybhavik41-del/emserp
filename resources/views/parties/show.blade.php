@@ -239,58 +239,70 @@
                         </tbody>
                     </table>
 
-                @can('core.party.update')
-                    <form method="POST" action="{{ route('parties.branches.store', $party) }}">
-                        @csrf
-
-                        <div class="row g-2">
-                            <div class="col-md-4">
-                                <input type="text" name="branch_name" value="{{ old('branch_name') }}" class="form-control form-control-sm"
-                                    placeholder="Branch name (optional)">
+                    @can('core.party.update')
+                        <form method="POST" action="{{ route('parties.contacts.store', $party) }}">
+                            @csrf
+                            <div class="row g-2">
+                                <div class="col-md-3">
+                                    <input type="text"
+                                           name="name"
+                                           value="{{ old('name') }}"
+                                           class="form-control form-control-sm @error('name') is-invalid @enderror"
+                                           placeholder="Name"
+                                           required>
+                                    @error('name')
+                                        <div class="invalid-feedback">{{ $message }}</div>
+                                    @enderror
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text"
+                                           name="designation"
+                                           value="{{ old('designation') }}"
+                                           class="form-control form-control-sm @error('designation') is-invalid @enderror"
+                                           placeholder="Designation">
+                                    @error('designation')
+                                        <div class="invalid-feedback">{{ $message }}</div>
+                                    @enderror
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text"
+                                           name="phone"
+                                           value="{{ old('phone') }}"
+                                           class="form-control form-control-sm @error('phone') is-invalid @enderror"
+                                           placeholder="Phone">
+                                    @error('phone')
+                                        <div class="invalid-feedback">{{ $message }}</div>
+                                    @enderror
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="email"
+                                           name="email"
+                                           value="{{ old('email') }}"
+                                           class="form-control form-control-sm @error('email') is-invalid @enderror"
+                                           placeholder="Email">
+                                    @error('email')
+                                        <div class="invalid-feedback">{{ $message }}</div>
+                                    @enderror
+                                </div>
                             </div>
-
-                            <div class="col-md-4">
-                                <input type="text" name="gstin" value="{{ old('gstin') }}"
-                                    class="form-control form-control-sm @error('gstin') is-invalid @enderror" placeholder="GSTIN *"
-                                    required>
-
-                                @error('gstin')
-                                    <div class="invalid-feedback">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
+                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                <div class="form-check">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           name="is_primary"
+                                           id="contact_is_primary"
+                                           value="1"
+                                           @checked(old('is_primary'))>
+                                    <label class="form-check-label small" for="contact_is_primary">
+                                        Set as primary contact
+                                    </label>
+                                </div>
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    Add Contact
+                                </button>
                             </div>
-
-                            <div class="col-md-4">
-                                <input type="text" name="state" value="{{ old('state') }}" class="form-control form-control-sm"
-                                    placeholder="State">
-                            </div>
-                        </div>
-
-                        <div class="row g-2 mt-2">
-                            <div class="col-md-6">
-                                <input type="text" name="address_line1" value="{{ old('address_line1') }}"
-                                    class="form-control form-control-sm" placeholder="Address line 1">
-                            </div>
-
-                            <div class="col-md-3">
-                                <input type="text" name="city" value="{{ old('city') }}" class="form-control form-control-sm"
-                                    placeholder="City">
-                            </div>
-
-                            <div class="col-md-3">
-                                <input type="text" name="pincode" value="{{ old('pincode') }}" class="form-control form-control-sm"
-                                    placeholder="Pincode">
-                            </div>
-                        </div>
-
-                        <div class="d-flex justify-content-end mt-3">
-                            <button type="submit" class="btn btn-sm btn-primary">
-                                Add Branch
-                            </button>
-                        </div>
-                    </form>
-                @endcan
+                        </form>
+                    @endcan
 
                 </div>
             </div>

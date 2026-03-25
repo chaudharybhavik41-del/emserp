@@ -253,7 +253,7 @@ class FuelIssuePostingService
             return 0.0;
         }
 
-        $totalBasic = (float) PurchaseBillLine::where('material_receipt_line_id', $mrLineId)->sum('basic_amount');
+        $totalBasic = PurchaseBillLine::postedBasicForMaterialReceiptLine((int) $mrLineId);
         if ($totalBasic <= 0) {
             return 0.0;
         }
@@ -275,4 +275,3 @@ class FuelIssuePostingService
         return round($rate * $qty, 2);
     }
 }
-

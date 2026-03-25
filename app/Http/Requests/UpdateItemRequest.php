@@ -37,7 +37,7 @@ class UpdateItemRequest extends FormRequest
             'asset_account_id'        => ['nullable', 'integer', 'exists:accounts,id'],
             'inventory_account_id'    => ['nullable', 'integer', 'exists:accounts,id'],
 
-            'accounting_usage_override' => ['nullable', 'string', 'in:tool_stock,fixed_asset,inventory,consumable,service'],
+            'accounting_usage_override' => ['nullable', 'string', 'in:tool_stock,fixed_asset,inventory,expense,mixed'],
 
             'hsn_code'                => ['nullable', 'string', 'max:20'],
             'gst_rate_percent'        => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -105,6 +105,5 @@ class UpdateItemRequest extends FormRequest
         });
     }
 }
-
 
 

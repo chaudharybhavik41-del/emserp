@@ -71,8 +71,9 @@
                     @if($account)
                         <a href="{{ route('accounting.reports.ledger', array_merge(request()->all(), ['export' => 'csv'])) }}"
                            class="btn btn-outline-success btn-sm"><i class="bi bi-download"></i> Export CSV</a>
-                        <a href="{{ route('accounting.reports.ledger', array_merge(request()->all(), ['export' => 'pdf'])) }}"
-                           class="btn btn-outline-danger btn-sm"><i class="bi bi-file-earmark-pdf"></i> Export PDF</a>
+                        <button type="button" id="ledgerExportPdfBtn" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-file-earmark-pdf"></i> Export PDF
+                        </button>
                     @endif
 
                     @if(($viewMode ?? 'standard') === 'standard')
@@ -155,10 +156,13 @@
                     <table class="table table-sm table-bordered mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
+                                <th style="width: 3%" class="text-center no-export">
+                                    <input type="checkbox" class="form-check-input" id="check-all-analytical" checked>
+                                </th>
                                 <th style="width: 9%">Date</th>
                                 <th style="width: 10%">Entry</th>
                                 <th style="width: 12%">Document</th>
-                                <th style="width: 12%">Voucher No</th>
+                                <th style="width: 10%">Voucher No</th>
                                 <th>Particulars</th>
                                 <th style="width: 10%" class="text-end">Bill Amt</th>
                                 <th style="width: 8%" class="text-end">TDS</th>
@@ -169,17 +173,20 @@
                         </thead>
                         <tbody>
                             <tr class="table-light">
-                                <td colspan="8" class="small fw-semibold">Opening Balance</td>
+                                <td colspan="9" class="small fw-semibold">Opening Balance</td>
                                 <td class="text-end small fw-semibold">{{ number_format(abs($openingBalance), 2) }}</td>
                                 <td class="text-center small fw-semibold">{{ $openingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
                             </tr>
 
                             <tr id="ledgerNoMatch" class="d-none">
-                                <td colspan="10" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
+                                <td colspan="11" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
                             </tr>
 
                             @forelse(($analyticalRows ?? collect()) as $row)
                                 <tr class="ledger-entry-row" data-row-text="{{ $row['search_text'] ?? '' }}">
+                                    <td class="text-center no-export">
+                                        <input type="checkbox" class="form-check-input analytical-entry-check" checked data-row-idx="{{ $loop->index }}">
+                                    </td>
                                     <td class="small">{{ $row['date'] ?: '-' }}</td>
                                     <td class="small fw-semibold">{{ $row['entry_type'] }}</td>
                                     <td class="small">{{ $row['document_no'] ?: '-' }}</td>
@@ -198,7 +205,7 @@
                             @endforelse
 
                             <tr class="table-dark text-white fw-semibold">
-                                <td colspan="8" class="text-end small">Closing Balance</td>
+                                <td colspan="9" class="text-end small">Closing Balance</td>
                                 <td class="text-end small">{{ number_format(abs($closingBalance), 2) }}</td>
                                 <td class="text-center small">{{ $closingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
                             </tr>
@@ -208,6 +215,9 @@
                     <table class="table table-sm table-bordered mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
+                                <th style="width: 3%" class="text-center no-export">
+                                    <input type="checkbox" class="form-check-input" id="check-all-standard" checked>
+                                </th>
                                 <th style="width: 10%">Date</th>
                                 <th style="width: 12%">Voucher No</th>
                                 <th style="width: 10%">Type</th>
@@ -222,7 +232,7 @@
                             @php $running = $openingBalance; @endphp
 
                             <tr class="table-light">
-                                <td colspan="4" class="small fw-semibold">Opening Balance</td>
+                                <td colspan="5" class="small fw-semibold">Opening Balance</td>
                                 <td class="text-end small">&nbsp;</td>
                                 <td class="text-end small">&nbsp;</td>
                                 <td class="text-end small fw-semibold">{{ number_format(abs($running), 2) }}</td>
@@ -230,7 +240,7 @@
                             </tr>
 
                             <tr id="ledgerNoMatch" class="d-none">
-                                <td colspan="8" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
+                                <td colspan="9" class="text-center small text-muted py-3">No ledger entries match the search text.</td>
                             </tr>
 
                             @if(count($ledgerEntries))
@@ -238,22 +248,40 @@
                                     @php
                                         $running += ((float) $entry->debit - (float) $entry->credit);
                                         $entryDate = optional($entry->voucher->voucher_date)->format('d-m-Y');
+                                        
+                                        $isDebit = $entry->debit > 0;
+                                        $oppLines = $entry->voucher->lines->where('id', '!=', $entry->id)
+                                                                          ->filter(fn($l) => $isDebit ? $l->credit > 0 : $l->debit > 0);
+                                        if ($oppLines->isEmpty()) {
+                                            $oppLines = $entry->voucher->lines->where('id', '!=', $entry->id);
+                                        }
+                                        
+                                        $oppLabels = [];
+                                        foreach($oppLines as $opp) {
+                                            $desc = $opp->description ?: $opp->account?->name;
+                                            if ($desc) $oppLabels[] = trim($desc);
+                                        }
+                                        $descText = count($oppLabels) > 0 ? implode(' | ', $oppLabels) : ($entry->description ?: ($entry->voucher->narration ?: '-'));
+
                                         $searchText = strtolower(trim(
                                             ($entryDate ?? '') . ' ' .
                                             ($entry->voucher->voucher_no ?? '') . ' ' .
                                             ($entry->voucher->voucher_type ?? '') . ' ' .
-                                            ($entry->description ?: ($entry->voucher->narration ?: '-')) . ' ' .
+                                            $descText . ' ' .
                                             ($entry->voucher->reference ?? '')
                                         ));
                                     @endphp
                                     <tr class="ledger-entry-row" data-voucher-id="{{ $entry->voucher_id }}" data-row-text="{{ $searchText }}">
+                                        <td class="text-center no-export">
+                                            <input type="checkbox" class="form-check-input standard-entry-check" name="entry_ids[]" value="{{ $entry->id }}" checked>
+                                        </td>
                                         <td class="small">{{ $entryDate }}</td>
                                         <td class="small">
                                             <a href="{{ route('accounting.vouchers.show', $entry->voucher) }}" class="text-decoration-none">{{ $entry->voucher->voucher_no }}</a>
                                         </td>
                                         <td class="small text-uppercase">{{ $entry->voucher->voucher_type }}</td>
                                         <td class="small">
-                                            <div class="fw-semibold">{{ $entry->description ?: ($entry->voucher->narration ?: '-') }}</div>
+                                            <div class="fw-semibold">{{ $descText }}</div>
                                             @if($entry->costCenter)
                                                 <div class="text-muted">Cost Center: {{ $entry->costCenter->name }}</div>
                                             @endif
@@ -272,7 +300,7 @@
 
                                         @if($vLines->count() > 1)
                                             <tr class="table-light ledger-breakdown-row" data-voucher-id="{{ $entry->voucher_id }}" data-expanded="true">
-                                                <td colspan="8" class="p-2">
+                                                <td colspan="9" class="p-2">
                                                     <div class="small text-muted mb-1">Voucher break-up</div>
                                                     <table class="table table-sm table-bordered mb-0 align-middle">
                                                         <thead class="table-light">
@@ -301,12 +329,12 @@
                                 @endforeach
                             @else
                                 <tr>
-                                    <td colspan="8" class="text-center small text-muted py-2">No ledger entries for the selected filters.</td>
+                                    <td colspan="9" class="text-center small text-muted py-2">No ledger entries for the selected filters.</td>
                                 </tr>
                             @endif
 
                             <tr class="table-dark text-white fw-semibold">
-                                <td colspan="6" class="text-end small">Closing Balance</td>
+                                <td colspan="7" class="text-end small">Closing Balance</td>
                                 <td class="text-end small">{{ number_format(abs($closingBalance), 2) }}</td>
                                 <td class="text-center small">{{ $closingBalance >= 0 ? 'Dr' : 'Cr' }}</td>
                             </tr>
@@ -396,6 +424,88 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
         applyFilter();
+    }
+
+    // Select All Standard
+    const checkAllStandard = document.getElementById('check-all-standard');
+    const standardChecks = document.querySelectorAll('.standard-entry-check');
+
+    if (checkAllStandard) {
+        checkAllStandard.addEventListener('change', function () {
+            standardChecks.forEach(c => c.checked = this.checked);
+        });
+    }
+
+    // Select All Analytical
+    const checkAllAnalytical = document.getElementById('check-all-analytical');
+    const analyticalChecks = document.querySelectorAll('.analytical-entry-check');
+
+    if (checkAllAnalytical) {
+        checkAllAnalytical.addEventListener('change', function () {
+            analyticalChecks.forEach(c => c.checked = this.checked);
+        });
+    }
+
+    // Export PDF (Selective)
+    const exportPdfBtn = document.getElementById('ledgerExportPdfBtn');
+    if (exportPdfBtn) {
+        exportPdfBtn.addEventListener('click', function () {
+            // Collecting checked entries only. If nothing is selected, alert.
+            const selectedStandard = Array.from(document.querySelectorAll('.standard-entry-check:checked')).map(c => c.value);
+            const selectedAnalytical = Array.from(document.querySelectorAll('.analytical-entry-check:checked')).map(c => c.dataset.rowIdx);
+
+            if (selectedStandard.length === 0 && selectedAnalytical.length === 0) {
+                alert('Please select at least one entry to export.');
+                return;
+            }
+
+            // Create a temporary form to submit via GET
+            // This avoids issues with very long URLs by only adding the essentials
+            const form = document.createElement('form');
+            form.method = 'GET';
+            form.action = window.location.pathname;
+            form.target = '_blank';
+
+            // Get existing parameters from Current URL except export/entry_ids
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.forEach((val, key) => {
+                if (!['export', 'entry_ids[]', 'row_idxs[]'].includes(key)) {
+                    const hiddenField = document.createElement('input');
+                    hiddenField.type = 'hidden';
+                    hiddenField.name = key;
+                    hiddenField.value = val;
+                    form.appendChild(hiddenField);
+                }
+            });
+
+            // Set export mode
+            const exportField = document.createElement('input');
+            exportField.type = 'hidden';
+            exportField.name = 'export';
+            exportField.value = 'pdf';
+            form.appendChild(exportField);
+
+            // Add selected IDs
+            selectedStandard.forEach(id => {
+                const hiddenField = document.createElement('input');
+                hiddenField.type = 'hidden';
+                hiddenField.name = 'entry_ids[]';
+                hiddenField.value = id;
+                form.appendChild(hiddenField);
+            });
+
+            selectedAnalytical.forEach(idx => {
+                const hiddenField = document.createElement('input');
+                hiddenField.type = 'hidden';
+                hiddenField.name = 'row_idxs[]';
+                hiddenField.value = idx;
+                form.appendChild(hiddenField);
+            });
+
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        });
     }
 });
 </script>

@@ -36,6 +36,8 @@ class HrPayrollPeriod extends Model
         'approved_by',
         'paid_at',
         'paid_by',
+        'source_data_changed_at',
+        'source_data_change_reason',
     ];
 
     protected $casts = [
@@ -48,6 +50,7 @@ class HrPayrollPeriod extends Model
         'processed_at' => 'datetime',
         'approved_at' => 'datetime',
         'paid_at' => 'datetime',
+        'source_data_changed_at' => 'datetime',
         'total_days' => 'integer',
         'working_days' => 'integer',
         'holidays' => 'integer',
@@ -141,12 +144,17 @@ class HrPayrollPeriod extends Model
 
     public function getCanApproveAttribute(): bool
     {
-        return $this->status === 'processed';
+        return $this->status === 'processed' && ! $this->is_stale;
     }
 
     public function getCanPayAttribute(): bool
     {
-        return $this->status === 'approved';
+        return $this->status === 'approved' && ! $this->is_stale;
+    }
+
+    public function getIsStaleAttribute(): bool
+    {
+        return ! is_null($this->source_data_changed_at);
     }
 
     // ==================== METHODS ====================
@@ -180,6 +188,8 @@ class HrPayrollPeriod extends Model
             'status' => 'processed',
             'processed_at' => now(),
             'processed_by' => auth()->id(),
+            'source_data_changed_at' => null,
+            'source_data_change_reason' => null,
         ]);
 
         return true;

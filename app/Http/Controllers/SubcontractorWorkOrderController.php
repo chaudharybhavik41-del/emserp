@@ -51,7 +51,7 @@ class SubcontractorWorkOrderController extends Controller
     {
         $subcontractors = Party::query()->where('is_contractor', true)->where('is_active', true)->orderBy('name')->get();
         $projects = Project::query()->orderBy('name')->get();
-        $nextWorkOrderNumber = SubcontractorWorkOrder::generateNextNumber();
+        $nextWorkOrderNumber = SubcontractorWorkOrder::generateNextNumber(null, now());
 
         return view('subcontractor_work_orders.create', compact('subcontractors', 'projects', 'nextWorkOrderNumber'));
     }
@@ -66,7 +66,7 @@ class SubcontractorWorkOrderController extends Controller
             'company_id' => $companyId,
             'subcontractor_id' => (int) $validated['subcontractor_id'],
             'project_id' => (int) $validated['project_id'],
-            'work_order_number' => $validated['work_order_number'] ?: SubcontractorWorkOrder::generateNextNumber($companyId),
+            'work_order_number' => $validated['work_order_number'] ?: SubcontractorWorkOrder::generateNextNumber($companyId, $validated['work_order_date']),
             'work_order_date' => $validated['work_order_date'],
             'start_date' => $validated['start_date'] ?? null,
             'end_date' => $validated['end_date'] ?? null,

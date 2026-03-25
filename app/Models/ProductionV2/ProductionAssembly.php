@@ -135,4 +135,9 @@ class ProductionAssembly extends Model
     {
         return $this->hasMany(ProductionQcGateEvent::class, 'assembly_id');
     }
+
+    public function dispatchLines()
+    {
+        return $this->hasMany(ProductionDispatchLine::class, 'assembly_id');
+    }
 }

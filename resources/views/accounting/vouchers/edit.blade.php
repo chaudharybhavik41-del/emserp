@@ -92,7 +92,7 @@
 
                             @php
     $existingLines = $voucher->lines->sortBy('line_no')->values();
-    $rowCount = max(6, $existingLines->count());
+    $rowCount = max(2, $existingLines->count());
                             @endphp
 
                             <div class="d-flex justify-content-between align-items-center mb-2">

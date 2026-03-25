@@ -96,15 +96,10 @@ class InventoryValuationReportController extends Controller
         $basicByMrLineId = [];
 
         if (! empty($mrLineIds)) {
-            $basicByMrLineId = PurchaseBillLine::query()
-                ->join('purchase_bills as pb', 'pb.id', '=', 'purchase_bill_lines.purchase_bill_id')
-                ->where('pb.status', 'posted')
-                ->whereDate('pb.bill_date', '<=', $asOfDate->toDateString())
-                ->whereIn('purchase_bill_lines.material_receipt_line_id', $mrLineIds)
-                ->groupBy('purchase_bill_lines.material_receipt_line_id')
-                ->selectRaw('purchase_bill_lines.material_receipt_line_id as mr_line_id, COALESCE(SUM(purchase_bill_lines.basic_amount),0) as total_basic')
-                ->pluck('total_basic', 'mr_line_id')
-                ->toArray();
+            $basicByMrLineId = PurchaseBillLine::postedBasicByMaterialReceiptLineIds(
+                $mrLineIds,
+                $asOfDate->toDateString()
+            );
         }
 
         // Aggregates by inventory account

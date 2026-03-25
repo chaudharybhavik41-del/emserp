@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Accounting\Account;
+use App\Models\ProductionV2\ProductionDispatch;
+use App\Models\ProductionV2\ProductionDispatchLine;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,6 +26,8 @@ class ClientRaBillLine extends Model
         'boq_item_id',
         'boq_item_code',
         'revenue_account_id',
+        'production_v2_dispatch_id',
+        'production_v2_dispatch_line_id',
         'description',
         'uom_id',
         'contracted_qty',
@@ -68,6 +72,16 @@ class ClientRaBillLine extends Model
     public function revenueAccount(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'revenue_account_id');
+    }
+
+    public function productionV2Dispatch(): BelongsTo
+    {
+        return $this->belongsTo(ProductionDispatch::class, 'production_v2_dispatch_id');
+    }
+
+    public function productionV2DispatchLine(): BelongsTo
+    {
+        return $this->belongsTo(ProductionDispatchLine::class, 'production_v2_dispatch_line_id');
     }
 
     /*

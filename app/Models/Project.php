@@ -11,6 +11,7 @@ use App\Models\Storage\StorageFolder;
 use App\Models\Storage\StorageFolderUserAccess;
 use App\Models\Tasks\Task as ProjectTask;
 use Illuminate\Support\Facades\Schema;
+use App\Models\ProjectClientBillingRate;
 
 
 class Project extends Model
@@ -29,6 +30,7 @@ class Project extends Model
 
         'status',
         'production_mode',
+        'description',
 
         // Site details (already developed earlier)
         'site_location',
@@ -53,7 +55,15 @@ class Project extends Model
         'po_date',
         'payment_terms_days',
         'freight_terms',
-        'special_notes',
+        'project_special_notes',
+        'client_billing_mode',
+        'client_billing_default_bill_kind',
+        'client_billing_source_basis',
+        'client_billing_material_scope',
+        'client_billing_separate_material_service',
+        'client_billing_tds_section',
+        'client_billing_tds_rate',
+        'client_billing_notes',
 
         'created_by',
     ];
@@ -62,6 +72,8 @@ class Project extends Model
         'start_date' => 'date',
         'end_date'   => 'date',
         'po_date'    => 'date',
+        'client_billing_separate_material_service' => 'boolean',
+        'client_billing_tds_rate' => 'float',
     ];
 
     public function client(): BelongsTo
@@ -104,6 +116,11 @@ class Project extends Model
     public function tasks(): HasMany
     {
         return $this->hasMany(ProjectTask::class);
+    }
+
+    public function clientBillingRates(): HasMany
+    {
+        return $this->hasMany(ProjectClientBillingRate::class);
     }
 	      
 	      

@@ -9,15 +9,15 @@
 @endphp
 <div class="container-fluid">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <h4 class="mb-0">Supplier Outstanding</h4>
+        <h4 class="mb-0">Supplier/Contractor Outstanding</h4>
         <div class="small text-muted">Company #{{ $companyId }} · As on {{ $ledgerTo }}</div>
     </div>
 
     <form method="GET" class="row g-2 mb-3 align-items-end">
         <div class="col-md-4">
-            <label class="form-label form-label-sm">Supplier</label>
+            <label class="form-label form-label-sm">Supplier/Contractor</label>
             <select class="form-select form-select-sm" name="supplier_id">
-                <option value="">All Suppliers</option>
+                <option value="">All parties</option>
                 @foreach($suppliers as $s)
                     <option value="{{ $s->id }}" @selected($selectedParty && $selectedParty->id == $s->id)>{{ $s->name }}</option>
                 @endforeach
@@ -32,7 +32,7 @@
             <a href="{{ route('accounting.reports.supplier-outstanding') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
         </div>
         <div class="col-md-6">
-            <label class="form-label form-label-sm">Quick search supplier</label>
+            <label class="form-label form-label-sm">Quick search party</label>
             <div class="input-group input-group-sm">
                 <span class="input-group-text"><i class="bi bi-search"></i></span>
                 <input type="text" id="supplierOutstandingSearch" class="form-control" placeholder="Filter by supplier name...">
@@ -51,7 +51,7 @@
             <table class="table table-sm table-striped align-middle">
                 <thead>
                     <tr>
-                        <th>Supplier</th>
+                        <th>Supplier/Contractor</th>
                         <th class="text-end">Bill Amount</th>
                         <th class="text-end">Allocated</th>
                         <th class="text-end">Bill Outstanding</th>

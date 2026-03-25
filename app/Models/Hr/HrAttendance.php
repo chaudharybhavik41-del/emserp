@@ -302,11 +302,30 @@ class HrAttendance extends Model
         if (!$this->shift) {
             return;
         }
-        
+
+        $employee = $this->employee ?: ($this->hr_employee_id ? HrEmployee::find($this->hr_employee_id) : null);
+        $policy = $employee?->getApplicableAttendancePolicy($this->attendance_date);
+        $existingMonthlyOtMinutes = 0;
+
+        if ($policy && (int) $policy->ot_max_hours_per_month > 0 && $this->attendance_date) {
+            $existingMonthlyOtMinutes = (int) round(
+                (float) self::query()
+                    ->where('hr_employee_id', $this->hr_employee_id)
+                    ->whereDate('attendance_date', '>=', $this->attendance_date->copy()->startOfMonth()->toDateString())
+                    ->whereDate('attendance_date', '<=', $this->attendance_date->copy()->endOfMonth()->toDateString())
+                    ->whereKeyNot($this->id)
+                    ->sum('ot_hours') * 60
+            );
+        }
+
         $result = $this->shift->determineAttendanceStatus(
             $this->first_in,
             $this->last_out,
-            $this->attendance_date
+            $this->attendance_date,
+            $policy,
+            (bool) $this->is_week_off,
+            (bool) $this->is_holiday,
+            $existingMonthlyOtMinutes
         );
         
         $this->status = AttendanceStatus::from($result['status']);
@@ -316,7 +335,7 @@ class HrAttendance extends Model
         $this->ot_hours = round($result['ot_minutes'] / 60, 2);
         
         if ($this->first_in && $this->last_out) {
-            $this->total_hours = round($this->last_out->diffInMinutes($this->first_in) / 60, 2);
+            $this->total_hours = round($this->first_in->diffInMinutes($this->last_out) / 60, 2);
         }
     }
 

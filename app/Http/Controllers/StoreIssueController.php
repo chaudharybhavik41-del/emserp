@@ -43,24 +43,24 @@ class StoreIssueController extends Controller
 
         $lines = $storeIssue->lines->map(function (StoreIssueLine $line) {
             return [
-                'id'                 => $line->id,
-                'store_stock_item_id'=> $line->store_stock_item_id,
-                'item_id'            => $line->item_id,
-                'item_code'          => $line->item?->code,
-                'item_name'          => $line->item?->name,
-                'uom_id'             => $line->uom_id,
-                'uom_name'           => $line->uom?->name,
-                'machine_id'         => $line->machine_id,
+                'id' => $line->id,
+                'store_stock_item_id' => $line->store_stock_item_id,
+                'item_id' => $line->item_id,
+                'item_code' => $line->item?->code,
+                'item_name' => $line->item?->name,
+                'uom_id' => $line->uom_id,
+                'uom_name' => $line->uom?->name,
+                'machine_id' => $line->machine_id,
                 // For Store Issue (non-raw), issued_weight_kg acts as the generic issued quantity.
-                'qty'                => (float) ($line->issued_weight_kg ?? 0),
+                'qty' => (float) ($line->issued_weight_kg ?? 0),
             ];
         })->values();
 
         return response()->json([
             'issue' => [
-                'id'                  => $storeIssue->id,
-                'project_id'           => $storeIssue->project_id,
-                'contractor_party_id'  => $storeIssue->contractor_party_id,
+                'id' => $storeIssue->id,
+                'project_id' => $storeIssue->project_id,
+                'contractor_party_id' => $storeIssue->contractor_party_id,
             ],
             'lines' => $lines,
         ]);
@@ -77,9 +77,9 @@ class StoreIssueController extends Controller
 
     public function create(Request $request): View
     {
-        $projects    = Project::orderBy('code')->get();
+        $projects = Project::orderBy('code')->get();
         $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
-        $machines    = Machine::orderBy('code')->orderBy('name')->get(['id', 'code', 'name', 'current_project_id']);
+        $machines = Machine::orderBy('code')->orderBy('name')->get(['id', 'code', 'name', 'current_project_id']);
 
         $selectedRequisitionId = $request->query('store_requisition_id')
             ? (int) $request->query('store_requisition_id')
@@ -95,7 +95,7 @@ class StoreIssueController extends Controller
             ->get();
 
         $selectedRequisition = null;
-        $pendingItemIds      = [];
+        $pendingItemIds = [];
 
         if ($selectedRequisitionId) {
             $selectedRequisition = StoreRequisition::with([
@@ -109,7 +109,7 @@ class StoreIssueController extends Controller
                 // Collect pending item ids (required_qty > issued_qty)
                 foreach ($selectedRequisition->lines as $line) {
                     $required = (float) ($line->required_qty ?? 0);
-                    $issued   = (float) ($line->issued_qty ?? 0);
+                    $issued = (float) ($line->issued_qty ?? 0);
                     if ($required > $issued + 0.0001) {
                         $pendingItemIds[] = (int) $line->item_id;
                     }
@@ -121,7 +121,7 @@ class StoreIssueController extends Controller
         $selectedIssuePurpose = $selectedRequisition
             ? (string) ($selectedRequisition->issue_purpose ?: 'general')
             : (string) $request->query('issue_purpose', 'general');
-        if (! in_array($selectedIssuePurpose, ['general', 'machine_spare'], true)) {
+        if (!in_array($selectedIssuePurpose, ['general', 'machine_spare'], true)) {
             $selectedIssuePurpose = 'general';
         }
 
@@ -138,12 +138,12 @@ class StoreIssueController extends Controller
             ->whereNotIn('material_category', ['steel_plate', 'steel_section'])
             ->where(function ($q) {
                 $q->where('qty_pcs_available', '>', 0)
-                  ->orWhere('weight_kg_available', '>', 0);
+                    ->orWhere('weight_kg_available', '>', 0);
             })
             ->orderByDesc('id');
 
         // If requisition is selected, restrict stock pool to pending requisition items
-        if (! empty($pendingItemIds)) {
+        if (!empty($pendingItemIds)) {
             $stockItemsQuery->whereIn('item_id', $pendingItemIds);
         }
         if ($selectedRequisition && $selectedRequisition->project_id) {
@@ -154,13 +154,13 @@ class StoreIssueController extends Controller
             $stockItemsQuery->where(function ($q) use ($projectId) {
                 $q->where(function ($q2) use ($projectId) {
                     $q2->where('is_client_material', true)
-                       ->where('project_id', $projectId);
+                        ->where('project_id', $projectId);
                 })->orWhere(function ($q2) use ($projectId) {
                     $q2->where('is_client_material', false)
-                       ->where(function ($q3) use ($projectId) {
-                           $q3->whereNull('project_id')
-                              ->orWhere('project_id', $projectId);
-                       });
+                        ->where(function ($q3) use ($projectId) {
+                            $q3->whereNull('project_id')
+                                ->orWhere('project_id', $projectId);
+                        });
                 });
             });
         }
@@ -169,13 +169,13 @@ class StoreIssueController extends Controller
             $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
             $excludedCategoryCodes = $this->machineSpareExcludedCategoryCodes();
 
-            if (! empty($allowedTypeCodes)) {
+            if (!empty($allowedTypeCodes)) {
                 $stockItemsQuery->whereHas('item.type', function ($q) use ($allowedTypeCodes) {
                     $q->whereIn('code', $allowedTypeCodes);
                 });
             }
 
-            if (! empty($excludedCategoryCodes)) {
+            if (!empty($excludedCategoryCodes)) {
                 $stockItemsQuery->whereDoesntHave('item.category', function ($cat) use ($excludedCategoryCodes) {
                     $cat->whereIn('code', $excludedCategoryCodes);
                 });
@@ -186,15 +186,15 @@ class StoreIssueController extends Controller
         $stockItems = $stockItemsQuery->limit($limit)->get();
 
         return view('store_issues.create', [
-            'projects'              => $projects,
-            'contractors'           => $contractors,
-            'machines'              => $machines,
-            'requisitions'          => $requisitions,
+            'projects' => $projects,
+            'contractors' => $contractors,
+            'machines' => $machines,
+            'requisitions' => $requisitions,
             'selectedRequisitionId' => $selectedRequisitionId,
-            'selectedRequisition'   => $selectedRequisition,
-            'selectedIssuePurpose'  => $selectedIssuePurpose,
-            'selectedMachineId'     => $selectedMachineId,
-            'stockItems'            => $stockItems,
+            'selectedRequisition' => $selectedRequisition,
+            'selectedIssuePurpose' => $selectedIssuePurpose,
+            'selectedMachineId' => $selectedMachineId,
+            'stockItems' => $stockItems,
         ]);
     }
 
@@ -223,23 +223,23 @@ class StoreIssueController extends Controller
                 ->with('error', 'Failed to post store issue to accounts: ' . $e->getMessage());
         }
     }
-  
-  	public function store(Request $request): RedirectResponse
+
+    public function store(Request $request): RedirectResponse
     {
         $rules = [
-            'issue_date'             => ['required', 'date'],
-            'issue_purpose'          => ['nullable', 'string', 'in:general,machine_spare'],
-            'project_id'             => ['nullable', 'integer', 'exists:projects,id'],
-            'machine_id'             => ['nullable', 'integer', 'exists:machines,id'],
-            'store_requisition_id'   => ['nullable', 'integer', 'exists:store_requisitions,id'],
-            'contractor_party_id'    => ['nullable', 'integer', 'exists:parties,id'],
+            'issue_date' => ['required', 'date'],
+            'issue_purpose' => ['nullable', 'string', 'in:general,machine_spare'],
+            'project_id' => ['nullable', 'integer', 'exists:projects,id'],
+            'machine_id' => ['nullable', 'integer', 'exists:machines,id'],
+            'store_requisition_id' => ['nullable', 'integer', 'exists:store_requisitions,id'],
+            'contractor_party_id' => ['nullable', 'integer', 'exists:parties,id'],
             'contractor_person_name' => ['nullable', 'string', 'max:100'],
-            'remarks'                => ['nullable', 'string'],
+            'remarks' => ['nullable', 'string'],
 
-            'lines'                           => ['required', 'array', 'min:1'],
-            'lines.*.store_stock_item_id'     => ['required', 'integer', 'exists:store_stock_items,id'],
-            'lines.*.issue_qty'               => ['required', 'numeric', 'min:0.0001'],
-            'lines.*.remarks'                 => ['nullable', 'string', 'max:255'],
+            'lines' => ['required', 'array', 'min:1'],
+            'lines.*.store_stock_item_id' => ['required', 'integer', 'exists:store_stock_items,id'],
+            'lines.*.issue_qty' => ['required', 'numeric', 'min:0.0001'],
+            'lines.*.remarks' => ['nullable', 'string', 'max:255'],
         ];
 
         if ($request->filled('store_requisition_id')) {
@@ -259,7 +259,7 @@ class StoreIssueController extends Controller
         $data = $request->validate($rules);
 
         $inputIssuePurpose = (string) ($data['issue_purpose'] ?? 'general');
-        if (! in_array($inputIssuePurpose, ['general', 'machine_spare'], true)) {
+        if (!in_array($inputIssuePurpose, ['general', 'machine_spare'], true)) {
             $inputIssuePurpose = 'general';
         }
 
@@ -281,15 +281,15 @@ class StoreIssueController extends Controller
 
         try {
             /** @var StoreRequisition|null $requisition */
-            $requisition          = null;
+            $requisition = null;
             $requisitionLinesById = [];
 
-            if (! empty($data['store_requisition_id'])) {
+            if (!empty($data['store_requisition_id'])) {
                 $requisition = StoreRequisition::with('lines')
                     ->lockForUpdate()
                     ->find($data['store_requisition_id']);
 
-                if (! $requisition) {
+                if (!$requisition) {
                     throw new \RuntimeException('Selected requisition not found.');
                 }
 
@@ -299,7 +299,7 @@ class StoreIssueController extends Controller
             $resolvedIssuePurpose = $requisition
                 ? (string) ($requisition->issue_purpose ?: 'general')
                 : $inputIssuePurpose;
-            if (! in_array($resolvedIssuePurpose, ['general', 'machine_spare'], true)) {
+            if (!in_array($resolvedIssuePurpose, ['general', 'machine_spare'], true)) {
                 $resolvedIssuePurpose = 'general';
             }
 
@@ -308,7 +308,7 @@ class StoreIssueController extends Controller
                 : (int) ($data['machine_id'] ?? 0);
             $resolvedMachineId = $resolvedMachineId > 0 ? $resolvedMachineId : null;
 
-            if ($resolvedIssuePurpose === 'machine_spare' && ! $resolvedMachineId) {
+            if ($resolvedIssuePurpose === 'machine_spare' && !$resolvedMachineId) {
                 throw new \RuntimeException('Machine is required for machine spare issue.');
             }
 
@@ -316,43 +316,43 @@ class StoreIssueController extends Controller
                 ? ((int) ($requisition->project_id ?? 0) ?: null)
                 : ((int) ($data['project_id'] ?? 0) ?: null);
 
-            if ($resolvedIssuePurpose === 'machine_spare' && ! $resolvedProjectId && $resolvedMachineId) {
+            if ($resolvedIssuePurpose === 'machine_spare' && !$resolvedProjectId && $resolvedMachineId) {
                 $resolvedProjectId = Machine::query()
                     ->whereKey($resolvedMachineId)
                     ->value('current_project_id');
             }
 
-            if ($resolvedIssuePurpose === 'general' && ! $resolvedProjectId) {
+            if ($resolvedIssuePurpose === 'general' && !$resolvedProjectId) {
                 throw new \RuntimeException('Project is required for general store issue.');
             }
 
             // --------- Issue header ----------
-            $issue                       = new StoreIssue();
-            $issue->issue_date           = $data['issue_date'];
+            $issue = new StoreIssue();
+            $issue->issue_date = $data['issue_date'];
             $issue->store_requisition_id = $data['store_requisition_id'] ?? null;
-            $issue->issue_purpose        = $resolvedIssuePurpose;
-            $issue->machine_id           = $resolvedIssuePurpose === 'machine_spare' ? $resolvedMachineId : null;
-            $issue->project_id           = $resolvedProjectId;
+            $issue->issue_purpose = $resolvedIssuePurpose;
+            $issue->machine_id = $resolvedIssuePurpose === 'machine_spare' ? $resolvedMachineId : null;
+            $issue->project_id = $resolvedProjectId;
 
             if ($requisition) {
                 // For requisition-based issues, counterparty is taken from requisition.
-                $issue->contractor_party_id    = $requisition->contractor_party_id;
+                $issue->contractor_party_id = $requisition->contractor_party_id;
                 $issue->contractor_person_name = $requisition->contractor_person_name;
             } else {
-                $issue->contractor_party_id    = $data['contractor_party_id'] ?? null;
+                $issue->contractor_party_id = $data['contractor_party_id'] ?? null;
                 $issue->contractor_person_name = $data['contractor_person_name'] ?? null;
             }
 
             $issue->issued_to_user_id = null;
-            $issue->status            = 'posted';
-            $issue->remarks           = $data['remarks'] ?? null;
-            $issue->created_by        = $request->user()?->id;
+            $issue->status = 'posted';
+            $issue->remarks = $data['remarks'] ?? null;
+            $issue->created_by = $request->user()?->id;
             $issue->save();
 
             // Generate issue number via central service (same pattern ISS-YY-XXXX)
-   			 $issue->issue_number = app(\App\Services\DocumentNumberService::class)
-  		      ->storeIssue($issue);
-  			  $issue->save();
+            $issue->issue_number = app(\App\Services\DocumentNumberService::class)
+                ->storeIssue($issue);
+            $issue->save();
 
 
             // Accumulate total issued quantity per requisition line
@@ -369,7 +369,7 @@ class StoreIssueController extends Controller
                     ->where('status', 'available')
                     ->findOrFail($lineData['store_stock_item_id']);
 
-                if (! $stock->is_client_material) {
+                if (!$stock->is_client_material) {
                     $hasOwnMaterial = true;
                 }
 
@@ -381,7 +381,7 @@ class StoreIssueController extends Controller
                 if ($resolvedIssuePurpose === 'machine_spare') {
                     $typeCode = strtoupper((string) ($stock->item?->type?->code ?? ''));
                     $allowedTypeCodes = $this->machineSpareAllowedTypeCodes();
-                    if (! in_array($typeCode, $allowedTypeCodes, true)) {
+                    if (!in_array($typeCode, $allowedTypeCodes, true)) {
                         throw new \RuntimeException('Selected item is not allowed for machine spare issue.');
                     }
 
@@ -403,7 +403,7 @@ class StoreIssueController extends Controller
                             throw new \RuntimeException('Client material stock must belong to the same project as this issue.');
                         }
                     } else {
-                        if (! is_null($stock->project_id) && (int) $stock->project_id !== $issueProjectId) {
+                        if (!is_null($stock->project_id) && (int) $stock->project_id !== $issueProjectId) {
                             throw new \RuntimeException('Selected stock item belongs to a different project. Use GENERAL stock or same-project stock.');
                         }
                     }
@@ -430,7 +430,7 @@ class StoreIssueController extends Controller
                     /** @var StoreRequisitionLine|null $reqLine */
                     $reqLine = $requisitionLinesById[$reqLineId] ?? null;
 
-                    if (! $reqLine || $reqLine->store_requisition_id !== $requisition->id) {
+                    if (!$reqLine || $reqLine->store_requisition_id !== $requisition->id) {
                         throw new \RuntimeException('Invalid requisition line selected for issue.');
                     }
 
@@ -441,7 +441,7 @@ class StoreIssueController extends Controller
 
                     // Brand enforcement:
                     // If requisition line has a brand specified, stock brand must match (case-insensitive).
-                    $reqBrand   = trim((string) ($reqLine->preferred_make ?? ''));
+                    $reqBrand = trim((string) ($reqLine->preferred_make ?? ''));
                     $stockBrand = trim((string) ($stock->brand ?? ''));
                     if ($reqBrand !== '' && strcasecmp($reqBrand, $stockBrand) !== 0) {
                         throw new \RuntimeException(
@@ -450,8 +450,8 @@ class StoreIssueController extends Controller
                     }
 
                     $required = (float) ($reqLine->required_qty ?? 0);
-                    $issued   = (float) ($reqLine->issued_qty ?? 0);
-                    $pending  = $required - $issued;
+                    $issued = (float) ($reqLine->issued_qty ?? 0);
+                    $pending = $required - $issued;
 
                     if ($issueQty > $pending + 0.0001) {
                         throw new \RuntimeException(
@@ -459,26 +459,26 @@ class StoreIssueController extends Controller
                         );
                     }
 
-                    if (! isset($requisitionLineAllocations[$reqLineId])) {
+                    if (!isset($requisitionLineAllocations[$reqLineId])) {
                         $requisitionLineAllocations[$reqLineId] = 0.0;
                     }
                     $requisitionLineAllocations[$reqLineId] += $issueQty;
-                } elseif ($requisition && ! $reqLineId) {
+                } elseif ($requisition && !$reqLineId) {
                     throw new \RuntimeException('Requisition-based issue line must be linked to a requisition line.');
                 }
 
                 // Create issue line
-                $issueLine                      = new StoreIssueLine();
-                $issueLine->store_issue_id      = $issue->id;
+                $issueLine = new StoreIssueLine();
+                $issueLine->store_issue_id = $issue->id;
                 $issueLine->store_stock_item_id = $stock->id;
-                $issueLine->item_id             = $stock->item_id;
-                $issueLine->uom_id              = $stock->item?->uom_id;
-                $issueLine->machine_id          = $issue->machine_id;
+                $issueLine->item_id = $stock->item_id;
+                $issueLine->uom_id = $stock->item?->uom_id;
+                $issueLine->machine_id = $issue->machine_id;
                 // For non-raw items the true quantity is stored in issued_weight_kg (generic qty)
-                $issueLine->issued_qty_pcs      = 1;
-                $issueLine->issued_weight_kg    = $issueQty;
+                $issueLine->issued_qty_pcs = 1;
+                $issueLine->issued_weight_kg = $issueQty;
                 $issueLine->store_requisition_line_id = $reqLineId;
-                $issueLine->remarks             = $lineData['remarks'] ?? null;
+                $issueLine->remarks = $lineData['remarks'] ?? null;
                 $issueLine->save();
 
                 // Update stock quantity: single logical quantity field
@@ -486,16 +486,16 @@ class StoreIssueController extends Controller
 
                 if ($stock->weight_kg_available <= 0.0001) {
                     $stock->weight_kg_available = 0;
-                    $stock->qty_pcs_available   = 0;
-                    $stock->status              = 'issued';
+                    $stock->qty_pcs_available = 0;
+                    $stock->status = 'issued';
                 }
 
                 $stock->save();
             }
 
             // Auto-mark "not required" for accounts if the issue contains only client-supplied material.
-            if (! $hasOwnMaterial) {
-                $issue->accounting_status    = 'not_required';
+            if (!$hasOwnMaterial) {
+                $issue->accounting_status = 'not_required';
                 $issue->accounting_posted_by = $request->user()?->id;
                 $issue->accounting_posted_at = now();
                 $issue->save();
@@ -506,20 +506,20 @@ class StoreIssueController extends Controller
                     $issue,
                     [
                         'accounting_status' => 'not_required',
-                        'business_date'     => optional($issue->issue_date)->toDateString(),
+                        'business_date' => optional($issue->issue_date)->toDateString(),
                     ]
                 );
             }
 
             // --------- Update requisition lines & status ----------
-            if ($requisition && ! empty($requisitionLineAllocations)) {
+            if ($requisition && !empty($requisitionLineAllocations)) {
                 foreach ($requisitionLineAllocations as $lineId => $issueQty) {
                     /** @var StoreRequisitionLine $reqLine */
                     $reqLine = $requisitionLinesById[$lineId];
 
                     $required = (float) ($reqLine->required_qty ?? 0);
-                    $already  = (float) ($reqLine->issued_qty ?? 0);
-                    $pending  = $required - $already;
+                    $already = (float) ($reqLine->issued_qty ?? 0);
+                    $pending = $required - $already;
 
                     if ($issueQty > $pending + 0.0001) {
                         throw new \RuntimeException(
@@ -540,12 +540,12 @@ class StoreIssueController extends Controller
                 $requisition->load('lines');
 
                 $allFulfilled = true;
-                $anyIssued    = false;
-                $hasDemand    = false;
+                $anyIssued = false;
+                $hasDemand = false;
 
                 foreach ($requisition->lines as $line) {
                     $required = (float) ($line->required_qty ?? 0);
-                    $issued   = (float) ($line->issued_qty ?? 0);
+                    $issued = (float) ($line->issued_qty ?? 0);
 
                     if ($issued > 0.0001) {
                         $anyIssued = true;
@@ -620,9 +620,117 @@ class StoreIssueController extends Controller
         }
 
         return view('store_issues.show', [
-            'issue'          => $storeIssue,
+            'issue' => $storeIssue,
             'returnedByLine' => $returnedByLine,
         ]);
+    }
+
+    public function print(StoreIssue $storeIssue)
+    {
+        $storeIssue->loadMissing([
+            'project',
+            'contractor',
+            'machine',
+            'requisition',
+            'voucher',
+            'createdBy',
+        ]);
+
+        $report = new \App\ReportsHub\Reports\StoreIssueAccountingReport();
+        $filters = ['issue_id' => $storeIssue->id];
+
+        // Strictly filter to avoid stray voucher data
+        $query = $report->query($filters)->where('si.id', $storeIssue->id);
+        $rows = $query->get();
+        $totals = [
+            'total_qty' => $rows->sum('issue_qty'),
+            'total_amount' => $rows->sum('accounting_amount'),
+        ];
+
+        return view('store_issues.print', [
+            'issue' => $storeIssue,
+            'rows' => $rows,
+            'totals' => $totals,
+            'report' => $report,
+            'headerData' => $report->headerData($filters),
+        ]);
+    }
+
+    public function pdf(StoreIssue $storeIssue)
+    {
+        $storeIssue->loadMissing([
+            'project',
+            'contractor',
+            'machine',
+            'requisition',
+            'voucher',
+            'createdBy',
+        ]);
+
+        $report = new \App\ReportsHub\Reports\StoreIssueAccountingReport();
+        $filters = ['issue_id' => $storeIssue->id];
+
+        // Strictly filter to avoid stray voucher data
+        $query = $report->query($filters)->where('si.id', $storeIssue->id);
+        $rows = $query->get();
+
+        $totals = [
+            'total_qty' => $rows->sum('issue_qty'),
+            'total_amount' => $rows->sum('accounting_amount'),
+        ];
+        // dd($storeIssue);
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('store_issues.pdf', [
+            'issue' => $storeIssue,
+            'rows' => $rows,
+            'totals' => $totals,
+            'report' => $report,
+            'headerData' => $report->headerData($filters),
+        ])->setPaper('a4', 'portrait');
+
+        return $pdf->download('store_issue_accounting_' . $storeIssue->issue_number . '.pdf');
+    }
+
+    public function csv(StoreIssue $storeIssue)
+    {
+        $report = new \App\ReportsHub\Reports\StoreIssueAccountingReport();
+        $filters = ['issue_id' => $storeIssue->id];
+        $query = $report->query($filters)->where('si.id', $storeIssue->id);
+        $rows = $query->get();
+
+        $filename = 'store_issue_accounting_' . ($storeIssue->issue_number ?: $storeIssue->id) . '.csv';
+
+        $headers = [
+            'Content-type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$filename",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        $callback = function () use ($rows, $report) {
+            $file = fopen('php://output', 'w');
+
+            // CSV columns from report
+            $cols = $report->columns();
+            $headers = array_map(fn($c) => $c['label'], $cols);
+            fputcsv($file, $headers);
+
+            foreach ($rows as $row) {
+                $line = [];
+                foreach ($cols as $col) {
+                    $val = $col['value'];
+                    if (is_callable($val)) {
+                        $line[] = strip_tags((string) $val($row, true));
+                    } else {
+                        $line[] = $row->{$val};
+                    }
+                }
+                fputcsv($file, $line);
+            }
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
     }
 
     /**
@@ -630,17 +738,17 @@ class StoreIssueController extends Controller
      */
     protected function machineSpareAllowedTypeCodes(): array
     {
-        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['CONSUMABLE']);
-        if (! is_array($codes)) {
+        $codes = config('accounting.store.machine_spare_allowed_material_type_codes', ['SPARE', 'CONSUMABLE']);
+        if (!is_array($codes)) {
             $codes = [$codes];
         }
 
         $normalized = array_values(array_unique(array_filter(array_map(
-            fn ($code) => strtoupper(trim((string) $code)),
+            fn($code) => strtoupper(trim((string) $code)),
             $codes
         ))));
 
-        return $normalized ?: ['CONSUMABLE'];
+        return $normalized ?: ['SPARE', 'CONSUMABLE'];
     }
 
     /**
@@ -649,12 +757,12 @@ class StoreIssueController extends Controller
     protected function machineSpareExcludedCategoryCodes(): array
     {
         $codes = config('accounting.store.machine_spare_excluded_material_category_codes', ['FUEL', 'FUELS']);
-        if (! is_array($codes)) {
+        if (!is_array($codes)) {
             $codes = [$codes];
         }
 
         return array_values(array_unique(array_filter(array_map(
-            fn ($code) => strtoupper(trim((string) $code)),
+            fn($code) => strtoupper(trim((string) $code)),
             $codes
         ))));
     }

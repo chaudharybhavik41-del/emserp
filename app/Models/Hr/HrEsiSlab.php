@@ -17,6 +17,7 @@ class HrEsiSlab extends Model
         'is_active',
     ];
 
+    
     protected $casts = [
         'effective_from' => 'date',
         'effective_to' => 'date',

@@ -23,25 +23,25 @@ class PurchaseBill extends Model
     protected $guarded = [];
 
     protected $casts = [
-        'bill_date'     => 'date',
-        'posting_date'  => 'date',
-        'due_date'      => 'date',
-        'total_basic'   => 'float',
-        'total_discount'=> 'float',
-        'total_tax'     => 'float',
-        'total_amount'  => 'float',
-        'total_cgst'    => 'float',
-        'total_sgst'    => 'float',
-        'total_igst'    => 'float',
+        'bill_date' => 'date',
+        'posting_date' => 'date',
+        'due_date' => 'date',
+        'total_basic' => 'float',
+        'total_discount' => 'float',
+        'total_tax' => 'float',
+        'total_amount' => 'float',
+        'total_cgst' => 'float',
+        'total_sgst' => 'float',
+        'total_igst' => 'float',
         'total_rcm_tax' => 'float',
-        'total_rcm_cgst'=> 'float',
-        'total_rcm_sgst'=> 'float',
-        'total_rcm_igst'=> 'float',
-        'tds_rate'      => 'float',
-        'tds_amount'    => 'float',
-        'tcs_rate'      => 'float',
-        'tcs_amount'    => 'float',
-        'round_off'     => 'float',
+        'total_rcm_cgst' => 'float',
+        'total_rcm_sgst' => 'float',
+        'total_rcm_igst' => 'float',
+        'tds_rate' => 'float',
+        'tds_amount' => 'float',
+        'tcs_rate' => 'float',
+        'tcs_amount' => 'float',
+        'round_off' => 'float',
     ];
 
     /*
@@ -86,6 +86,17 @@ class PurchaseBill extends Model
         return $this->hasMany(PurchaseBillExpenseLine::class, 'purchase_bill_id')
             ->orderBy('line_no')
             ->orderBy('id');
+    }
+
+    public function materialReceipts()
+    {
+        // Many-to-many style via bill lines
+        return MaterialReceipt::whereIn('id', function ($query) {
+            $query->select('material_receipt_id')
+                ->from('purchase_bill_lines')
+                ->where('purchase_bill_id', $this->id)
+                ->whereNotNull('material_receipt_id');
+        });
     }
 
     public function tdsAccount(): BelongsTo
@@ -178,8 +189,8 @@ class PurchaseBill extends Model
         // Indian FY: starts April by default (configurable)
         $startMonth = (int) config('accounting.financial_year.start_month', 4);
         $fyStartYear = $date->month >= $startMonth ? $date->year : $date->year - 1;
-        $fyEndYear   = $fyStartYear + 1;
-        $fyCode      = sprintf('%d-%02d', $fyStartYear, $fyEndYear % 100);
+        $fyEndYear = $fyStartYear + 1;
+        $fyCode = sprintf('%d-%02d', $fyStartYear, $fyEndYear % 100);
 
         $prefix = 'PB/' . $fyCode . '/';
 

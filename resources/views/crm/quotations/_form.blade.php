@@ -524,7 +524,7 @@
 </form>
 
 {{-- Cost Breakup Modal (single modal reused for all rows) --}}
-<div class="modal fade" id="costBreakupModal" tabindex="-1" aria-labelledby="costBreakupModalLabel" aria-hidden="true">
+<div class="modal fade" id="costBreakupModal" tabindex="-1" aria-labelledby="costBreakupModalLabel" aria-hidden="true" data-bs-backdrop="false">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -800,7 +800,12 @@
 
         // Breakup modal elements
         const breakupModalEl = document.getElementById('costBreakupModal');
-        const breakupModal = breakupModalEl ? new bootstrap.Modal(breakupModalEl) : null;
+        if (breakupModalEl && breakupModalEl.parentElement !== document.body) {
+            document.body.appendChild(breakupModalEl);
+        }
+        const breakupModal = (breakupModalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal)
+            ? bootstrap.Modal.getOrCreateInstance(breakupModalEl)
+            : null;
         const cbTbody = document.getElementById('cb-tbody');
         const cbRowTpl = document.getElementById('cb-row-template');
 
@@ -813,6 +818,29 @@
         const cbAddDefaultsBtn = document.getElementById('cb-add-defaults');
         const cbClearBtn = document.getElementById('cb-clear');
         const cbSaveBtn = document.getElementById('cb-save');
+
+        if (breakupModalEl) {
+            breakupModalEl.addEventListener('shown.bs.modal', function () {
+                const firstEditable = breakupModalEl.querySelector('.cb-name, .cb-rate, .cb-basis');
+                if (firstEditable && typeof firstEditable.focus === 'function') {
+                    firstEditable.focus();
+                }
+            });
+
+            breakupModalEl.addEventListener('hidden.bs.modal', function () {
+                document.querySelectorAll('.modal-backdrop').forEach(function (backdrop, idx, all) {
+                    if (idx < all.length - 1) {
+                        backdrop.remove();
+                    }
+                });
+
+                if (!document.querySelector('.modal.show')) {
+                    document.body.classList.remove('modal-open');
+                    document.body.style.removeProperty('padding-right');
+                    document.body.style.removeProperty('overflow');
+                }
+            });
+        }
 
         if (!tbody || !tpl || !addBtn) {
             return;

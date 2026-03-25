@@ -79,8 +79,9 @@ class ClientRaBillRegisterReport extends BaseTabularReport
             ],
             ['name'=>'revenue_type','label'=>'Type','type'=>'select','col'=>2,'options'=>$revTypes],
             [
-                'name'=>'status','label'=>'Status','type'=>'select','col'=>2,
-                'options'=>collect($statusOptions)->map(fn($s)=>['value'=>$s,'label'=>strtoupper($s)])->all(),
+                'name' => 'status', 'label' => 'Status', 'type' => 'select', 'col' => 2,
+                'options' => array_merge([['value' => 'all', 'label' => 'ALL']], collect($statusOptions)->map(fn($s) => ['value' => $s, 'label' => strtoupper($s)])->all()),
+                'value' => (string) ($request->has('status') && $request->get('status') !== '' ? $request->get('status') : 'posted'),
             ],
             ['name'=>'q','label'=>'Search','type'=>'text','col'=>4,'placeholder'=>'RA No / Invoice No / Contract'],
         ];
@@ -158,8 +159,12 @@ class ClientRaBillRegisterReport extends BaseTabularReport
         if (!empty($filters['revenue_type'])) {
             $q->where('ra.revenue_type', $filters['revenue_type']);
         }
-        if (!empty($filters['status'])) {
-            $q->where('ra.status', $filters['status']);
+        $status = $filters['status'] ?? 'posted';
+        if ($status === '') {
+            $status = 'posted';
+        }
+        if ($status && $status !== 'all') {
+            $q->where('ra.status', $status);
         }
         if (!empty($filters['q'])) {
             $term = trim((string)$filters['q']);

@@ -49,18 +49,20 @@ class HrEsiSlabController extends Controller
         return redirect()->route('hr.settings.esi-slabs.index')->with('success', 'ESI slab deleted successfully.');
     }
 
-    private function validateData(Request $request): array
-    {
-        $validated = $request->validate([
-            'effective_from' => 'required|date',
-            'effective_to' => 'nullable|date|after_or_equal:effective_from',
-            'wage_ceiling' => 'required|numeric|min:0',
-            'employee_rate' => 'required|numeric|min:0|max:100',
-            'employer_rate' => 'required|numeric|min:0|max:100',
-            'is_active' => 'nullable|boolean',
-        ]);
+   private function validateData(Request $request): array
+{
+    $validated = $request->validate([
+        'effective_from' => 'required|date',
+        'effective_to' => 'nullable|date|after_or_equal:effective_from',
+        'wage_ceiling' => 'required|numeric|min:0',
+        'employee_rate' => 'required|numeric|min:0|max:100',
+        'employer_rate' => 'required|numeric|min:0|max:100',
+        'is_active' => 'nullable|in:0,1',
+    ]);
 
-        $validated['is_active'] = $request->boolean('is_active', true);
-        return $validated;
-    }
+    // Final safe handling
+    $validated['is_active'] = (int) $request->input('is_active', 0);
+
+    return $validated;
+}
 }

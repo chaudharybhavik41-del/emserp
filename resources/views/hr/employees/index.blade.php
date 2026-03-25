@@ -219,15 +219,23 @@
                                                     </li>
                                                 @endif
                                                 @can('hr.employee.delete')
-                                                    <li>
-                                                        <form action="{{ route('hr.employees.destroy', $employee) }}" method="POST" class="d-inline">
-                                                            @csrf
-                                                            @method('DELETE')
-                                                            <button type="submit" class="dropdown-item text-danger" onclick="return confirm('Are you sure you want to delete this employee?')">
-                                                                <i class="bi bi-trash me-2"></i>Delete
-                                                            </button>
-                                                        </form>
-                                                    </li>
+                                                    @if(($employee->payrolls_count ?? 0) === 0 && ($employee->salaries_count ?? 0) === 0)
+                                                        <li>
+                                                            <form action="{{ route('hr.employees.destroy', $employee) }}" method="POST" class="d-inline">
+                                                                @csrf
+                                                                @method('DELETE')
+                                                                <button type="submit" class="dropdown-item text-danger" onclick="return confirm('Are you sure you want to delete this employee?')">
+                                                                    <i class="bi bi-trash me-2"></i>Delete
+                                                                </button>
+                                                            </form>
+                                                        </li>
+                                                    @else
+                                                        <li>
+                                                            <span class="dropdown-item-text text-muted">
+                                                                <i class="bi bi-lock me-2"></i>Delete blocked by salary/payroll history
+                                                            </span>
+                                                        </li>
+                                                    @endif
                                                 @endcan
                                             </ul>
                                         </div>
@@ -237,7 +245,7 @@
 
                             {{-- Separation Modal --}}
                             @if($employee->status->value === 'active')
-                            <div class="modal fade" id="separationModal{{ $employee->id }}" tabindex="-1">
+                            <div class="modal fade" id="separationModal{{ $employee->id }}" tabindex="-1" data-bs-backdrop="false">
                                 <div class="modal-dialog">
                                     <div class="modal-content">
                                         <form action="{{ route('hr.employees.separation', $employee) }}" method="POST">

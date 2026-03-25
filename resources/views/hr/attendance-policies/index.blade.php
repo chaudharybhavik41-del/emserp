@@ -51,6 +51,7 @@
                             <th class="text-center">Late Grace</th>
                             <th class="text-center">Min Full Day</th>
                             <th class="text-center">OT</th>
+                            <th class="text-center">OT Basis</th>
                             <th class="text-center">Weekend</th>
                             <th class="text-center">Employees</th>
                             <th class="text-center">Status</th>
@@ -62,17 +63,25 @@
                             <tr>
                                 <td><code>{{ $policy->code }}</code></td>
                                 <td>{{ $policy->name }}</td>
-                                <td class="text-center">{{ $policy->late_coming_grace_minutes ?? 0 }} min</td>
-                                <td class="text-center">{{ $policy->min_working_hours_full_day ?? '-' }} hrs</td>
+                                <td class="text-center">{{ $policy->grace_period_minutes ?? 0 }} min</td>
+                                <td class="text-center">{{ number_format((float) ($policy->min_hours_for_full_day ?? 0), 2) }} hrs</td>
                                 <td class="text-center">
-                                    @if($policy->overtime_applicable)
-                                        <span class="badge bg-success">{{ $policy->overtime_rate_multiplier ?? 1 }}x</span>
+                                    @if($policy->ot_allowed)
+                                        <span class="badge bg-success">
+                                            {{ number_format((float) ($policy->ot_rate_multiplier ?? 1.5), 2) }}x /
+                                            {{ number_format((float) ($policy->week_off_ot_multiplier ?? 1), 2) }}x /
+                                            {{ number_format((float) ($policy->holiday_ot_multiplier ?? 1), 2) }}x
+                                        </span>
                                     @else
                                         <span class="badge bg-secondary">No</span>
                                     @endif
                                 </td>
                                 <td class="text-center">
-                                    <small>{{ ucwords(str_replace('_', ' ', $policy->weekend_policy ?? 'Not Set')) }}</small>
+                                    <small>{{ strtoupper((string) ($policy->ot_calculation_basis ?? 'basic')) }}</small>
+                                    <div class="text-muted small">{{ optional($policy->effective_from)->format('d M Y') ?: '-' }}</div>
+                                </td>
+                                <td class="text-center">
+                                    <small>{{ $policy->allow_week_off_work ? 'Roster Based' : 'Off Only' }}</small>
                                 </td>
                                 <td class="text-center">
                                     <span class="badge bg-light text-dark">{{ $policy->employees_count }}</span>

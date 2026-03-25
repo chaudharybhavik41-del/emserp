@@ -91,7 +91,7 @@ class VoucherReversalService
             'Reversal date'
         );
 
-        return DB::transaction(function () use ($original, $reversalDate, $reason, $userId) {
+        return DB::transaction(function () use ($original, $reversalDate, $reason, $userId, $companyId) {
             // Create reversal voucher as DRAFT first, insert lines, then POST.
             $reversal = new Voucher();
             $reversal->company_id   = $companyId;

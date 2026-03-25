@@ -32,7 +32,8 @@ use RuntimeException;
 class StoreStockAdjustmentPostingService
 {
     public function __construct(
-        protected VoucherNumberService $voucherNumberService
+        protected VoucherNumberService $voucherNumberService,
+        protected ItemAccountingResolver $itemAccountingResolver
     ) {
     }
 
@@ -159,18 +160,14 @@ class StoreStockAdjustmentPostingService
 
                 // Inventory account
                 $item             = $stockItem->item ?? $line->item;
-                $inventoryAccount = null;
-
-                if ($item && $item->inventory_account_id) {
-                    $inventoryAccount = Account::find($item->inventory_account_id);
-                }
-
+                $inventoryAccount = $this->itemAccountingResolver->resolveInventoryHoldingAccount($item, (int) $companyId);
                 if (! $inventoryAccount) {
-                    $invCode = Config::get('accounting.store.inventory_consumables_account_code');
+                    $invCode = Config::get('accounting.store.inventory_consumables_account_code')
+                        ?: (Config::get('accounting.default_accounts.inventory_raw_material_code') ?: 'INV-RM');
                     if (! $invCode) {
                         throw new RuntimeException(
                             'Inventory account not found for Stock Adjustment line ID ' . $line->id .
-                            '; please configure accounting.store.inventory_consumables_account_code or set inventory_account_id on item.'
+                            '; please configure inventory defaults or set inventory_account_id on item/subcategory.'
                         );
                     }
                     $inventoryAccount = Account::where('company_id', $companyId)->where('code', $invCode)->first();
@@ -396,7 +393,7 @@ class StoreStockAdjustmentPostingService
             return 0.0;
         }
 
-        $totalBasic = (float) PurchaseBillLine::where('material_receipt_line_id', $mrLineId)->sum('basic_amount');
+        $totalBasic = PurchaseBillLine::postedBasicForMaterialReceiptLine((int) $mrLineId);
         if ($totalBasic <= 0) {
             return 0.0;
         }
@@ -434,5 +431,3 @@ class StoreStockAdjustmentPostingService
         return round($amount, 2);
     }
 }
-
-

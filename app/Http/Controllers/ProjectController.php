@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreProjectRequest;
 use App\Http\Requests\UpdateProjectRequest;
+use App\Models\Accounting\TdsSection;
+use App\Models\ClientRaBill;
 use App\Models\Party;
 use App\Models\Project;
 use App\Models\Tasks\Task;
@@ -50,12 +52,9 @@ class ProjectController extends Controller
         return view('projects.index', compact('projects', 'clients', 'tpiParties'));
     }
 
-    public function create()
+public function create()
 {
-    $clients = Party::where('is_client', true)->orderBy('name')->get();
-    $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
-
-    return view('projects.create', compact('clients', 'contractors'));
+    return view('projects.create', $this->formData(null));
 }
 
 
@@ -70,16 +69,26 @@ class ProjectController extends Controller
         $data['created_by'] = $request->user()->id;
 
         $project = Project::create($data);
+        $projectId = $project->getKey();
 
         return redirect()
-            ->route('projects.show', $project)
+            ->to('/projects/' . $projectId)
             ->with('success', 'Project created successfully.');
     }
 
     public function show(Project $project)
     {
         $project->load(['client', 'tpi', 'lead', 'quotation', 'creator'])
-            ->loadCount('boms');
+            ->loadCount(['boms', 'clientBillingRates']);
+
+        $project->load([
+            'clientBillingRates' => fn ($query) => $query
+                ->with(['uom', 'revenueAccount'])
+                ->where('is_active', true)
+                ->orderBy('line_type')
+                ->orderBy('source_key')
+                ->limit(5),
+        ]);
 
         $taskStats = [
             'total' => 0,
@@ -113,14 +122,12 @@ class ProjectController extends Controller
 
     public function edit(Project $project)
 {
-    $clients = Party::where('is_client', true)->orderBy('name')->get();
-    $contractors = Party::where('is_contractor', true)->orderBy('name')->get();
-
-    return view('projects.edit', compact('project', 'clients', 'contractors'));
+    return view('projects.edit', $this->formData($project));
 }
     public function update(UpdateProjectRequest $request, Project $project)
     {
         $data = $request->validated();
+        $projectId = $project->getKey();
 
         if (empty($data['code'])) {
             $data['code'] = $project->code;
@@ -129,7 +136,7 @@ class ProjectController extends Controller
         $project->update($data);
 
         return redirect()
-            ->route('projects.show', $project)
+            ->to('/projects/' . $projectId)
             ->with('success', 'Project updated successfully.');
     }
 
@@ -141,5 +148,30 @@ class ProjectController extends Controller
         return redirect()
             ->route('projects.index')
             ->with('success', 'Project deleted successfully.');
+    }
+
+    protected function formData(?Project $project): array
+    {
+        $companyId = (int) config('accounting.default_company_id', 1);
+
+        return [
+            'project' => $project,
+            'clients' => Party::where('is_client', true)->orderBy('name')->get(),
+            'tpiParties' => Party::where('is_contractor', true)->orderBy('name')->get(),
+            'clientBillingModes' => [
+                'mfg' => 'MFG Project Billing',
+                'labour' => 'Service (Labour)',
+                'material_sale' => 'Material Sales',
+                'mixed' => 'Mixed',
+            ],
+            'billKindOptions' => ClientRaBill::billKindOptions(),
+            'sourceBasisOptions' => ClientRaBill::sourceBasisOptions(),
+            'materialScopeOptions' => ClientRaBill::materialScopeOptions(),
+            'tdsSections' => TdsSection::query()
+                ->where('company_id', $companyId)
+                ->where('is_active', true)
+                ->orderBy('code')
+                ->get(['id', 'code', 'name', 'default_rate']),
+        ];
     }
 }

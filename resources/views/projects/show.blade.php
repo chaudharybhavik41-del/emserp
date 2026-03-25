@@ -16,6 +16,7 @@
 
     $designV2Route = $pickRoute(['production-v2.project.design']);
     $productionV2Route = $pickRoute(['production-v2.project']);
+    $clientBillingRateRoute = $pickRoute(['projects.client-billing-rates.index']);
     $taskIndexRoute = $pickRoute(['tasks.index']);
     $taskBoardRoute = $pickRoute(['task-board.index']);
     $taskCreateRoute = $pickRoute(['tasks.create']);
@@ -56,6 +57,12 @@
         @if($productionV2Route && auth()->user()?->canAny(['production.plan.update','production.dpr.view','production.dpr.create','production.qc.perform']))
             <a href="{{ route($productionV2Route, $project) }}" class="btn btn-outline-dark btn-sm">
                 <i class="bi bi-hammer me-1"></i> Production V2 Module
+            </a>
+        @endif
+
+        @if($clientBillingRateRoute && auth()->user()?->can('project.project.view'))
+            <a href="{{ route($clientBillingRateRoute, $project) }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-cash-coin me-1"></i> Client Billing Rates
             </a>
         @endif
 
@@ -197,6 +204,78 @@
                     @else
                         <div class="small text-muted">Task details are hidden due to permission settings.</div>
                     @endcan
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-0 pb-0 d-flex align-items-center justify-content-between">
+                    <h6 class="card-title text-uppercase small text-muted mb-0">Client Billing Setup</h6>
+                    @if($clientBillingRateRoute)
+                        <span class="badge text-bg-light">{{ $project->client_billing_rates_count ?? 0 }} rates</span>
+                    @endif
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-3 small">
+                        <dt class="col-sm-5 text-muted">Billing Mode</dt>
+                        <dd class="col-sm-7">{{ $project->client_billing_mode ? ucfirst(str_replace('_', ' ', $project->client_billing_mode)) : '—' }}</dd>
+
+                        <dt class="col-sm-5 text-muted">Default Bill Kind</dt>
+                        <dd class="col-sm-7">{{ $project->client_billing_default_bill_kind ? ucfirst(str_replace('_', ' ', $project->client_billing_default_bill_kind)) : '—' }}</dd>
+
+                        <dt class="col-sm-5 text-muted">Default Source Basis</dt>
+                        <dd class="col-sm-7">{{ $project->client_billing_source_basis ? ucfirst(str_replace('_', ' ', $project->client_billing_source_basis)) : '—' }}</dd>
+
+                        <dt class="col-sm-5 text-muted">Default Material Scope</dt>
+                        <dd class="col-sm-7">{{ $project->client_billing_material_scope ? ucfirst(str_replace('_', ' ', $project->client_billing_material_scope)) : '—' }}</dd>
+
+                        <dt class="col-sm-5 text-muted">Separate Material/Service</dt>
+                        <dd class="col-sm-7">{{ $project->client_billing_separate_material_service ? 'Yes' : 'No' }}</dd>
+
+                        <dt class="col-sm-5 text-muted">Default TDS</dt>
+                        <dd class="col-sm-7">
+                            @if($project->client_billing_tds_section || $project->client_billing_tds_rate)
+                                {{ $project->client_billing_tds_section ?: 'TDS' }}
+                                @if($project->client_billing_tds_rate !== null)
+                                    @ {{ rtrim(rtrim(number_format((float) $project->client_billing_tds_rate, 4), '0'), '.') }}%
+                                @endif
+                            @else
+                                —
+                            @endif
+                        </dd>
+                    </dl>
+
+                    @if(filled($project->client_billing_notes))
+                        <div class="small text-muted text-uppercase fw-semibold mb-2">Billing Notes</div>
+                        <div class="small mb-3">{{ $project->client_billing_notes }}</div>
+                    @endif
+
+                    @if($project->clientBillingRates->isEmpty())
+                        <div class="small text-muted">No active client billing rates configured yet.</div>
+                    @else
+                        <div class="small text-muted text-uppercase fw-semibold mb-2">Active Rate Preview</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0 align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Scope</th>
+                                        <th>Key</th>
+                                        <th class="text-end">Rate</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($project->clientBillingRates as $rate)
+                                        <tr>
+                                            <td>{{ $rate->line_type_label }}</td>
+                                            <td>{{ $rate->source_key ?: 'Default' }}</td>
+                                            <td class="text-end">{{ number_format((float) $rate->rate, 2) }} {{ $rate->uom?->code ?: '' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    @endif
                 </div>
             </div>
         </div>

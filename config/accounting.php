@@ -69,6 +69,26 @@ return [
         'tds_receivable_account_code' => 'TDS-RECEIVABLE',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Sales / Client Billing
+    |--------------------------------------------------------------------------
+    | Material and scrap billing currently post in revenue-only mode because
+    | Production V2 dispatch does not yet carry a reliable cost basis for
+    | inventory / COGS accounting. Keep this enabled until source costing is
+    | integrated into client billing.
+    */
+    'sales' => [
+        'default_revenue_code' => 'REV-FABRICATION',
+        'fabrication_revenue_code' => 'REV-FABRICATION',
+        'erection_revenue_code' => 'REV-ERECTION',
+        'supply_revenue_code' => 'REV-SUPPLY',
+        'service_revenue_code' => 'REV-SERVICE',
+        'other_revenue_code' => 'REV-OTHER',
+        'scrap_revenue_code' => 'REV-SCRAP',
+        'material_sales_revenue_only_mode' => true,
+    ],
+
     'tcs' => [
         'tcs_receivable_account_code' => 'TCS-RECEIVABLE',
     ],
@@ -79,14 +99,34 @@ return [
     'machine_maintenance_spare_expense_account_code' => 'WIP-MACHINE',   // Dr for machine spare issues
     'inventory_consumables_account_code'       => 'INV-CONSUMABLES',    // fallback Cr if item has no inventory_account_id
     // Machine spare filtering preset (used in requisition lookup + store issue validation)
-    'machine_spare_allowed_material_type_codes' => ['CONSUMABLE'],
+    'machine_spare_allowed_material_type_codes' => ['SPARE', 'CONSUMABLE'],
     'machine_spare_excluded_material_category_codes' => ['FUEL', 'FUELS'],
 	],
 
     'fuel' => [
-        'project_fuel_expense_account_code' => 'WIP-MACHINE',
-        'factory_fuel_expense_account_code' => 'FACTORY-CONS-EXP',
-        'inventory_account_code' => 'INV-CONSUMABLES',
+    'project_fuel_expense_account_code' => 'WIP-MACHINE',
+    'factory_fuel_expense_account_code' => 'FACTORY-CONS-EXP',
+    'inventory_account_code' => 'INV-CONSUMABLES',
+    ],
+
+    'hr' => [
+        'enable_payroll_posting' => true,
+        'enable_employee_ledger_sync' => true,
+        'enable_employee_finance_posting' => true,
+        'employee_ledger_group_code' => 'LOANS_ADVANCES',
+        'loan_interest_income_account_code' => 'HR-LOAN-INT-INCOME',
+        'salary_expense_account_code' => 'PAYROLL-SALARY-EXP',
+        'employer_contribution_expense_account_code' => 'PAYROLL-STAT-EXP',
+        'salary_payable_account_code' => 'SALARY-PAYABLE',
+        'pf_payable_account_code' => 'PF-PAYABLE',
+        'esi_payable_account_code' => 'ESI-PAYABLE',
+        'professional_tax_payable_account_code' => 'PT-PAYABLE',
+        'lwf_payable_account_code' => 'LWF-PAYABLE',
+        'other_deductions_account_code' => 'PAYROLL-DED-CLEAR',
+        'round_off_account_code' => 'PAYROLL-ROUND-OFF',
+        'bank_account_code' => 'BANK-HDFC',
+        'cheque_account_code' => 'BANK-HDFC',
+        'cash_account_code' => 'CASH',
     ],
 
 

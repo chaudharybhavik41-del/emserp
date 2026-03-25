@@ -4,6 +4,8 @@
 
 @section('content')
 <div class="container-fluid py-3">
+    @include('hr.employees.partials.hub-nav', ['employee' => $employee, 'activeSection' => 'salary'])
+
     <h4 class="mb-3">Salary History - {{ $employee->full_name }}</h4>
     <div class="card"><div class="card-body p-0">
         <table class="table table-sm mb-0">

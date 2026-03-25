@@ -46,7 +46,7 @@
                       onsubmit="return confirm('Process payroll for this period? This will create/update processed payroll records.');">
                     @csrf
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-gear"></i> Process Payroll
+                        <i class="bi bi-gear"></i> {{ $period->is_stale ? 'Reprocess Payroll' : 'Process Payroll' }}
                     </button>
                 </form>
             @endcan
@@ -64,6 +64,21 @@
             @endcan
         </div>
     </div>
+
+    @if($period->is_stale)
+        <div class="alert alert-warning border-0 shadow-sm">
+            <div class="fw-semibold mb-1">Payroll source data changed after processing.</div>
+            <div class="small">
+                Reprocess this payroll period before approval or payment.
+                @if($period->source_data_change_reason)
+                    Last change: {{ $period->source_data_change_reason }}
+                @endif
+                @if($period->source_data_changed_at)
+                    on {{ $period->source_data_changed_at->format('d M Y H:i') }}.
+                @endif
+            </div>
+        </div>
+    @endif
 
     {{-- Summary --}}
     <div class="row g-3 mb-3">
